@@ -21,6 +21,13 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
+function field(label, input) {
+	return E('div', { 'class': 'cbi-value' }, [
+		E('label', { 'class': 'cbi-value-title', 'for': input.id }, label),
+		E('div', { 'class': 'cbi-value-field' }, input)
+	]);
+}
+
 return view.extend({
 	handleSave: null,
 	handleSaveApply: null,
@@ -36,12 +43,13 @@ return view.extend({
 	},
 
 	render: function(data) {
-		const page = E('div', { 'class': 'cbi-map' });
-		const section = E('form', { 'class': 'cbi-section' });
-		const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network' });
-		const portInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'min': '1024', 'max': '65535', 'step': '1' });
-		const bootEnabledInput = E('input', { 'type': 'checkbox', 'name': 'boot_enabled' });
-		const message = E('p', { 'role': 'status' }, '');
+		honk.installStyles();
+		const page = E('div', { 'class': 'cbi-map honk-page' });
+		const section = E('form', { 'class': 'honk-card' });
+		const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network', 'id': 'honk-lan-network' });
+		const portInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'id': 'honk-listen-port', 'min': '1024', 'max': '65535', 'step': '1' });
+		const bootEnabledInput = E('input', { 'type': 'checkbox', 'name': 'boot_enabled', 'id': 'honk-boot-enabled' });
+		const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const save = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Save settings'));
 
 		(data.networks || []).forEach(function(name) {
@@ -54,28 +62,16 @@ return view.extend({
 		portInput.value = data.status && data.status.listen_port ? String(data.status.listen_port) : '9527';
 		bootEnabledInput.checked = !!(data.status && data.status.boot_enabled === true);
 
-		section.appendChild(E('h3', {}, _('Honk settings')));
+		section.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Honk settings')));
 		if (data.statusError)
 			section.appendChild(E('div', { 'class': 'alert-message' }, _('Could not read current settings: %s').format(data.statusError)));
 		if (data.networkError)
 			section.appendChild(E('div', { 'class': 'alert-message' }, _('Could not load LAN networks: %s').format(data.networkError)));
 		if (!(data.networks || []).length)
 			networkSelect.appendChild(E('option', { 'value': '' }, _('No network interfaces found')));
-		section.appendChild(E('div', { 'class': 'cbi-value' }, [
-			E('label', { 'class': 'cbi-value-title', 'for': 'honk-lan-network' }, _('LAN network')),
-			E('div', { 'class': 'cbi-value-field' }, networkSelect)
-		]));
-		networkSelect.id = 'honk-lan-network';
-		section.appendChild(E('div', { 'class': 'cbi-value' }, [
-			E('label', { 'class': 'cbi-value-title', 'for': 'honk-listen-port' }, _('Listen port')),
-			E('div', { 'class': 'cbi-value-field' }, portInput)
-		]));
-		portInput.id = 'honk-listen-port';
-		section.appendChild(E('div', { 'class': 'cbi-value' }, [
-			E('label', { 'class': 'cbi-value-title', 'for': 'honk-boot-enabled' }, _('Start Honk at boot')),
-			E('div', { 'class': 'cbi-value-field' }, bootEnabledInput)
-		]));
-		bootEnabledInput.id = 'honk-boot-enabled';
+		section.appendChild(field(_('LAN network'), networkSelect));
+		section.appendChild(field(_('Listen port'), portInput));
+		section.appendChild(field(_('Start Honk at boot'), bootEnabledInput));
 		section.appendChild(E('div', { 'class': 'cbi-page-actions' }, save));
 		section.appendChild(message);
 		section.addEventListener('submit', function(ev) {
@@ -97,7 +93,10 @@ return view.extend({
 			});
 		});
 
-		page.appendChild(E('h2', {}, _('Settings')));
+		page.appendChild(E('header', { 'class': 'honk-header' }, [
+			E('h2', {}, _('Settings')),
+			E('p', { 'class': 'honk-header-sub' }, _('Network interface, listen port and boot behaviour for the Honk service.'))
+		]));
 		page.appendChild(section);
 		return page;
 	}

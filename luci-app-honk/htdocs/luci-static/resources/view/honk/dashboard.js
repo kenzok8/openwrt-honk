@@ -18,11 +18,14 @@ return view.extend({
 	},
 
 	render: function(data) {
-		const page = E('div', { 'class': 'cbi-map' });
+		honk.installStyles();
+		const page = E('div', { 'class': 'cbi-map honk-page' });
 
 		function renderInitialized(status) {
-			const section = E('div', { 'class': 'cbi-section' });
+			const section = E('div', { 'class': 'honk-card' });
 			const webUi = honk.localWebUi(status);
+
+			section.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Doona')));
 
 			if (webUi) {
 				section.appendChild(E('a', {
@@ -60,7 +63,7 @@ return view.extend({
 			return page;
 		}
 
-		const form = E('form', { 'class': 'cbi-section' });
+		const form = E('form', { 'class': 'honk-card' });
 		const username = E('input', {
 			'type': 'text',
 			'name': 'username',
@@ -76,7 +79,7 @@ return view.extend({
 		const message = E('p', { 'role': 'status' }, '');
 		const submit = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Initialize Honk'));
 
-		form.appendChild(E('h3', {}, _('Initial setup')));
+		form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Initial setup')));
 		form.appendChild(E('p', {}, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
 		form.appendChild(E('div', { 'class': 'cbi-value' }, [
 			E('label', { 'class': 'cbi-value-title', 'for': 'honk-init-username' }, _('Username')),

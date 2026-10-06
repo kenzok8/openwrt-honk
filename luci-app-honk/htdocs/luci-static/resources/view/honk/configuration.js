@@ -17,7 +17,7 @@ function utf8Length(value) {
 function sha256(file) {
 	return file.arrayBuffer().then(function(buffer) {
 		if (!window.crypto || !window.crypto.subtle)
-			return sha256Fallback(buffer);
+			return sha256Fallback.sha256(buffer);
 
 		return window.crypto.subtle.digest('SHA-256', buffer).then(function(hash) {
 			return Array.from(new Uint8Array(hash)).map(function(byte) {
@@ -45,25 +45,67 @@ function uploadDae(file) {
 	});
 }
 
+function isHttpUrl(value) {
+	try {
+		const url = new URL(value);
+		return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.hostname;
+	}
+	catch (e) {
+		return false;
+	}
+}
+
+function field(label, input, help) {
+	const row = E('div', { 'class': 'cbi-value' }, [
+		E('label', { 'class': 'cbi-value-title', 'for': input.id }, label),
+		E('div', { 'class': 'cbi-value-field' }, input)
+	]);
+	if (help)
+		row.appendChild(E('div', { 'class': 'cbi-value-description honk-note' }, help));
+	return row;
+}
+
 return view.extend({
 	handleSave: null,
 	handleSaveApply: null,
 	handleReset: null,
 
 	render: function() {
-		const page = E('div', { 'class': 'cbi-map' });
-		const capabilityMessage = E('p', { 'role': 'status' }, _('Checking import support…'));
-		const previewMessage = E('p', { 'role': 'status' }, '');
-		const previewDetails = E('div', { 'class': 'cbi-section' });
+		honk.installStyles();
+
+		const page = E('div', { 'class': 'cbi-map honk-page' });
+		const capabilityMessage = E('p', { 'class': 'honk-note', 'role': 'status' }, _('Checking import support…'));
+		const previewMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status', 'aria-live': 'polite' }, '');
+		const previewDetails = E('section', { 'class': 'honk-card', 'aria-live': 'polite' });
 		const controls = [];
 		let previewBusy = false;
 		let recoveryBlocked = false;
+		let previewSupported = false;
 		let applySupported = false;
 		let activePreview = null;
+		let previewGeneration = 0;
+
+		const applyButton = E('button', {
+			'class': 'cbi-button cbi-button-positive',
+			'type': 'button',
+			'disabled': true
+		}, _('Apply this preview'));
 
 		function setBusy(busy) {
 			previewBusy = busy;
-			controls.forEach(function(control) { control.disabled = busy || recoveryBlocked; });
+			controls.forEach(function(control) { control.disabled = busy || recoveryBlocked || !previewSupported; });
+			applyButton.disabled = busy || recoveryBlocked || !applySupported || !activePreview;
+		}
+
+		function invalidatePreview() {
+			previewGeneration++;
+			if (!activePreview)
+				return;
+
+			activePreview = null;
+			previewDetails.replaceChildren();
+			applyButton.disabled = true;
+			previewMessage.textContent = _('Inputs changed. Create a new preview before applying.');
 		}
 
 		function showPreview(result) {
@@ -74,31 +116,47 @@ return view.extend({
 			}).filter(Boolean).join(', ') : '';
 			const imported = Array.isArray(result.imported_sections) ? result.imported_sections.join(', ') : '';
 			const excluded = Array.isArray(result.excluded_sections) ? result.excluded_sections.join(', ') : '';
-			previewDetails.appendChild(E('h3', {}, _('Preview summary')));
-			previewDetails.appendChild(E('p', {}, _('Candidate: %d nodes, %d subscriptions, %d files changed.').format(
+
+			previewDetails.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Preview summary')));
+			previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Candidate: %d nodes, %d subscriptions, %d files changed.').format(
 				Number(result.node_count) || 0, Number(result.subscription_count) || 0, Number(result.changed_files) || 0)));
 			if (imported)
-				previewDetails.appendChild(E('p', {}, _('Imported sections: %s').format(imported)));
+				previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Imported sections: %s').format(imported)));
 			if (excluded)
-				previewDetails.appendChild(E('p', {}, _('Excluded sections: %s').format(excluded)));
+				previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Excluded sections: %s').format(excluded)));
 			if (replacements)
-				previewDetails.appendChild(E('p', {}, _('Existing sections replaced: %s').format(replacements)));
-			previewDetails.appendChild(E('p', {}, _('Parser and configuration checks passed. Runtime validation: %s.').format(
+				previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Existing sections replaced: %s').format(replacements)));
+			previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Parser and configuration checks passed. Runtime validation: %s.').format(
 				result.mock && result.mock.state === 'passed' ? _('passed') : _('not run'))));
-			if (result.mock && Array.isArray(result.mock.executed) && result.mock.executed.length)
-				previewDetails.appendChild(E('p', {}, _('Executed checks: %s').format(result.mock.executed.join(', '))));
-			if (result.mock && Array.isArray(result.mock.skipped) && result.mock.skipped.length)
-				previewDetails.appendChild(E('p', {}, _('Skipped checks: %s').format(result.mock.skipped.join(', '))));
-			if (!applySupported)
-				previewDetails.appendChild(E('p', {}, _('Apply is disabled until this core reports transactional import support.')));
-			else
-				previewDetails.appendChild(applyButton);
-			previewDetails.appendChild(E('p', {}, _('Imported items are not assigned to groups automatically.')));
+
+			if (result.mock && ((Array.isArray(result.mock.executed) && result.mock.executed.length) ||
+				(Array.isArray(result.mock.skipped) && result.mock.skipped.length))) {
+				const diagnostics = E('details', {}, [
+					E('summary', {}, _('Validation details'))
+				]);
+				if (Array.isArray(result.mock.executed) && result.mock.executed.length)
+					diagnostics.appendChild(E('p', { 'class': 'honk-note' }, _('Executed checks: %s').format(result.mock.executed.join(', '))));
+				if (Array.isArray(result.mock.skipped) && result.mock.skipped.length)
+					diagnostics.appendChild(E('p', { 'class': 'honk-note' }, _('Skipped checks: %s').format(result.mock.skipped.join(', '))));
+				previewDetails.appendChild(diagnostics);
+			}
+
+			if (applySupported) {
+				previewDetails.appendChild(E('div', { 'class': 'honk-actions' }, applyButton));
+				applyButton.disabled = recoveryBlocked || previewBusy;
+			}
+			else {
+				previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Applying a preview is not available in this installed core.')));
+			}
+			previewDetails.appendChild(E('p', { 'class': 'honk-note' }, _('Imported items are not assigned to groups automatically.')));
 		}
 
 		function preview(request) {
-			if (previewBusy)
+			if (previewBusy || !previewSupported)
 				return;
+
+			const generation = ++previewGeneration;
+			activePreview = null;
 			setBusy(true);
 			previewMessage.textContent = _('Preparing preview…');
 			previewDetails.replaceChildren();
@@ -107,6 +165,10 @@ return view.extend({
 					previewMessage.textContent = honk.jobPhaseMessage(status.phase);
 				}).then(honk.ensureOk);
 			}).then(function(result) {
+				if (generation !== previewGeneration) {
+					previewMessage.textContent = _('Inputs changed. Create a new preview before applying.');
+					return;
+				}
 				showPreview(result);
 				previewMessage.textContent = _('Preview is ready. No configuration has been applied.');
 			}).catch(function(error) {
@@ -116,14 +178,13 @@ return view.extend({
 			});
 		}
 
-		const applyButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button', 'disabled': 'disabled' }, _('Apply this preview'));
-		controls.push(applyButton);
 		applyButton.addEventListener('click', function(ev) {
 			ev.preventDefault();
 			if (previewBusy || !applySupported || !activePreview)
 				return;
 			if (!window.confirm(_('Apply the reviewed preview? Any running Honk service will be stopped during the change and its previous running state will be restored afterward.')))
 				return;
+
 			setBusy(true);
 			previewMessage.textContent = _('Starting configuration apply…');
 			honk.importApply(activePreview).then(honk.ensureOk).then(function(job) {
@@ -136,62 +197,106 @@ return view.extend({
 				previewMessage.textContent = _('Configuration applied. Review group assignment and update subscriptions in Doona.');
 			}).catch(function(error) {
 				previewMessage.textContent = honk.errorMessage(error, _('Configuration apply failed.'));
-				if (error && error.recoveryRequired) {
+				if (error && error.recoveryRequired)
 					recoveryBlocked = true;
-					controls.forEach(function(control) { control.disabled = true; });
-				}
 			}).finally(function() {
 				setBusy(false);
 			});
 		});
 
-		const subscriptionName = E('input', { 'class': 'cbi-input-text', 'type': 'text', 'maxlength': '256', 'autocomplete': 'off' });
-		const subscriptionUrl = E('input', { 'class': 'cbi-input-text', 'type': 'url', 'maxlength': '8192', 'autocomplete': 'off' });
-		const subscriptionButton = E('button', { 'class': 'cbi-button', 'type': 'button', 'disabled': 'disabled' }, _('Preview subscription'));
-		controls.push(subscriptionName, subscriptionUrl, subscriptionButton);
-		subscriptionButton.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			preview({ action: 'preview', kind: 'subscription', name: subscriptionName.value, url: subscriptionUrl.value });
+		const subscriptionPanel = E('form', { 'class': 'honk-card', 'id': 'honk-panel-subscription', 'role': 'tabpanel', 'tabindex': '0' });
+		const subscriptionName = E('input', {
+			'class': 'cbi-input-text', 'type': 'text', 'id': 'honk-subscription-name', 'name': 'name',
+			'maxlength': '256', 'autocomplete': 'off', 'required': true
 		});
-		const subscription = E('fieldset', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Add subscription')),
-			E('div', { 'class': 'cbi-value' }, [ E('label', { 'class': 'cbi-value-title' }, _('Name')), E('div', { 'class': 'cbi-value-field' }, subscriptionName) ]),
-			E('div', { 'class': 'cbi-value' }, [ E('label', { 'class': 'cbi-value-title' }, _('Subscription URL')), E('div', { 'class': 'cbi-value-field' }, subscriptionUrl) ]),
-			subscriptionButton
-		]);
-
-		const linksInput = E('textarea', { 'class': 'cbi-input-textarea', 'rows': '6', 'maxlength': String(SHARE_LINK_LIMIT), 'spellcheck': 'false' });
-		const linksButton = E('button', { 'class': 'cbi-button', 'type': 'button', 'disabled': 'disabled' }, _('Preview share links'));
-		controls.push(linksInput, linksButton);
-		linksButton.addEventListener('click', function(ev) {
+		const subscriptionUrl = E('input', {
+			'class': 'cbi-input-text', 'type': 'url', 'id': 'honk-subscription-url', 'name': 'url',
+			'maxlength': '8192', 'autocomplete': 'url', 'required': true
+		});
+		const subscriptionButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview subscription'));
+		controls.push(subscriptionName, subscriptionUrl, subscriptionButton);
+		subscriptionPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Add subscription')));
+		subscriptionPanel.appendChild(field(_('Name'), subscriptionName));
+		subscriptionPanel.appendChild(field(_('Subscription URL'), subscriptionUrl, _('Use an HTTP or HTTPS subscription address.')));
+		subscriptionPanel.appendChild(E('div', { 'class': 'honk-actions' }, subscriptionButton));
+		subscriptionPanel.addEventListener('submit', function(ev) {
 			ev.preventDefault();
+			if (previewBusy || recoveryBlocked || !previewSupported)
+				return;
+			const name = subscriptionName.value.trim();
+			const url = subscriptionUrl.value.trim();
+			if (!subscriptionPanel.reportValidity())
+				return;
+			if (!name) {
+				subscriptionName.setCustomValidity(_('Enter a subscription name.'));
+				subscriptionName.reportValidity();
+				return;
+			}
+			if (!isHttpUrl(url)) {
+				subscriptionUrl.setCustomValidity(_('Enter a valid HTTP or HTTPS URL.'));
+				subscriptionUrl.reportValidity();
+				return;
+			}
+			preview({ action: 'preview', kind: 'subscription', name: name, url: url });
+		});
+		subscriptionUrl.addEventListener('input', function() { subscriptionUrl.setCustomValidity(''); invalidatePreview(); });
+		subscriptionName.addEventListener('input', function() { subscriptionName.setCustomValidity(''); invalidatePreview(); });
+
+		const linksPanel = E('form', { 'class': 'honk-card', 'id': 'honk-panel-links', 'role': 'tabpanel', 'tabindex': '0', 'hidden': true });
+		const linksInput = E('textarea', {
+			'class': 'cbi-input-textarea', 'id': 'honk-share-links', 'name': 'share_links',
+			'rows': '7', 'maxlength': String(SHARE_LINK_LIMIT), 'spellcheck': 'false', 'required': true
+		});
+		const linksButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview share links'));
+		controls.push(linksInput, linksButton);
+		linksPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Add nodes')));
+		linksPanel.appendChild(E('label', { 'class': 'cbi-value-title', 'for': linksInput.id }, _('Share links, one per line')));
+		linksPanel.appendChild(linksInput);
+		linksPanel.appendChild(E('p', { 'class': 'honk-note' }, _('A request is limited to 16 KiB. Add larger lists in batches; name or node conflicts are shown in the preview.')));
+		linksPanel.appendChild(E('div', { 'class': 'honk-actions' }, linksButton));
+		linksPanel.addEventListener('submit', function(ev) {
+			ev.preventDefault();
+			if (previewBusy || recoveryBlocked || !previewSupported)
+				return;
+			if (!linksPanel.reportValidity())
+				return;
+			if (!linksInput.value.trim()) {
+				linksInput.setCustomValidity(_('Enter one or more share links.'));
+				linksInput.reportValidity();
+				return;
+			}
 			if (utf8Length(linksInput.value) > SHARE_LINK_LIMIT) {
 				previewMessage.textContent = _('Share links exceed the 16 KiB per request limit. Submit them in smaller batches.');
 				return;
 			}
 			preview({ action: 'preview', kind: 'share_links', share_links: linksInput.value });
 		});
-		const shareLinks = E('fieldset', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Import share links')),
-			E('p', {}, _('One link per line. A single request is limited to 16 KiB; larger lists can be submitted in batches. Conflicts are reported for review.')),
-			linksInput,
-			linksButton
-		]);
+		linksInput.addEventListener('input', function() { linksInput.setCustomValidity(''); invalidatePreview(); });
 
-		const daeFile = E('input', { 'type': 'file', 'accept': '.dae,text/plain' });
-		const daeButton = E('button', { 'class': 'cbi-button', 'type': 'button', 'disabled': 'disabled' }, _('Preview dae file'));
+		const daePanel = E('form', { 'class': 'honk-card', 'id': 'honk-panel-dae', 'role': 'tabpanel', 'tabindex': '0', 'hidden': true });
+		const daeFile = E('input', { 'type': 'file', 'id': 'honk-dae-file', 'name': 'dae_file', 'accept': '.dae,text/plain', 'required': true });
+		const daeButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview dae file'));
 		controls.push(daeFile, daeButton);
-		daeButton.addEventListener('click', function(ev) {
+		daePanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Import dae business configuration')));
+		daePanel.appendChild(field(_('Configuration file'), daeFile, _('Choose one .dae file up to 2 MiB.')));
+		daePanel.appendChild(E('p', { 'class': 'honk-note' }, _('This replaces the business sections listed in the preview. Global settings are excluded, and external includes are rejected.')));
+		daePanel.appendChild(E('div', { 'class': 'honk-actions' }, daeButton));
+		daePanel.addEventListener('submit', function(ev) {
 			ev.preventDefault();
+			if (previewBusy || recoveryBlocked || !previewSupported)
+				return;
+			if (!daePanel.reportValidity())
+				return;
 			const file = daeFile.files && daeFile.files[0];
 			if (!file) {
-				previewMessage.textContent = _('Choose a dae file first.');
+				daeFile.reportValidity();
 				return;
 			}
 			if (file.size > DAE_LIMIT) {
 				previewMessage.textContent = _('The dae file exceeds the 2 MiB limit.');
 				return;
 			}
+			const generation = ++previewGeneration;
 			setBusy(true);
 			previewMessage.textContent = _('Checking file and calculating SHA-256…');
 			sha256(file).then(function(hash) {
@@ -201,46 +306,96 @@ return view.extend({
 				});
 			}).then(function(hash) {
 				setBusy(false);
+				if (generation !== previewGeneration)
+					return;
 				preview({ action: 'preview', kind: 'dae', mode: 'replace', upload_sha256: hash });
 			}).catch(function(error) {
 				setBusy(false);
 				previewMessage.textContent = honk.errorMessage(error, _('File upload failed.'));
 			});
 		});
-		const dae = E('fieldset', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Import dae business configuration')),
-			E('p', {}, _('One file up to 2 MiB. The browser calculates SHA-256 before upload; the core verifies the uploaded file again.')),
-			daeFile,
-			E('p', {}, _('Only nodes, subscriptions, groups, routing, and DNS sections can be previewed. Global settings and external includes are excluded or rejected.')),
-			daeButton
+		daeFile.addEventListener('change', invalidatePreview);
+
+		const tabList = E('div', { 'class': 'honk-seg', 'role': 'tablist', 'aria-label': _('Configuration input type') });
+		const panels = {
+			subscription: subscriptionPanel,
+			links: linksPanel,
+			dae: daePanel
+		};
+		const tabs = [];
+		[
+			{ id: 'subscription', panel: subscriptionPanel, label: _('Add subscription') },
+			{ id: 'links', panel: linksPanel, label: _('Add nodes') },
+			{ id: 'dae', panel: daePanel, label: _('Import configuration') }
+		].forEach(function(entry, index, entries) {
+			const tab = E('button', {
+				'class': 'honk-seg-btn',
+				'type': 'button',
+				'role': 'tab',
+				'id': 'honk-tab-%s'.format(entry.id),
+				'aria-controls': entry.panel.id,
+				'aria-selected': index === 0 ? 'true' : 'false',
+				'tabindex': index === 0 ? '0' : '-1'
+			}, entry.label);
+			entry.panel.setAttribute('aria-labelledby', tab.id);
+			tab.addEventListener('click', function() { selectTab(entry.id); });
+			tab.addEventListener('keydown', function(ev) {
+				if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft')
+					return;
+				ev.preventDefault();
+				const delta = ev.key === 'ArrowRight' ? 1 : -1;
+				const nextIndex = (index + delta + entries.length) % entries.length;
+				selectTab(entries[nextIndex].id);
+				tabs[nextIndex].focus();
+			});
+			tabs.push(tab);
+			tabList.appendChild(tab);
+		});
+
+		function selectTab(id) {
+			tabs.forEach(function(tab, index) {
+				const selected = tab.id === 'honk-tab-%s'.format(id);
+				tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+				tab.setAttribute('tabindex', selected ? '0' : '-1');
+				panels[['subscription', 'links', 'dae'][index]].hidden = !selected;
+			});
+		}
+
+		const safetyNotes = E('div', { 'class': 'honk-card' }, [
+			E('h3', { 'class': 'honk-card-title' }, _('About this import')),
+			E('p', { 'class': 'honk-note' }, _('Subscriptions and nodes append without changing routing, DNS, or service state. Dae import replaces business sections shown in the preview; global settings stay excluded.')),
+			E('details', {}, [
+				E('summary', {}, _('Before applying')),
+				E('p', { 'class': 'honk-note' }, _('Imported items are not assigned to groups automatically. Review group assignment and subscription updates in Doona.')),
+				E('p', { 'class': 'honk-note' }, _('Save any Doona browser draft before applying configuration changes.'))
+			])
 		]);
 
-		page.appendChild(E('h2', {}, _('Configuration')));
-		page.appendChild(E('div', { 'class': 'alert-message' }, [
-			E('p', {}, _('Imports append subscriptions and nodes by default. Dae import replaces only the listed business sections after preview.')),
-			E('p', {}, _('Saving subscriptions and share links does not start Honk or change routing, DNS, or the enabled state. Dae import replaces business routing and DNS only as shown in the preview; it does not overwrite global or managed system settings.')),
-			E('p', {}, _('Imported subscriptions and nodes are not assigned to groups automatically. Review group assignment and Doona update behavior after import.')),
-			E('p', {}, _('Save any browser draft in Doona before applying configuration changes.')),
-			E('p', {}, _('The preview is available when supported by the installed core. Apply remains disabled until a verified transactional apply is available.'))
+		setBusy(false);
+		page.appendChild(E('header', { 'class': 'honk-header' }, [
+			E('h2', {}, _('Configuration')),
+			E('p', { 'class': 'honk-header-sub' }, _('Add subscriptions, nodes or import a dae business configuration with a preview and transactional apply.'))
 		]));
 		page.appendChild(capabilityMessage);
-		page.appendChild(subscription);
-		page.appendChild(shareLinks);
-		page.appendChild(dae);
+		page.appendChild(safetyNotes);
+		page.appendChild(tabList);
+		page.appendChild(subscriptionPanel);
+		page.appendChild(linksPanel);
+		page.appendChild(daePanel);
 		page.appendChild(previewMessage);
 		page.appendChild(previewDetails);
 
 		honk.importCapabilities().then(honk.ensureOk).then(function(result) {
-			if (result.import_preview) {
-				applySupported = result.import_apply === true;
-				capabilityMessage.textContent = result.import_apply ? _('This core supports preview and apply.') : _('This core supports preview; transactional apply is not installed yet.');
-				controls.forEach(function(control) { control.disabled = false; });
-			}
-			else {
-				capabilityMessage.textContent = _('Import is unavailable in this installed core. Existing service controls remain available.');
-			}
+			previewSupported = result.import_preview === true;
+			applySupported = result.import_apply === true;
+			capabilityMessage.textContent = previewSupported ?
+				(applySupported ? _('This core supports preview and transactional apply.') : _('Preview is available. Apply stays disabled until transactional import is supported by this core.')) :
+				_('Import is unavailable in this installed core. Existing service controls remain available.');
+			setBusy(false);
 		}).catch(function() {
+			previewSupported = false;
 			capabilityMessage.textContent = _('Import is unavailable in this installed core. Existing service controls remain available.');
+			setBusy(false);
 		});
 
 		return page;

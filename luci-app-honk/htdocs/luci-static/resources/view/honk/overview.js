@@ -22,11 +22,21 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
-function field(label, value) {
-	return E('div', { 'class': 'cbi-value' }, [
-		E('label', { 'class': 'cbi-value-title' }, label),
-		E('div', { 'class': 'cbi-value-field' }, value == null || value === '' ? '—' : String(value))
+function metaItem(label, value) {
+	return E('span', { 'class': 'honk-meta-item' }, [
+		E('span', { 'class': 'honk-meta-label' }, label),
+		value == null || value === '' ? '—' : String(value)
 	]);
+}
+
+function field(label, input, help) {
+	const row = E('div', { 'class': 'cbi-value' }, [
+		E('label', { 'class': 'cbi-value-title', 'for': input.id }, label),
+		E('div', { 'class': 'cbi-value-field' }, input)
+	]);
+	if (help)
+		row.appendChild(E('div', { 'class': 'cbi-value-description honk-note' }, help));
+	return row;
 }
 
 function captureFields(root) {
@@ -78,22 +88,19 @@ return view.extend({
 	},
 
 	render: function(data) {
-		const page = E('div', { 'class': 'cbi-map' });
-		const section = E('div', { 'class': 'cbi-section' });
+		honk.installStyles();
+		const page = E('div', { 'class': 'cbi-map honk-page' });
 		const statusArea = E('div');
-		const actionMessage = E('p', { 'role': 'status' }, '');
+		const actionMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const setupArea = E('div');
 		let currentStatus = data.status;
 		let busy = false;
 		let setupBusy = false;
 		let settingsBusy = false;
+		let setupState = null;
 
 		function renderStatus(status, error) {
 			const fields = captureFields(statusArea);
-			const previousDetails = statusArea.querySelector('details');
-			const versionsOpen = previousDetails && previousDetails.open;
-			const settingsDetails = statusArea.querySelector('.honk-service-settings');
-			const settingsOpen = settingsDetails && settingsDetails.open;
 			const focusedAction = statusArea.contains(document.activeElement) && document.activeElement.dataset.action;
 			while (statusArea.firstChild)
 				statusArea.removeChild(statusArea.firstChild);
@@ -106,38 +113,21 @@ return view.extend({
 
 			currentStatus = status;
 			const running = status.running === true;
-			const controls = E('div', { 'class': 'honk-status-controls' });
-			const statusRow = E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title' }, _('Service')),
-				E('div', {
-					'class': 'cbi-value-field',
-					'style': 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5em'
-				}, [
-					E('span', {}, running ? _('Running') : _('Stopped')),
-					controls
-				])
-			]);
-			statusArea.appendChild(statusRow);
 
-			const versions = E('details', { 'class': 'honk-version-details' }, [
-				E('summary', {}, _('Version information')),
-				E('div', { 'class': 'cbi-section-node' }, [
-					field(_('Core version'), status.core_version),
-					field(_('Doona version'), status.doona_version),
-					field(_('Kernel'), status.kernel)
-				])
-			]);
-			versions.open = !!versionsOpen;
-			statusArea.appendChild(versions);
-			statusArea.appendChild(renderServiceSettings(status, settingsOpen));
+			/* Status card */
+			const badge = E('span', {
+				'class': 'honk-badge %s'.format(running ? 'honk-badge--run' : 'honk-badge--stop')
+			}, running ? _('Running') : _('Stopped'));
 
-			const errors = (Array.isArray(status.errors) ? status.errors : []).filter(function(token) {
-				return token !== 'disabled' && token !== 'not_initialized' && token !== 'service_not_running';
-			});
-			if (errors.length)
-				statusArea.appendChild(E('ul', { 'class': 'alert-message' }, errors.map(function(token) {
-					return E('li', {}, honk.statusIssue(token));
-				})));
+			const webUi = honk.localWebUi(status);
+			const openDoona = E(webUi ? 'a' : 'button', {
+				'class': 'cbi-button cbi-button-action',
+				'href': webUi || null,
+				'target': webUi ? '_blank' : null,
+				'rel': webUi ? 'noopener noreferrer' : null,
+				'type': webUi ? null : 'button',
+				'disabled': webUi ? null : true
+			}, _('Open Doona'));
 
 			const toggle = E('button', {
 				'class': 'cbi-button cbi-button-action',
@@ -149,8 +139,8 @@ return view.extend({
 				ev.preventDefault();
 				runAction(running ? 'stop' : 'start');
 			});
-			controls.appendChild(toggle);
 
+			const actions = [ openDoona, toggle ];
 			if (running) {
 				const restart = E('button', { 'class': 'cbi-button', 'type': 'button', 'data-action': 'restart' }, _('Restart'));
 				restart.disabled = busy;
@@ -158,8 +148,40 @@ return view.extend({
 					ev.preventDefault();
 					runAction('restart');
 				});
-				controls.appendChild(restart);
+				actions.push(restart);
 			}
+
+			const statusCard = E('section', { 'class': 'honk-card' }, [
+				E('div', { 'class': 'honk-card-head' }, [
+					E('div', {}, [
+						E('h3', { 'class': 'honk-card-title' }, _('Status')),
+						badge
+					]),
+					E('div', { 'class': 'honk-actions' }, actions)
+				]),
+				E('div', { 'class': 'honk-meta' }, [
+					metaItem(_('Core version'), status.core_version),
+					metaItem(_('Doona version'), status.doona_version),
+					metaItem(_('Kernel'), status.kernel)
+				])
+			]);
+
+			if (!webUi) {
+				const reason = !status.initialized ? _('Complete initial setup before opening Doona.') :
+					!running ? _('Start Honk to open Doona.') : _('Doona is not ready yet. Check the service status.');
+				statusCard.appendChild(E('p', { 'class': 'honk-note', 'role': 'status' }, reason));
+			}
+
+			const errors = (Array.isArray(status.errors) ? status.errors : []).filter(function(token) {
+				return token !== 'disabled' && token !== 'not_initialized' && token !== 'service_not_running';
+			});
+			if (errors.length)
+				statusCard.appendChild(E('ul', { 'class': 'alert-message' }, errors.map(function(token) {
+					return E('li', {}, honk.statusIssue(token));
+				})));
+
+			statusArea.appendChild(statusCard);
+			statusArea.appendChild(renderServiceSettings(status));
 
 			if (focusedAction) {
 				const replacement = statusArea.querySelector('[data-action="%s"]'.format(focusedAction));
@@ -169,13 +191,13 @@ return view.extend({
 			restoreFields(statusArea, fields);
 		}
 
-		function renderServiceSettings(status, open) {
-			const details = E('details', { 'class': 'honk-service-settings' });
-			const form = E('form', { 'class': 'cbi-section-node' });
-			const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network' });
-			const portInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'min': '1024', 'max': '65535', 'step': '1' });
-			const bootEnabledInput = E('input', { 'type': 'checkbox', 'name': 'boot_enabled' });
-			const message = E('p', { 'role': 'status' }, '');
+		function renderServiceSettings(status) {
+			const card = E('section', { 'class': 'honk-card' });
+			const form = E('form');
+			const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network', 'id': 'honk-lan-network' });
+			const portInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'id': 'honk-listen-port', 'min': '1024', 'max': '65535', 'step': '1' });
+			const bootEnabledInput = E('input', { 'type': 'checkbox', 'name': 'boot_enabled', 'id': 'honk-boot-enabled' });
+			const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 			const save = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Save service settings'));
 
 			(data.networks || []).forEach(function(name) {
@@ -188,24 +210,12 @@ return view.extend({
 			portInput.value = status.listen_port ? String(status.listen_port) : '9527';
 			bootEnabledInput.checked = status.boot_enabled === true;
 
-			details.appendChild(E('summary', {}, _('Service settings')));
+			card.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Service settings')));
 			if (!(data.networks || []).length)
 				networkSelect.appendChild(E('option', { 'value': '' }, _('No network interfaces found')));
-			form.appendChild(E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title', 'for': 'honk-lan-network' }, _('LAN network')),
-				E('div', { 'class': 'cbi-value-field' }, networkSelect)
-			]));
-			networkSelect.id = 'honk-lan-network';
-			form.appendChild(E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title', 'for': 'honk-listen-port' }, _('Listen port')),
-				E('div', { 'class': 'cbi-value-field' }, portInput)
-			]));
-			portInput.id = 'honk-listen-port';
-			form.appendChild(E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title', 'for': 'honk-boot-enabled' }, _('Start Honk at boot')),
-				E('div', { 'class': 'cbi-value-field' }, bootEnabledInput)
-			]));
-			bootEnabledInput.id = 'honk-boot-enabled';
+			form.appendChild(field(_('LAN network'), networkSelect));
+			form.appendChild(field(_('Listen port'), portInput));
+			form.appendChild(field(_('Start Honk at boot'), bootEnabledInput));
 			form.appendChild(E('div', { 'class': 'cbi-page-actions' }, save));
 			form.appendChild(message);
 			form.addEventListener('submit', function(ev) {
@@ -229,55 +239,35 @@ return view.extend({
 					refresh();
 				});
 			});
-			details.open = !!open;
-			details.appendChild(form);
-			return details;
+			card.appendChild(form);
+			return card;
 		}
 
 		function renderSetup(status) {
 			if (setupBusy)
 				return;
+			if (!status)
+				return;
+			const initialized = status.initialized === true;
+			if (setupState === initialized)
+				return;
+			setupState = initialized;
 			const fields = captureFields(setupArea);
 			while (setupArea.firstChild)
 				setupArea.removeChild(setupArea.firstChild);
 
-			if (status && status.initialized === true) {
-				const webUi = honk.localWebUi(status);
-				const entry = E('div', { 'class': 'cbi-section' }, [ E('h3', {}, _('Doona web interface')) ]);
-				if (webUi) {
-					entry.appendChild(E('p', {}, _('Doona opens its own sign-in page.')));
-					entry.appendChild(E('a', {
-						'class': 'cbi-button cbi-button-action',
-						'href': webUi,
-						'target': '_blank',
-						'rel': 'noopener noreferrer'
-					}, _('Open Doona')));
-				}
-				else {
-					entry.appendChild(E('p', {}, status.running ? _('Doona is not ready yet. Check the service status.') : _('Honk is stopped. Start it to open Doona.')));
-				}
-				setupArea.appendChild(entry);
-				restoreFields(setupArea, fields);
+			if (initialized)
 				return;
-			}
 
-			const form = E('form', { 'class': 'cbi-section' });
-			const username = E('input', { 'type': 'text', 'name': 'username', 'autocomplete': 'username', 'class': 'cbi-input-text' });
-			const password = E('input', { 'type': 'password', 'name': 'password', 'autocomplete': 'new-password', 'class': 'cbi-input-password' });
-			const message = E('p', { 'role': 'status' }, '');
+			const form = E('form', { 'class': 'honk-card' });
+			const username = E('input', { 'type': 'text', 'name': 'username', 'id': 'honk-init-username', 'autocomplete': 'username', 'required': true, 'class': 'cbi-input-text' });
+			const password = E('input', { 'type': 'password', 'name': 'password', 'id': 'honk-init-password', 'autocomplete': 'new-password', 'required': true, 'class': 'cbi-input-password' });
+			const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 			const submit = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Initialize Honk'));
-			form.appendChild(E('h3', {}, _('Initial setup')));
-			form.appendChild(E('p', {}, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
-			form.appendChild(E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title', 'for': 'honk-init-username' }, _('Username')),
-				E('div', { 'class': 'cbi-value-field' }, username)
-			]));
-			username.id = 'honk-init-username';
-			form.appendChild(E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title', 'for': 'honk-init-password' }, _('Password')),
-				E('div', { 'class': 'cbi-value-field' }, password)
-			]));
-			password.id = 'honk-init-password';
+			form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Initial setup')));
+			form.appendChild(E('p', { 'class': 'honk-note' }, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
+			form.appendChild(field(_('Username'), username));
+			form.appendChild(field(_('Password'), password));
 			form.appendChild(E('div', { 'class': 'cbi-page-actions' }, submit));
 			form.appendChild(message);
 			form.addEventListener('submit', function(ev) {
@@ -341,10 +331,12 @@ return view.extend({
 			});
 		}
 
-		section.appendChild(statusArea);
-		section.appendChild(actionMessage);
-		page.appendChild(E('h2', {}, _('Honk')));
-		page.appendChild(section);
+		page.appendChild(E('header', { 'class': 'honk-header' }, [
+			E('h2', {}, _('Honk')),
+			E('p', { 'class': 'honk-header-sub' }, _('Transparent proxy core for OpenWrt. Start, stop and manage the Honk service.'))
+		]));
+		page.appendChild(statusArea);
+		page.appendChild(actionMessage);
 		page.appendChild(setupArea);
 		renderStatus(data.status, data.error);
 		if (data.status)

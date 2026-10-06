@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 'use strict';
+'require baseclass';
 
 function sha256(input) {
 	const bytes = new Uint8Array(input);
@@ -68,4 +69,4 @@ function sha256(input) {
 	return state.map(function(value) { return value.toString(16).padStart(8, '0'); }).join('');
 }
 
-return sha256;
+return baseclass.extend({ sha256: sha256 });

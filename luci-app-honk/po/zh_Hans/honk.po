@@ -899,3 +899,105 @@ msgstr "请重新检查更新，以刷新签名清单。"
 
 msgid "The signed manifest expired. Check for updates again."
 msgstr "签名清单已过期，请重新检查更新。"
+
+msgid "A request is limited to 16 KiB. Add larger lists in batches; name or node conflicts are shown in the preview."
+msgstr "单次请求最多 16 KiB。较大的列表请分批添加；名称或节点冲突会在预览中显示。"
+
+msgid "Add nodes"
+msgstr "添加节点"
+
+msgid "Applying a preview is not available in this installed core."
+msgstr "当前安装的核心暂不支持应用预览结果。"
+
+msgid "Before applying"
+msgstr "应用前请注意"
+
+msgid "Choose one .dae file up to 2 MiB."
+msgstr "请选择一个不超过 2 MiB 的 .dae 文件。"
+
+msgid "Configuration file"
+msgstr "配置文件"
+
+msgid "Configuration input type"
+msgstr "配置输入类型"
+
+msgid "Enter a subscription name."
+msgstr "请输入订阅名称。"
+
+msgid "Enter a valid HTTP or HTTPS URL."
+msgstr "请输入有效的 HTTP 或 HTTPS 地址。"
+
+msgid "Enter one or more share links."
+msgstr "请输入一个或多个分享链接。"
+
+msgid "Import configuration"
+msgstr "导入配置"
+
+msgid "Imported items are not assigned to groups automatically. Review group assignment and subscription updates in Doona."
+msgstr "导入内容不会自动分配到分组。请在 Doona 中检查分组分配和订阅更新。"
+
+msgid "Inputs changed. Create a new preview before applying."
+msgstr "输入内容已更改。请重新预览后再应用。"
+
+msgid "Preview is available. Apply stays disabled until transactional import is supported by this core."
+msgstr "可以预览；当前核心尚不支持事务式导入，应用功能暂不可用。"
+
+msgid "Save any Doona browser draft before applying configuration changes."
+msgstr "应用配置前，请先保存 Doona 浏览器中的草稿。"
+
+msgid "Share links, one per line"
+msgstr "分享链接（每行一个）"
+
+msgid "Subscriptions and nodes append without changing routing, DNS, or service state. Dae import replaces business sections shown in the preview; global settings stay excluded."
+msgstr "订阅和节点会追加，不会更改路由、DNS 或服务状态。DAE 导入会替换预览中列出的业务配置段，并排除全局设置。"
+
+msgid "This core supports preview and transactional apply."
+msgstr "当前核心支持预览和事务式应用。"
+
+msgid "This replaces the business sections listed in the preview. Global settings are excluded, and external includes are rejected."
+msgstr "这会替换预览中列出的业务配置段。全局设置会被排除，外部 include 会被拒绝。"
+
+msgid "Use an HTTP or HTTPS subscription address."
+msgstr "请使用 HTTP 或 HTTPS 订阅地址。"
+
+msgid "Validation details"
+msgstr "验证详情"
+
+msgid "System check and repair"
+msgstr "系统检查与修复"
+
+msgid "The updater verifies a signed compatibility manifest. Installation remains unavailable until a complete verified rollback package set is available and the device transaction path has passed validation."
+msgstr "更新程序会验证签名兼容性清单。完整且已验证的回滚软件包组准备好、并通过设备事务验证后，才会开放安装。"
+
+msgid "Check for updates first. Installation requires signature and rollback validation."
+msgstr "请先检查更新。安装需要通过签名与回滚验证。"
+
+msgid "Update requirements"
+msgstr "更新条件"
+
+msgid "Complete initial setup before opening Doona."
+msgstr "请先完成初始化设置，再打开 Doona。"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Live log"
+msgstr "实时日志"
+
+msgid "About this import"
+msgstr "关于本次导入"
+
+msgid "Doona"
+msgstr "Doona"
+
+msgid "Transparent proxy core for OpenWrt. Start, stop and manage the Honk service."
+msgstr "OpenWrt 的透明代理核心。启动、停止并管理 Honk 服务。"
+
+msgid "Add subscriptions, nodes or import a dae business configuration with a preview and transactional apply."
+msgstr "添加订阅、节点，或以预览加事务式应用的方式导入 dae 业务配置。"
+
+msgid "Updates, backups and system recovery for the Honk installation."
+msgstr "Honk 安装的更新、备份与系统恢复。"
+
+msgid "Network interface, listen port and boot behaviour for the Honk service."
+msgstr "Honk 服务的网络接口、监听端口与开机启动行为。"

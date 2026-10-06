@@ -15,11 +15,13 @@ return view.extend({
 	handleReset: null,
 
 	render: function() {
-		const page = E('div', { 'class': 'cbi-map' });
-		const health = E('div', { 'class': 'cbi-section' }, [ E('h3', {}, _('System check')) ]);
-		const healthMessage = E('p', { 'role': 'status' }, '');
+		honk.installStyles();
+		const page = E('div', { 'class': 'cbi-map honk-page' });
+		const recoveryMessage = E('p', { 'class': 'alert-message', 'role': 'status' }, '');
+		recoveryMessage.hidden = true;
 		const writeControls = [];
 		let recoveryRequired = false;
+
 		function phaseMessage(job, fallback) {
 			const messages = {
 				checking_feed: _('Checking the signed update source…'),
@@ -35,60 +37,84 @@ return view.extend({
 			};
 			return messages[job.phase] || fallback;
 		}
+
 		function blockWrites() {
 			recoveryRequired = true;
 			writeControls.forEach(function(button) { button.disabled = true; });
 		}
-		const check = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Run system check'));
-		check.addEventListener('click', function(ev) {
+
+		/* --- Honk updates card --- */
+		const updateSection = E('section', { 'class': 'honk-card' });
+		const updateMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, _('Check for updates first. Installation requires signature and rollback validation.'));
+		const updateCheck = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('Check for updates'));
+		const updateApply = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, _('Install update'));
+		let updateApplyAvailable = false;
+		updateApply.disabled = true;
+		writeControls.push(updateApply);
+
+		updateCheck.addEventListener('click', function(ev) {
 			ev.preventDefault();
-			check.disabled = true;
-			healthMessage.textContent = _('Checking…');
-			honk.check().then(function(result) {
-				if (result && result.ok === true) {
-					healthMessage.textContent = _('System check passed.');
-				}
-				else if (Array.isArray(result && result.errors) && result.errors.length) {
-					healthMessage.textContent = result.errors.map(honk.statusIssue).join('；');
-				}
-				else {
-					healthMessage.textContent = _('The backend did not confirm the check.');
+			updateCheck.disabled = true;
+			updateApplyAvailable = false;
+			updateApply.disabled = true;
+			updateMessage.textContent = _('Checking update source…');
+			honk.updateCheck().then(honk.ensureOk).then(function(job) {
+				return honk.waitJob(job.job_id, function(progress) {
+					updateMessage.textContent = phaseMessage(progress, _('Checking the signed update source…'));
+				});
+			}).then(function(result) {
+				if (result.available) {
+					updateMessage.textContent = result.apply_enabled === true ? _('A compatible update is available: %s').format(result.version || '') : honk.statusIssue(result.reason);
+					updateApplyAvailable = result.apply_enabled === true;
+				} else {
+					updateApplyAvailable = false;
+					updateMessage.textContent = result.reason === 'trusted_feed_unavailable' ? _('No trusted update source is configured.') : _('No compatible update is available.');
 				}
 			}).catch(function(error) {
-				healthMessage.textContent = _('System check failed.');
-			}).finally(function() { check.disabled = false; });
+				updateApplyAvailable = false;
+				updateMessage.textContent = honk.errorMessage(error, _('Update check failed.'));
+			}).finally(function() {
+				updateCheck.disabled = recoveryRequired;
+				updateApply.disabled = recoveryRequired || !updateApplyAvailable;
+			});
 		});
-		health.appendChild(E('p', {}, _('Checks Honk system components and reports detected issues.')));
-		health.appendChild(check);
-		health.appendChild(healthMessage);
-
-		const repairSection = E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Repair system files')),
-			E('p', {}, _('Repair replaces missing or damaged Honk system files and does not overwrite user configuration.'))
-		]);
-		const repairMessage = E('p', { 'role': 'status' }, '');
-		const repair = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Repair'));
-		writeControls.push(repair);
-		repair.addEventListener('click', function(ev) {
+		updateApply.addEventListener('click', function(ev) {
 			ev.preventDefault();
-			repair.disabled = true;
-			repairMessage.textContent = _('Repairing…');
-			honk.repair().then(honk.ensureOk).then(function(result) {
-				repairMessage.textContent = honk.resultMessage(result, _('Repair completed.'));
+			if (!confirm(_('Install the verified Honk, LuCI, Doona, and Chinese translation package set? If installation or startup fails, Honk will remain stopped and show recovery instructions.')))
+				return;
+			updateCheck.disabled = true;
+			updateApplyAvailable = false;
+			updateApply.disabled = true;
+			updateMessage.textContent = _('Preparing the signed update…');
+			honk.updateApply().then(honk.ensureOk).then(function(result) {
+				return honk.waitJob(result.job_id, function(job) {
+					updateMessage.textContent = phaseMessage(job, _('Installing the verified update…'));
+				});
+			}).then(function(result) {
+				updateMessage.textContent = honk.resultMessage(result, _('Update installed.'));
 			}).catch(function(error) {
 				if (error && error.recoveryRequired)
 					blockWrites();
-				repairMessage.textContent = honk.errorMessage(error, _('Repair failed.'));
-			}).finally(function() { repair.disabled = recoveryRequired; });
+				updateMessage.textContent = honk.errorMessage(error, _('Update failed.'));
+			}).finally(function() {
+				updateCheck.disabled = recoveryRequired;
+				updateApply.disabled = true;
+			});
 		});
-		repairSection.appendChild(repair);
-		repairSection.appendChild(repairMessage);
 
-		const backupSection = E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Backup and restore')),
-			E('p', {}, _('Create a backup archive or restore one from your computer.'))
-		]);
-		const backupMessage = E('p', { 'role': 'status' }, '');
+		updateSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Honk updates')));
+		updateSection.appendChild(E('p', { 'class': 'honk-note' }, _('Updates install the matching Honk core, LuCI, Doona assets, and Chinese translation as one package set.')));
+		updateSection.appendChild(E('p', { 'class': 'honk-note' }, _('This target supports x86_64 on OpenWrt 25.12 using APK packages.')));
+		updateSection.appendChild(E('div', { 'class': 'honk-actions' }, [ updateCheck, updateApply ]));
+		updateSection.appendChild(updateMessage);
+		updateSection.appendChild(E('details', {}, [
+			E('summary', {}, _('Update requirements')),
+			E('p', { 'class': 'honk-note' }, _('The updater verifies a signed compatibility manifest. Installation remains unavailable until a complete verified rollback package set is available and the device transaction path has passed validation.'))
+		]));
+
+		/* --- Backup and restore card --- */
+		const backupSection = E('section', { 'class': 'honk-card' });
+		const backupMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const backup = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Download backup'));
 		writeControls.push(backup);
 		backup.addEventListener('click', function(ev) {
@@ -141,14 +167,58 @@ return view.extend({
 				backupMessage.textContent = honk.errorMessage(error, _('Restore failed.'));
 			}).finally(function() { restore.disabled = recoveryRequired; });
 		});
-		backupSection.appendChild(E('div', { 'class': 'cbi-page-actions' }, [ backup, restore ]));
+		backupSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Backup and restore')));
+		backupSection.appendChild(E('p', { 'class': 'honk-note' }, _('Create a backup archive or restore one from your computer.')));
+		backupSection.appendChild(E('div', { 'class': 'honk-actions' }, [ backup, restore ]));
 		backupSection.appendChild(backupMessage);
 
-		const resetSection = E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Reset Honk data')),
-			E('p', {}, _('Reset clears Honk subscriptions, nodes, policies, DNS data, history, and cache, then restores default configuration. It keeps the administrator account and leaves Honk stopped with boot disabled.'))
-		]);
-		const resetMessage = E('p', { 'role': 'status' }, '');
+		/* --- System check and repair card --- */
+		const health = E('section', { 'class': 'honk-card' });
+		const healthMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
+		const check = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Run system check'));
+		check.addEventListener('click', function(ev) {
+			ev.preventDefault();
+			check.disabled = true;
+			healthMessage.textContent = _('Checking…');
+			honk.check().then(function(result) {
+				if (result && result.ok === true) {
+					healthMessage.textContent = _('System check passed.');
+				}
+				else if (Array.isArray(result && result.errors) && result.errors.length) {
+					healthMessage.textContent = result.errors.map(honk.statusIssue).join('；');
+				}
+				else {
+					healthMessage.textContent = _('The backend did not confirm the check.');
+				}
+			}).catch(function(error) {
+				healthMessage.textContent = _('System check failed.');
+			}).finally(function() { check.disabled = false; });
+		});
+		const repairMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
+		const repair = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Repair'));
+		writeControls.push(repair);
+		repair.addEventListener('click', function(ev) {
+			ev.preventDefault();
+			repair.disabled = true;
+			repairMessage.textContent = _('Repairing…');
+			honk.repair().then(honk.ensureOk).then(function(result) {
+				repairMessage.textContent = honk.resultMessage(result, _('Repair completed.'));
+			}).catch(function(error) {
+				if (error && error.recoveryRequired)
+					blockWrites();
+				repairMessage.textContent = honk.errorMessage(error, _('Repair failed.'));
+			}).finally(function() { repair.disabled = recoveryRequired; });
+		});
+		health.appendChild(E('h3', { 'class': 'honk-card-title' }, _('System check and repair')));
+		health.appendChild(E('p', { 'class': 'honk-note' }, _('Checks Honk system components and reports detected issues.')));
+		health.appendChild(E('div', { 'class': 'honk-actions' }, [ check, repair ]));
+		health.appendChild(healthMessage);
+		health.appendChild(repairMessage);
+		health.appendChild(E('p', { 'class': 'honk-note' }, _('Repair replaces missing or damaged Honk system files and does not overwrite user configuration.')));
+
+		/* --- Reset card (danger zone) --- */
+		const resetSection = E('section', { 'class': 'honk-card' });
+		const resetMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const reset = E('button', { 'class': 'cbi-button cbi-button-negative', 'type': 'button' }, _('Reset Honk data'));
 		writeControls.push(reset);
 		reset.addEventListener('click', function(ev) {
@@ -170,80 +240,29 @@ return view.extend({
 				resetMessage.textContent = honk.errorMessage(error, _('Reset failed.'));
 			}).finally(function() { reset.disabled = recoveryRequired; });
 		});
-		resetSection.appendChild(reset);
+		resetSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Reset Honk data')));
+		resetSection.appendChild(E('p', { 'class': 'honk-note' }, _('Reset clears Honk subscriptions, nodes, policies, DNS data, history, and cache, then restores default configuration. It keeps the administrator account and leaves Honk stopped with boot disabled.')));
+		resetSection.appendChild(E('div', { 'class': 'honk-actions' }, reset));
 		resetSection.appendChild(resetMessage);
 
-		const updateSection = E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Honk updates')),
-			E('p', {}, _('Updates install the matching Honk core, LuCI, Doona assets, and Chinese translation as one package set.')),
-			E('p', {}, _('This target supports x86_64 on OpenWrt 25.12 using APK packages.')),
-			E('p', {}, _('The updater verifies a signed compatibility manifest. Installation stays disabled until a complete verified rollback package set is available and the device transaction path has passed validation.'))
-		]);
-		const updateMessage = E('p', { 'role': 'status' }, '');
-		const updateCheck = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('Check for updates'));
-		const updateApply = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, _('Install update'));
-		updateApply.disabled = true;
-		updateApply.style.display = 'none';
-		writeControls.push(updateApply);
-		updateCheck.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			updateCheck.disabled = true;
-			updateApply.disabled = true;
-			updateApply.style.display = 'none';
-			updateMessage.textContent = _('Checking update source…');
-			honk.updateCheck().then(honk.ensureOk).then(function(job) {
-				return honk.waitJob(job.job_id, function(progress) {
-					updateMessage.textContent = phaseMessage(progress, _('Checking the signed update source…'));
-				});
-			}).then(function(result) {
-				if (result.available) {
-					updateMessage.textContent = result.apply_enabled === true ? _('A compatible update is available: %s').format(result.version || '') : honk.statusIssue(result.reason);
-					updateApply.disabled = result.apply_enabled !== true;
-					updateApply.style.display = result.apply_enabled === true ? '' : 'none';
-				} else {
-					updateMessage.textContent = result.reason === 'trusted_feed_unavailable' ? _('No trusted update source is configured.') : _('No compatible update is available.');
-				}
-			}).catch(function(error) {
-				updateMessage.textContent = honk.errorMessage(error, _('Update check failed.'));
-			}).finally(function() { updateCheck.disabled = recoveryRequired; });
-		});
-		updateApply.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			if (!confirm(_('Install the verified Honk, LuCI, Doona, and Chinese translation package set? If installation or startup fails, Honk will remain stopped and show recovery instructions.')))
-				return;
-			updateCheck.disabled = true;
-			updateApply.disabled = true;
-			updateMessage.textContent = _('Preparing the signed update…');
-			honk.updateApply().then(honk.ensureOk).then(function(result) {
-				return honk.waitJob(result.job_id, function(job) {
-					updateMessage.textContent = phaseMessage(job, _('Installing the verified update…'));
-				});
-			}).then(function(result) {
-				updateMessage.textContent = honk.resultMessage(result, _('Update installed.'));
-			}).catch(function(error) {
-				if (error && error.recoveryRequired)
-					blockWrites();
-				updateMessage.textContent = honk.errorMessage(error, _('Update failed.'));
-			}).finally(function() {
-				updateCheck.disabled = recoveryRequired;
-				updateApply.disabled = true;
-				updateApply.style.display = 'none';
-			});
-		});
-		updateSection.appendChild(updateCheck);
-		updateSection.appendChild(updateApply);
-		updateSection.appendChild(updateMessage);
-
-		page.appendChild(E('h2', {}, _('Maintenance')));
-		page.appendChild(health);
-		page.appendChild(repairSection);
-		page.appendChild(backupSection);
-		page.appendChild(resetSection);
+		page.appendChild(E('header', { 'class': 'honk-header' }, [
+			E('h2', {}, _('Maintenance')),
+			E('p', { 'class': 'honk-header-sub' }, _('Updates, backups and system recovery for the Honk installation.'))
+		]));
+		page.appendChild(recoveryMessage);
 		page.appendChild(updateSection);
+		page.appendChild(backupSection);
+		page.appendChild(health);
+		page.appendChild(resetSection);
+
 		honk.status().then(function(result) {
-			if (Array.isArray(result && result.errors) && result.errors.indexOf('maintenance_recovery_required') >= 0) {
+			const errors = Array.isArray(result && result.errors) ? result.errors : [];
+			const recoveryToken = errors.indexOf('update_recovery_required') >= 0 ? 'update_recovery_required' :
+				errors.indexOf('maintenance_recovery_required') >= 0 ? 'maintenance_recovery_required' : null;
+			if (recoveryToken) {
 				blockWrites();
-				healthMessage.textContent = _('A previous maintenance operation needs recovery before write operations can continue.');
+				recoveryMessage.textContent = honk.statusIssue(recoveryToken);
+				recoveryMessage.hidden = false;
 			}
 		}).catch(function() {});
 		return page;

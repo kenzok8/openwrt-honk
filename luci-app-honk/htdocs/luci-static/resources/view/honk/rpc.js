@@ -76,6 +76,20 @@ const callImportApply = rpc.declare({
 const callUpdateCheck = rpc.declare({ object: 'honk', method: 'update_check', expect: { '': {} } });
 const callUpdateApply = rpc.declare({ object: 'honk', method: 'update_apply', expect: { '': {} } });
 
+let pageStylesInstalled = false;
+
+function installStyles() {
+	if (pageStylesInstalled || document.getElementById('honk-page-styles'))
+		return;
+
+	const stylesheet = document.createElement('link');
+	stylesheet.id = 'honk-page-styles';
+	stylesheet.rel = 'stylesheet';
+	stylesheet.href = L.resource('view/honk/honk.css');
+	document.head.appendChild(stylesheet);
+	pageStylesInstalled = true;
+}
+
 function localWebUi(status) {
 	if (!status || !status.initialized || !status.running || !status.api_ready || !status.api_url)
 		return null;
@@ -297,5 +311,6 @@ return baseclass.extend({
 	statusIssue: statusIssue,
 	resultMessage: resultMessage,
 	errorMessage: errorMessage,
-	jobPhaseMessage: jobPhaseMessage
+	jobPhaseMessage: jobPhaseMessage,
+	installStyles: installStyles
 });

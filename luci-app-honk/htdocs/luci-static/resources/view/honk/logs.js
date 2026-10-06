@@ -17,6 +17,7 @@ return view.extend({
 	},
 
 	render: function() {
+		honk.installStyles();
 		const source = E('select', { 'class': 'cbi-input-select' }, [
 			E('option', { 'value': 'service' }, _('Service')),
 			E('option', { 'value': 'core' }, _('Core')),
@@ -31,10 +32,9 @@ return view.extend({
 		]);
 		const output = E('pre', {
 			'class': 'honk-log-output',
-			'aria-live': 'polite',
-			'style': 'max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;'
+			'aria-live': 'polite'
 		}, _('Loading logs…'));
-		const status = E('p', { 'role': 'status' }, '');
+		const status = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const pause = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('Pause'));
 		const refresh = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('Refresh now'));
 		const download = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('Download redacted log'));
@@ -93,19 +93,22 @@ return view.extend({
 			setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
 		});
 
+		source.id = 'honk-log-source';
+		level.id = 'honk-log-level';
 		this._timer = setInterval(function() { loadLogs(false); }, 5000);
 		loadLogs(true);
 
-		return E('div', { 'class': 'cbi-map' }, [
-			E('h2', {}, _('Logs')),
-			E('div', { 'class': 'cbi-section' }, [
-				E('p', {}, _('Shows up to 200 Honk-specific lines, capped at 32 KiB, and refreshes every 5 seconds while live. Sensitive URLs and credentials are redacted before display.')),
-				E('div', { 'class': 'cbi-page-actions' }, [
-					E('label', {}, [ _('Log source'), source ]),
-					E('label', {}, [ _('Minimum level'), level ]),
-					pause,
-					refresh,
-					download
+		return E('div', { 'class': 'cbi-map honk-page' }, [
+			E('header', { 'class': 'honk-header' }, [
+				E('h2', {}, _('Logs')),
+				E('p', { 'class': 'honk-header-sub' }, _('Shows up to 200 Honk-specific lines, capped at 32 KiB, and refreshes every 5 seconds while live. Sensitive URLs and credentials are redacted before display.'))
+			]),
+			E('section', { 'class': 'honk-card' }, [
+				E('h3', { 'class': 'honk-card-title' }, _('Live log')),
+				E('div', { 'class': 'honk-log-toolbar' }, [
+					E('label', { 'for': source.id }, [ _('Log source'), source ]),
+					E('label', { 'for': level.id }, [ _('Minimum level'), level ]),
+					E('div', { 'class': 'honk-actions' }, [ pause, refresh, download ])
 				]),
 				status,
 				output
