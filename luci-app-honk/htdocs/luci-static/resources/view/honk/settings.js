@@ -93,7 +93,7 @@ return view.extend({
 			});
 		});
 
-		page.appendChild(E('header', { 'class': 'honk-header' }, [
+		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Settings')),
 			E('p', { 'class': 'honk-header-sub' }, _('Network interface, listen port and boot behaviour for the Honk service.'))
 		]));

@@ -331,7 +331,7 @@ return view.extend({
 			});
 		}
 
-		page.appendChild(E('header', { 'class': 'honk-header' }, [
+		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Honk')),
 			E('p', { 'class': 'honk-header-sub' }, _('Transparent proxy core for OpenWrt. Start, stop and manage the Honk service.'))
 		]));

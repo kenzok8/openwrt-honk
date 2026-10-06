@@ -77,7 +77,8 @@ return view.extend({
 		const capabilityMessage = E('p', { 'class': 'honk-note', 'role': 'status' }, _('Checking import support…'));
 		const previewMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status', 'aria-live': 'polite' }, '');
 		const previewDetails = E('section', { 'class': 'honk-card', 'aria-live': 'polite' });
-		const controls = [];
+		const inputs = [];
+		const actionButtons = [];
 		let previewBusy = false;
 		let recoveryBlocked = false;
 		let previewSupported = false;
@@ -93,7 +94,8 @@ return view.extend({
 
 		function setBusy(busy) {
 			previewBusy = busy;
-			controls.forEach(function(control) { control.disabled = busy || recoveryBlocked || !previewSupported; });
+			inputs.forEach(function(input) { input.disabled = busy || recoveryBlocked; });
+			actionButtons.forEach(function(button) { button.disabled = busy || recoveryBlocked || !previewSupported; });
 			applyButton.disabled = busy || recoveryBlocked || !applySupported || !activePreview;
 		}
 
@@ -214,7 +216,8 @@ return view.extend({
 			'maxlength': '8192', 'autocomplete': 'url', 'required': true
 		});
 		const subscriptionButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview subscription'));
-		controls.push(subscriptionName, subscriptionUrl, subscriptionButton);
+		inputs.push(subscriptionName, subscriptionUrl);
+		actionButtons.push(subscriptionButton);
 		subscriptionPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Add subscription')));
 		subscriptionPanel.appendChild(field(_('Name'), subscriptionName));
 		subscriptionPanel.appendChild(field(_('Subscription URL'), subscriptionUrl, _('Use an HTTP or HTTPS subscription address.')));
@@ -248,7 +251,8 @@ return view.extend({
 			'rows': '7', 'maxlength': String(SHARE_LINK_LIMIT), 'spellcheck': 'false', 'required': true
 		});
 		const linksButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview share links'));
-		controls.push(linksInput, linksButton);
+		inputs.push(linksInput);
+		actionButtons.push(linksButton);
 		linksPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Add nodes')));
 		linksPanel.appendChild(E('label', { 'class': 'cbi-value-title', 'for': linksInput.id }, _('Share links, one per line')));
 		linksPanel.appendChild(linksInput);
@@ -276,7 +280,8 @@ return view.extend({
 		const daePanel = E('form', { 'class': 'honk-card', 'id': 'honk-panel-dae', 'role': 'tabpanel', 'tabindex': '0', 'hidden': true });
 		const daeFile = E('input', { 'type': 'file', 'id': 'honk-dae-file', 'name': 'dae_file', 'accept': '.dae,text/plain', 'required': true });
 		const daeButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview dae file'));
-		controls.push(daeFile, daeButton);
+		inputs.push(daeFile);
+		actionButtons.push(daeButton);
 		daePanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Import dae business configuration')));
 		daePanel.appendChild(field(_('Configuration file'), daeFile, _('Choose one .dae file up to 2 MiB.')));
 		daePanel.appendChild(E('p', { 'class': 'honk-note' }, _('This replaces the business sections listed in the preview. Global settings are excluded, and external includes are rejected.')));
@@ -372,7 +377,7 @@ return view.extend({
 		]);
 
 		setBusy(false);
-		page.appendChild(E('header', { 'class': 'honk-header' }, [
+		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Configuration')),
 			E('p', { 'class': 'honk-header-sub' }, _('Add subscriptions, nodes or import a dae business configuration with a preview and transactional apply.'))
 		]));

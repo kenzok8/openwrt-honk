@@ -245,7 +245,7 @@ return view.extend({
 		resetSection.appendChild(E('div', { 'class': 'honk-actions' }, reset));
 		resetSection.appendChild(resetMessage);
 
-		page.appendChild(E('header', { 'class': 'honk-header' }, [
+		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Maintenance')),
 			E('p', { 'class': 'honk-header-sub' }, _('Updates, backups and system recovery for the Honk installation.'))
 		]));

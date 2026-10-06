@@ -363,13 +363,11 @@
 .honk-page .cbi-value-field .cbi-input-password,
 .honk-page .cbi-value-field input[type="number"],
 .honk-page .cbi-value-field input[type="url"],
-.honk-page .cbi-value-field input[type="text"] {
-	max-width: 480px;
-}
-
+.honk-page .cbi-value-field input[type="text"],
 .honk-page .cbi-value-field .cbi-input-select,
-.honk-page .cbi-value-field select {
-	max-width: 320px;
+.honk-page .cbi-value-field select,
+.honk-page .cbi-value-field input[type="file"] {
+	max-width: 400px;
 }
 
 .honk-page .cbi-value-field textarea,
