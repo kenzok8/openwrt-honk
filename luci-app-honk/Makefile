@@ -12,7 +12,7 @@ LUCI_MAINTAINER:=kenzok8
 
 PKG_NAME:=luci-app-honk
 PKG_VERSION:=2026.10.05
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 PKG_SOURCE:=doona-f8fd5228.tar.gz
 PKG_SOURCE_URL:=https://github.com/kenzok8/openwrt-honk/releases/download/staging
