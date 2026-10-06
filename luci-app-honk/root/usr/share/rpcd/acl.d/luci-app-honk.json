@@ -1,0 +1,27 @@
+{
+	"luci-app-honk": {
+		"description": "Grant access to Honk controls and maintenance",
+		"read": {
+			"ubus": {
+				"honk": [ "status", "check", "job_status", "logs", "import_capabilities", "update_check" ],
+				"network": [ "get_proto_handlers" ],
+				"network.interface": [ "dump" ],
+				"uci": [ "get" ]
+			},
+			"file": {
+				"/tmp/honk-backup.tar.gz": [ "read" ]
+			},
+			"uci": [ "network" ]
+		},
+		"write": {
+			"cgi-io": [ "upload" ],
+			"ubus": {
+				"honk": [ "initialize", "start", "stop", "restart", "settings", "repair", "backup", "restore", "restore_prepare", "reset", "import_preview", "import_upload_prepare", "import_apply", "update_apply" ]
+			},
+			"file": {
+				"/tmp/honk-maintenance/restore.tar.gz": [ "write" ],
+				"/tmp/honk-v2-upload/import.dae": [ "write" ]
+			}
+		}
+	}
+}

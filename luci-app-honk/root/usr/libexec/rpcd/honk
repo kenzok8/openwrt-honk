@@ -1,0 +1,454 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+. /lib/functions.sh
+. /usr/share/honk/lock.sh
+. /usr/share/honk/lifecycle.sh
+. /usr/share/honk/log-lines.sh
+
+CONTROL=/usr/share/honk/control.sh
+CORE=/usr/bin/honk-core
+JOBS=/tmp/honk-jobs
+JOB_RUNNER=/usr/share/honk/job.sh
+UPDATE=/usr/share/honk/update.sh
+MAINT=/usr/share/honk/maintenance.sh
+REDACT=/usr/share/honk/redact-log.sh
+LOG_LEVEL_FILTER=/usr/share/honk/log-level-filter.sh
+RESTORE_ROOT=/tmp/honk-maintenance
+RESTORE_PATH=$RESTORE_ROOT/restore.tar.gz
+
+emit_result() {
+	ok=$1
+	message=$2
+	[ "$ok" = true ] && ok=1 || ok=0
+	json_init
+	json_add_boolean ok "$ok"
+	json_add_string message "$message"
+	json_dump
+}
+
+emit_errors() {
+	ok=$1
+	[ "$ok" = true ] && ok=1 || ok=0
+	json_init
+	json_add_boolean ok "$ok"
+	json_add_array errors
+	for error in $2; do
+		json_add_string "" "$error"
+	done
+	json_close_array
+	json_dump
+}
+
+lock_owner_invalid() {
+	[ -d "$HONK_LOCK_DIR" ] || return 1
+	lock_owner=$(cat "$HONK_LOCK_DIR/pid" 2>/dev/null)
+	case "$lock_owner" in ''|*[!0-9]*) return 0 ;; esac
+	return 1
+}
+
+status() {
+	local enabled initialized boot_enabled running api_url api_ready core_version doona_version kernel lan_network listen_port errors listen
+	config_load honk
+	config_get_bool enabled main enabled 0
+	config_get_bool initialized main initialized 0
+	config_get_bool boot_enabled main boot_enabled 0
+	config_get listen_port main listen_port 9527
+	config_get lan_network main lan_network lan
+	managed_pid=$(procd_core_pid)
+	if is_managed_core "$managed_pid"; then running=1; else running=0; fi
+	listen=$(sed -n "s/^[[:space:]]*listen:[[:space:]]*'\\([^']*\\)'.*/\\1/p" /etc/honk/system.dae | head -n 1)
+	case "$listen" in
+		''|*[!0-9.:]*) listen="127.0.0.1:$listen_port" ;;
+	esac
+	api_url="http://$listen"
+	if [ "$running" = 1 ] && honk_lifecycle_api_owned "$managed_pid"; then api_ready=1; else api_ready=0; fi
+	core_version=$($CORE --version 2>/dev/null | sed -n '1p')
+	[ -n "$core_version" ] || core_version=unknown
+	doona_version=$(jsonfilter -i /usr/share/honk/provenance.json -e '@.doona.version' 2>/dev/null)
+	[ -n "$doona_version" ] || doona_version=unknown
+	kernel=$(uname -r)
+	errors=""
+	if [ "$enabled" != 1 ]; then errors="$errors disabled"; fi
+	if [ "$initialized" != 1 ]; then errors="$errors not_initialized"; fi
+	if [ "$enabled" = 1 ] && [ "$initialized" = 1 ] && [ "$running" != 1 ]; then errors="$errors service_not_running"; fi
+	if [ "$running" = 1 ] && [ "$api_ready" != 1 ]; then errors="$errors api_unavailable"; fi
+	if [ -d "$HONK_LOCK_DIR" ]; then
+		if lock_owner_invalid || honk_lock_is_stale; then errors="$errors stale_operation_lock maintenance_recovery_required"; else errors="$errors operation_in_progress"; fi
+	fi
+	{ [ -e /etc/.honk-maintenance/journal ] || [ -L /etc/.honk-maintenance/journal ]; } && errors="$errors maintenance_recovery_required"
+	{ [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; } && errors="$errors update_recovery_required"
+	json_init
+	json_add_boolean enabled "$enabled"
+	json_add_boolean initialized "$initialized"
+	json_add_boolean boot_enabled "$boot_enabled"
+	json_add_boolean running "$running"
+	json_add_boolean api_ready "$api_ready"
+	json_add_string api_url "$api_url"
+	json_add_string core_version "$core_version"
+	json_add_string doona_version "$doona_version"
+	json_add_string kernel "$kernel"
+	json_add_string lan_network "$lan_network"
+	case "$listen_port" in
+		''|*[!0-9]*) listen_port=0 ;;
+	esac
+	json_add_int listen_port "$listen_port"
+	json_add_array errors
+	for error in $errors; do json_add_string "" "$error"; done
+	json_close_array
+	json_dump
+}
+
+
+service_ready_config() {
+	local enabled initialized
+	config_load honk
+	config_get_bool enabled main enabled 0
+	config_get_bool initialized main initialized 0
+	[ "$initialized" = 1 ]
+}
+
+start_job() {
+	job_operation=$1
+	job_request=
+	case "$job_operation" in backup|restore|reset|import_apply|import_preview|update_check|update_apply) ;; *) emit_result false invalid_operation; return 1 ;; esac
+	if [ "$job_operation" = update_apply ]; then
+		update_gate_result=$("$UPDATE" gate 2>/dev/null) || { emit_result false update_check_failed; return 1; }
+		json_load "$update_gate_result" 2>/dev/null || { emit_result false update_check_failed; return 1; }
+		json_get_var update_apply_enabled apply_enabled
+		if [ "$update_apply_enabled" != 1 ]; then
+			json_get_var update_gate_reason reason
+			case "$update_gate_reason" in rollback_tuple_unavailable|trusted_feed_unavailable|signed_manifest_missing|signed_manifest_expired|no_update) emit_result false "$update_gate_reason" ;; *) emit_result false update_check_failed ;; esac
+			return 1
+		fi
+	fi
+	if [ "$job_operation" = import_apply ]; then
+		job_request=$(cat)
+		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+		json_get_keys request_keys
+		case " $request_keys " in *' preview_id '*) ;; *) emit_result false invalid_request; return 1 ;; esac
+		case " $request_keys " in *' source_sha256 '*) ;; *) emit_result false invalid_request; return 1 ;; esac
+		[ "$(printf '%s\n' "$request_keys" | wc -w | tr -d ' ')" = 2 ] || { emit_result false invalid_request; return 1; }
+		json_get_type preview_id_type preview_id
+		json_get_type source_sha256_type source_sha256
+		[ "$preview_id_type" = string ] && [ "$source_sha256_type" = string ] || { emit_result false invalid_request; return 1; }
+		json_get_var preview_id preview_id
+		json_get_var source_sha256 source_sha256
+		case "$preview_id" in ''|*[!0-9a-f]*) emit_result false invalid_request; return 1 ;; esac
+		case "$source_sha256" in ''|*[!0-9a-f]*) emit_result false invalid_request; return 1 ;; esac
+		[ "${#preview_id}" = 32 ] && [ "${#source_sha256}" = 64 ] || { emit_result false invalid_request; return 1; }
+	elif [ "$job_operation" = import_preview ]; then
+		job_request=$(cat) || { emit_result false invalid_request; return 1; }
+		[ "$(printf '%s' "$job_request" | wc -c | tr -d ' ')" -le 32768 ] || { emit_result false invalid_request; return 1; }
+		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+		json_get_keys request_keys
+		for request_key in $request_keys; do
+			case "$request_key" in action|kind|mode|name|url|share_links|upload_sha256) ;; *) emit_result false invalid_request; return 1 ;; esac
+		done
+		json_get_type action_type action
+		json_get_var action action
+		[ "$action_type" = string ] && [ "$action" = preview ] || { emit_result false invalid_request; return 1; }
+		json_get_type kind_type kind
+		json_get_var kind kind
+		[ "$kind_type" = string ] || { emit_result false invalid_request; return 1; }
+		case "$kind" in share_links|subscription|dae) ;; *) emit_result false invalid_request; return 1 ;; esac
+	fi
+	if [ ! -e "$JOBS" ] && [ ! -L "$JOBS" ]; then
+		(umask 077; mkdir "$JOBS") || { emit_result false job_storage_unavailable; return 1; }
+	fi
+	[ -d "$JOBS" ] && [ ! -L "$JOBS" ] && [ "$(stat -c '%u:%a' "$JOBS" 2>/dev/null)" = 0:700 ] || { emit_result false job_storage_unavailable; return 1; }
+	job_id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-')
+	case "$job_id" in [0-9a-f][0-9a-f]*) [ "${#job_id}" -eq 32 ] || { emit_result false job_id_unavailable; return 1; } ;; *) emit_result false job_id_unavailable; return 1 ;; esac
+	job_dir=$JOBS/$job_id
+	mkdir "$job_dir" || { emit_result false job_storage_unavailable; return 1; }
+	chmod 0700 "$job_dir" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	if [ "$job_operation" = import_apply ]; then
+		printf '{"preview_id":"%s","source_sha256":"%s"}\n' "$preview_id" "$source_sha256" > "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+		chmod 0600 "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	elif [ "$job_operation" = import_preview ]; then
+		printf '%s\n' "$job_request" > "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+		chmod 0600 "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	fi
+	json_init
+	json_add_string state running
+	json_add_string phase queued
+	json_add_boolean ok 1
+	json_add_string message job_started
+	json_dump > "$job_dir/status" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	chmod 0600 "$job_dir/status" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	nohup "$JOB_RUNNER" "$job_id" "$job_operation" >/dev/null 2>&1 </dev/null &
+	job_pid=$!
+	printf '%s\n' "$job_pid" > "$job_dir/worker.pid" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	chmod 0600 "$job_dir/worker.pid" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	json_init
+	json_add_boolean ok 1
+	json_add_string message job_started
+	json_add_string job_id "$job_id"
+	json_dump
+}
+
+job_status() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	json_get_var job_id job_id
+	case "$job_id" in ''|*[!0-9a-f]*) emit_result false invalid_job_id; return 1 ;; esac
+	[ "${#job_id}" -eq 32 ] || { emit_result false invalid_job_id; return 1; }
+	[ -d "$JOBS" ] && [ ! -L "$JOBS" ] && [ "$(stat -c '%u:%a' "$JOBS" 2>/dev/null)" = 0:700 ] || { emit_result false job_not_found; return 1; }
+	job_dir=$JOBS/$job_id
+	[ -d "$job_dir" ] && [ ! -L "$job_dir" ] && [ "$(stat -c '%u:%a' "$job_dir" 2>/dev/null)" = 0:700 ] || { emit_result false job_not_found; return 1; }
+	job_status_file=$JOBS/$job_id/status
+	[ -f "$job_status_file" ] && [ ! -L "$job_status_file" ] && [ "$(stat -c '%u:%a' "$job_status_file" 2>/dev/null)" = 0:600 ] || { emit_result false job_not_found; return 1; }
+	job_pid_file=$job_dir/worker.pid
+	[ -f "$job_pid_file" ] && [ ! -L "$job_pid_file" ] && [ "$(stat -c '%u:%a' "$job_pid_file" 2>/dev/null)" = 0:600 ] || { emit_result false job_not_found; return 1; }
+	job_state=$(jsonfilter -i "$job_status_file" -e '@.state' 2>/dev/null)
+	job_pid=$(cat "$job_pid_file" 2>/dev/null)
+	case "$job_pid" in ''|*[!0-9]*) job_pid= ;; esac
+	if [ "$job_state" = running ] && { [ -z "$job_pid" ] || ! kill -0 "$job_pid" 2>/dev/null; }; then
+		json_init
+		if [ -e /etc/.honk-maintenance/journal ] || [ -L /etc/.honk-maintenance/journal ] || [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ] || [ -d "$HONK_LOCK_DIR" ]; then
+			json_add_string state rollback_required
+			json_add_string phase recovery
+			job_lost_message=maintenance_recovery_required
+		else
+			json_add_string state failed
+			json_add_string phase complete
+			job_lost_message worker_lost
+		fi
+		json_add_boolean ok 0
+		json_add_string message "$job_lost_message"
+		json_dump > "$job_dir/status.new" && chmod 0600 "$job_dir/status.new" && mv -f "$job_dir/status.new" "$job_status_file" || { emit_result false job_status_unavailable; return 1; }
+	fi
+	cat "$job_status_file"
+}
+
+logs() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	json_get_var log_source source
+	json_get_var log_level level
+	json_get_var log_limit limit
+	case "$log_source" in service) log_pattern='honk.init|procd.*honk|honk service|honk\[[0-9]+\]' ;; core) log_pattern='honk-core|honk::' ;; maintenance) log_pattern='honk-maintenance|honk maintenance' ;; *) emit_result false invalid_log_source; return 1 ;; esac
+	case "$log_level" in all|debug|info|warn|error) ;; *) emit_result false invalid_log_level; return 1 ;; esac
+	case "$log_limit" in ''|*[!0-9]*) log_limit=200 ;; esac
+	[ "$log_limit" -ge 1 ] && [ "$log_limit" -le 200 ] || { emit_result false invalid_log_limit; return 1; }
+	command -v logread >/dev/null 2>&1 || { emit_result false logs_unavailable; return 1; }
+	[ -x "$REDACT" ] && [ -x "$LOG_LEVEL_FILTER" ] || { emit_result false logs_unavailable; return 1; }
+	log_raw_file=$(mktemp /tmp/honk-log.XXXXXX) || { emit_result false logs_unavailable; return 1; }
+	log_file=$(mktemp /tmp/honk-log.XXXXXX) || { rm -f "$log_raw_file"; emit_result false logs_unavailable; return 1; }
+	chmod 0600 "$log_raw_file" "$log_file" || { rm -f "$log_raw_file" "$log_file"; emit_result false logs_unavailable; return 1; }
+	log_capped=0
+	logread -l 200 -e 'honk|honk-core|honk-maintenance' 2>/dev/null | head -c 262144 > "$log_raw_file"
+	log_raw_bytes=$(wc -c < "$log_raw_file" | tr -d ' ')
+	if [ "$log_raw_bytes" -ge 262144 ]; then
+		log_capped=1
+		log_raw_complete=$(mktemp /tmp/honk-log.XXXXXX) || { rm -f "$log_raw_file" "$log_file"; emit_result false logs_unavailable; return 1; }
+		chmod 0600 "$log_raw_complete" || { rm -f "$log_raw_file" "$log_file" "$log_raw_complete"; emit_result false logs_unavailable; return 1; }
+		sed '$d' "$log_raw_file" > "$log_raw_complete"
+		mv -f "$log_raw_complete" "$log_raw_file"
+	fi
+	grep -E "$log_pattern" "$log_raw_file" | "$LOG_LEVEL_FILTER" "$log_level" | "$REDACT" > "$log_file"
+	rm -f "$log_raw_file"
+	line_count=$(wc -l < "$log_file" | tr -d ' ')
+	if [ "$line_count" -gt "$log_limit" ]; then
+		log_capped=1
+		tail -n "$log_limit" "$log_file" > "$log_file.latest" && mv -f "$log_file.latest" "$log_file"
+	fi
+	log_bytes=$(wc -c < "$log_file" | tr -d ' ')
+	if [ "$log_bytes" -gt 32768 ]; then
+		log_capped=1
+		log_capped_file=$(mktemp /tmp/honk-log.XXXXXX) || { rm -f "$log_file"; emit_result false logs_unavailable; return 1; }
+		chmod 0600 "$log_capped_file" || { rm -f "$log_file" "$log_capped_file"; emit_result false logs_unavailable; return 1; }
+		LC_ALL=C awk 'BEGIN { first=1; bytes=0 } { lines[NR]=$0; sizes[NR]=length($0)+1; bytes+=sizes[NR]; while (bytes>32768 && first<=NR) { bytes-=sizes[first]; first++ } } END { for (i=first; i<=NR; i++) print lines[i] }' "$log_file" > "$log_capped_file"
+		mv -f "$log_capped_file" "$log_file"
+	fi
+	json_init
+	json_add_boolean ok 1
+	json_add_string message logs_read
+	[ "$log_capped" = 1 ] && json_add_boolean capped 1 || json_add_boolean capped 0
+	json_add_array lines
+	honk_add_log_lines "$log_file"
+	json_close_array
+	json_dump
+	rm -f "$log_file"
+}
+
+core_import_capabilities() {
+	capabilities=$($CORE --config /etc/honk/config.dae --data-dir /etc/honk admin capabilities 2>/dev/null) || return 1
+	json_load "$capabilities" 2>/dev/null || return 1
+	json_get_var capabilities_version capabilities_version
+	json_get_var import_preview_enabled import_preview
+	json_get_var import_apply_enabled import_apply
+	json_get_var dae_upload_prepare dae_upload_prepare
+	json_get_var reset_business_enabled reset_business
+	json_get_var offline_subscription_validation offline_subscription_validation
+	[ "$capabilities_version" = 1 ] || return 1
+}
+
+import_capabilities() {
+	core_import_capabilities || { emit_result false unsupported_core; return 1; }
+	json_init
+	json_add_boolean ok 1
+	json_add_int capabilities_version "$capabilities_version"
+	json_add_boolean import_preview "$import_preview_enabled"
+	json_add_boolean import_apply "$import_apply_enabled"
+	json_add_boolean reset_business "$reset_business_enabled"
+	json_add_boolean offline_subscription_validation "$offline_subscription_validation"
+	json_dump
+}
+
+import_preview() {
+	core_import_capabilities || { emit_result false unsupported_core; return 1; }
+	[ "$import_preview_enabled" = 1 ] || { emit_result false unsupported_core; return 1; }
+	start_job import_preview
+}
+
+prepare_upload_directory() {
+	[ ! -e "$RESTORE_ROOT" ] && [ ! -L "$RESTORE_ROOT" ] && { (umask 077; mkdir "$RESTORE_ROOT") || return 1; }
+	[ -d "$RESTORE_ROOT" ] && [ ! -L "$RESTORE_ROOT" ] && [ "$(stat -c '%u:%a' "$RESTORE_ROOT" 2>/dev/null)" = 0:700 ] || return 1
+	if [ -e "$RESTORE_PATH" ] || [ -L "$RESTORE_PATH" ]; then
+		[ -f "$RESTORE_PATH" ] && [ ! -L "$RESTORE_PATH" ] && [ "$(stat -c '%u:%a' "$RESTORE_PATH" 2>/dev/null)" = 0:600 ] || return 1
+		rm -f "$RESTORE_PATH" || return 1
+	fi
+}
+
+restore_prepare() {
+	prepare_upload_directory || { emit_result false upload_unavailable; return 1; }
+	emit_result true upload_ready
+}
+
+import_upload_prepare() {
+	core_import_capabilities || { emit_result false unsupported_core; return 1; }
+	[ "$dae_upload_prepare" = 1 ] || { emit_result false unsupported_core; return 1; }
+	result=$(printf '%s' '{"action":"upload_prepare"}' | "$CORE" --config /etc/honk/config.dae --data-dir /etc/honk admin import 2>/dev/null) || { emit_result false upload_unavailable; return 1; }
+	json_load "$result" 2>/dev/null || { emit_result false upload_unavailable; return 1; }
+	json_dump
+}
+
+import_apply_job() {
+	core_import_capabilities || { emit_result false unsupported_core; return 1; }
+	[ "$import_apply_enabled" = 1 ] || { emit_result false unsupported_core; return 1; }
+	start_job import_apply
+}
+
+set_enabled() {
+	uci set "honk.main.enabled=$1" && uci commit honk
+}
+
+procd_core_pid() {
+	honk_lifecycle_procd_pid
+}
+
+is_managed_core() {
+	[ "$1" = "$(honk_lifecycle_managed_pid 2>/dev/null)" ] && [ -n "$1" ]
+}
+
+begin_mutation() {
+	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then emit_result false update_recovery_required; exit 1; fi
+	honk_lock_acquire || { emit_result false operation_in_progress; exit 1; }
+	trap 'honk_lock_release >/dev/null 2>&1' 0
+}
+
+case "$1" in
+list)
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean"},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"import_capabilities":{},"import_upload_prepare":{},"import_preview":{},"import_apply":{"preview_id":"String","source_sha256":"String"},"update_check":{},"update_apply":{}}'
+		;;
+	call)
+		case "$2" in
+			status)
+				status
+				;;
+			check)
+				if errors=$("$CONTROL" diagnose 2>/dev/null); then emit_errors true ""; else emit_errors false "$errors"; fi
+				;;
+			initialize)
+				exec "$CONTROL" initialize
+				;;
+			settings)
+				exec "$CONTROL" settings
+				;;
+			repair)
+				exec "$CONTROL" repair
+				;;
+			backup)
+				start_job backup
+				;;
+			restore)
+				start_job restore
+				;;
+			restore_prepare)
+				restore_prepare
+				;;
+			reset)
+				start_job reset
+				;;
+			job_status)
+				job_status
+				;;
+			logs)
+				logs
+				;;
+			import_capabilities)
+				import_capabilities
+				;;
+			import_preview)
+				import_preview
+				;;
+			import_upload_prepare)
+				import_upload_prepare
+				;;
+			import_apply)
+				import_apply_job
+				;;
+			update_check)
+				start_job update_check
+				;;
+			update_apply)
+				start_job update_apply
+				;;
+			start)
+				begin_mutation
+				if ! service_ready_config; then emit_result false not_initialized; exit 1; fi
+				old_enabled=$(uci -q get honk.main.enabled || echo 0)
+				if ! set_enabled 1; then emit_result false settings_write_failed; exit 1; fi
+				managed_pid=$(honk_lifecycle_managed_pid 2>/dev/null)
+				if [ -n "$managed_pid" ]; then
+					if honk_lifecycle_api_owned "$managed_pid"; then emit_result true already_running; else set_enabled "$old_enabled" >/dev/null 2>&1; emit_result false managed_service_unhealthy; exit 1; fi
+				elif honk_lifecycle_start 30; then
+					emit_result true started
+				else
+					honk_lifecycle_stop 30 >/dev/null 2>&1 || :
+					set_enabled "$old_enabled" >/dev/null 2>&1
+					emit_result false start_failed
+					exit 1
+				fi
+				;;
+			stop)
+				begin_mutation
+				old_enabled=$(uci -q get honk.main.enabled || echo 0)
+				if ! set_enabled 0; then emit_result false settings_write_failed; exit 1; fi
+				if honk_lifecycle_stop 30; then emit_result true stopped; else set_enabled "$old_enabled" >/dev/null 2>&1; emit_result false stop_failed; exit 1; fi
+				;;
+			restart)
+				begin_mutation
+				if ! service_ready_config; then emit_result false not_initialized; exit 1; fi
+				old_enabled=$(uci -q get honk.main.enabled || echo 0)
+				if ! set_enabled 1; then emit_result false settings_write_failed; exit 1; fi
+				if [ -n "$(honk_lifecycle_managed_pid 2>/dev/null)" ]; then
+					:
+				elif pidof honk-core >/dev/null 2>&1; then
+					set_enabled "$old_enabled" >/dev/null 2>&1
+					emit_result false unmanaged_core_running
+					exit 1
+				fi
+				if honk_lifecycle_restart 30; then emit_result true restarted; else set_enabled "$old_enabled" >/dev/null 2>&1; emit_result false restart_failed; exit 1; fi
+				;;
+			*)
+				emit_result false unknown_method
+				exit 1
+				;;
+		esac
+		;;
+	*)
+		exit 2
+		;;
+esac

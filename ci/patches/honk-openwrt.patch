@@ -1,0 +1,3278 @@
+diff --git a/crates/honk-config/src/parser/source_edit.rs b/crates/honk-config/src/parser/source_edit.rs
+index 5942f48..dfd7df2 100644
+--- a/crates/honk-config/src/parser/source_edit.rs
++++ b/crates/honk-config/src/parser/source_edit.rs
+@@ -37,6 +37,8 @@ impl GroupField {
+ #[error("source cannot represent the requested edit")]
+ pub struct SourceEditError;
+ 
++const BUSINESS_ROOTS: [&str; 5] = ["node", "subscription", "group", "routing", "dns"];
++
+ fn group_source_indices(documents: &[Document<'_>]) -> HashMap<String, usize> {
+     let mut result = HashMap::new();
+     for (index, document) in documents.iter().enumerate() {
+@@ -208,6 +210,161 @@ pub fn append_node_source(
+     Ok(append_entry(&document, "node", &entry))
+ }
+ 
++/// Append share links with the production parser, preserving the source's
++/// formatting and refusing duplicate names or parser-derived identities.
++pub fn append_share_links_source(
++    sources: &[SourceSnapshot],
++    links: &[String],
++) -> Result<(String, Vec<String>), SourceEditError> {
++    let source = sources.first().ok_or(SourceEditError)?;
++    if links.is_empty()
++        || links.len() > 1000
++        || links.iter().map(String::len).sum::<usize>() > 1024 * 1024
++    {
++        return Err(SourceEditError);
++    }
++    let inputs = sources
++        .iter()
++        .map(|source| (source.path.clone(), source.content.clone()))
++        .collect::<Vec<_>>();
++    let existing =
++        super::parse_dae_sources(&inputs, super::SourceLimits::default(), &mut Vec::new())
++            .map_err(|_| SourceEditError)?;
++    let mut names = std::collections::HashSet::new();
++    let mut ids = existing
++        .config
++        .nodes
++        .iter()
++        .map(|node| node.id)
++        .collect::<std::collections::HashSet<_>>();
++    let mut entries = Vec::with_capacity(links.len());
++    let mut imported_names = Vec::with_capacity(links.len());
++    for link in links {
++        let mut diagnostics = Vec::new();
++        let node =
++            crate::node::Node::from_share_link_with_detailed_diagnostics(link, &mut diagnostics)
++                .map_err(|_| SourceEditError)?;
++        if node.name.trim().is_empty() {
++            return Err(SourceEditError);
++        }
++        let id = node.derive_id();
++        if existing
++            .config
++            .nodes
++            .iter()
++            .any(|existing| existing.name == node.name)
++            || !names.insert(node.name.clone())
++            || !ids.insert(id)
++        {
++            return Err(SourceEditError);
++        }
++        let (entry, parsed) = managed_entry("node", &node.name, link, &[])?;
++        if parsed.nodes.len() != 1 || parsed.nodes[0].id != id {
++            return Err(SourceEditError);
++        }
++        entries.push(entry);
++        imported_names.push(node.name);
++    }
++    let document = managed_document(source)?;
++    Ok((append_entries(&document, "node", &entries), imported_names))
++}
++
++/// Replace business sections across a complete loaded tree. Read-only source
++/// paths are retained and rejected if they contain business sections.
++pub fn replace_business_sections_sources(
++    sources: &[SourceSnapshot],
++    read_only_paths: &[std::path::PathBuf],
++    imported: &str,
++) -> Result<
++    (
++        Vec<(std::path::PathBuf, String)>,
++        Vec<String>,
++        Vec<String>,
++        Vec<(String, usize)>,
++    ),
++    SourceEditError,
++> {
++    let source = sources.first().ok_or(SourceEditError)?;
++    if imported.len() > 2 * 1024 * 1024 {
++        return Err(SourceEditError);
++    }
++    let imported_path = source.path.with_file_name("honk-import.dae");
++    let imported_config = super::parse_dae_sources(
++        &[(imported_path, std::sync::Arc::from(imported))],
++        super::SourceLimits::default(),
++        &mut Vec::new(),
++    )
++    .map_err(|_| SourceEditError)?;
++    let imported_source = &imported_config.sources[0];
++    let imported_document = managed_document(imported_source)?;
++    let roots = imported_document.sections().collect::<Vec<_>>();
++    if roots.iter().any(|root| root.header() == "include") {
++        return Err(SourceEditError);
++    }
++
++    let mut accepted = Vec::new();
++    let mut accepted_names = Vec::new();
++    let mut excluded = Vec::new();
++    for root in roots {
++        let name = root.header();
++        if BUSINESS_ROOTS.contains(&name) {
++            let span = root.span();
++            accepted.push(imported[span.start..span.end].to_owned());
++            accepted_names.push(name.to_owned());
++        } else if !excluded.iter().any(|existing| existing == name) {
++            excluded.push(name.to_owned());
++        }
++    }
++    if accepted.is_empty() {
++        return Err(SourceEditError);
++    }
++
++    let mut outputs = Vec::with_capacity(sources.len());
++    let mut replaced = std::collections::HashMap::<String, usize>::new();
++    for source in sources {
++        let document = managed_document(source)?;
++        let roots = document
++            .sections()
++            .filter(|root| BUSINESS_ROOTS.contains(&root.header()))
++            .collect::<Vec<_>>();
++        for root in &roots {
++            *replaced.entry(root.header().to_owned()).or_default() += 1;
++        }
++        if read_only_paths.contains(&source.path) {
++            if !roots.is_empty() {
++                return Err(SourceEditError);
++            }
++            outputs.push((source.path.clone(), source.content.to_string()));
++            continue;
++        }
++        let removals = roots
++            .iter()
++            .map(|root| line_of(&source.content, root.span().start..root.span().end))
++            .collect::<Vec<_>>();
++        let mut content = source.content.to_string();
++        for range in removals.into_iter().rev() {
++            content.replace_range(range, "");
++        }
++        outputs.push((source.path.clone(), content));
++    }
++    let (_, content) = outputs.first_mut().ok_or(SourceEditError)?;
++    if !accepted.is_empty() {
++        if !content.is_empty() && !content.ends_with('\n') {
++            content.push('\n');
++        }
++        if !content.is_empty() && !content.ends_with("\n\n") {
++            content.push('\n');
++        }
++        content.push_str(&accepted.join("\n\n"));
++        if !content.ends_with('\n') {
++            content.push('\n');
++        }
++    }
++    let mut replaced = replaced.into_iter().collect::<Vec<_>>();
++    replaced.sort_by(|left, right| left.0.cmp(&right.0));
++    Ok((outputs, accepted_names, excluded, replaced))
++}
++
+ /// Remove the unique declaration with this parser-derived node identity.
+ /// `None` means this source owns no matching declaration; includes are untouched.
+ pub fn remove_node_source(
+@@ -280,7 +437,7 @@ pub fn append_subscription_source(
+         || subscription.cache != options.cache.unwrap_or(defaults.cache)
+         || url::Url::parse(url)
+             .ok()
+-            .is_none_or(|url| url.host_str().is_none())
++            .is_none_or(|url| !matches!(url.scheme(), "http" | "https") || url.host_str().is_none())
+     {
+         return Err(SourceEditError);
+     }
+@@ -305,6 +462,32 @@ pub fn append_subscription_source(
+     Ok(append_entry(&document, "subscription", &entry))
+ }
+ 
++/// Append an unfetched subscription after checking every loaded source for a
++/// duplicate name. The returned text edits only the entry source.
++pub fn append_subscription_sources(
++    sources: &[SourceSnapshot],
++    name: &str,
++    url: &str,
++    options: &SubscriptionOptions<'_>,
++) -> Result<String, SourceEditError> {
++    let source = sources.first().ok_or(SourceEditError)?;
++    let inputs = sources
++        .iter()
++        .map(|source| (source.path.clone(), source.content.clone()))
++        .collect::<Vec<_>>();
++    let loaded = super::parse_dae_sources(&inputs, super::SourceLimits::default(), &mut Vec::new())
++        .map_err(|_| SourceEditError)?;
++    if loaded
++        .config
++        .subscriptions
++        .iter()
++        .any(|subscription| subscription.name == name)
++    {
++        return Err(SourceEditError);
++    }
++    append_subscription_source(source, name, url, options)
++}
++
+ /// Match by name and fetch identity (URL, configured UA, headers), never the
+ /// parser's random subscription UUID or mutable refresh metadata. Ambiguous
+ /// duplicate declarations and legacy headers owning child entries are rejected.
+@@ -445,26 +628,34 @@ fn managed_entry(
+ }
+ 
+ fn append_entry(document: &Document<'_>, section: &str, entry: &str) -> String {
++    append_entries(document, section, &[entry.to_owned()])
++}
++
++fn append_entries(document: &Document<'_>, section: &str, entries: &[String]) -> String {
+     let content = document.source().text();
+     let newline = if content.contains("\r\n") {
+         "\r\n"
+     } else {
+         "\n"
+     };
+-    let entry = entry.replace('\n', newline);
++    let entries = entries
++        .iter()
++        .map(|entry| entry.replace('\n', newline))
++        .collect::<Vec<_>>()
++        .join(newline);
+     let mut output = content.to_owned();
+     if let Some(root) = document.sections().rfind(|root| root.header() == section) {
+         let close = root.span().end - 1;
+         match own_line_start(content, close) {
+-            Some(line_start) => output.insert_str(line_start, &format!("    {entry}{newline}")),
+-            None => output.insert_str(close, &format!("{newline}    {entry}{newline}")),
++            Some(line_start) => output.insert_str(line_start, &format!("    {entries}{newline}")),
++            None => output.insert_str(close, &format!("{newline}    {entries}{newline}")),
+         }
+     } else {
+         if !content.is_empty() && !content.ends_with('\n') {
+             output.push_str(newline);
+         }
+         output.push_str(&format!(
+-            "{section} {{{newline}    {entry}{newline}}}{newline}"
++            "{section} {{{newline}    {entries}{newline}}}{newline}"
+         ));
+     }
+     output
+diff --git a/crates/honk-config/src/parser/source_edit/tests.rs b/crates/honk-config/src/parser/source_edit/tests.rs
+index fbce20e..ab7cf8b 100644
+--- a/crates/honk-config/src/parser/source_edit/tests.rs
++++ b/crates/honk-config/src/parser/source_edit/tests.rs
+@@ -49,6 +49,43 @@ fn managed_appends_use_last_roots_and_preserve_literal_names_and_crlf() {
+     );
+ }
+ 
++#[test]
++fn subscription_append_rejects_names_from_included_sources() {
++    let loaded = parse_dae_sources(
++        &[
++            (
++                PathBuf::from("main.dae"),
++                Arc::from("include { extra.dae }\n"),
++            ),
++            (
++                PathBuf::from("extra.dae"),
++                Arc::from("subscription { existing: 'https://example.test/feed' }\n"),
++            ),
++        ],
++        SourceLimits::default(),
++        &mut Vec::new(),
++    )
++    .unwrap();
++    assert!(
++        append_subscription_sources(
++            &loaded.sources,
++            "existing",
++            "https://example.test/other",
++            &SubscriptionOptions::default(),
++        )
++        .is_err()
++    );
++    assert!(
++        append_subscription_sources(
++            &loaded.sources,
++            "new",
++            "https://example.test/other",
++            &SubscriptionOptions::default(),
++        )
++        .is_ok()
++    );
++}
++
+ #[test]
+ fn managed_appends_create_sections_after_unterminated_comments() {
+     let loaded = managed_source("# preserved EOF comment");
+@@ -152,6 +189,7 @@ fn managed_appends_reject_injection_parse_skips_and_duplicate_identities() {
+     }
+     for url in [
+         "file:///PRIVATE",
++        "ftp://example.test/sub",
+         "https://",
+         "https://example.test/PRIVATE\n}",
+         "https://example.test/two'quotes\"",
+@@ -195,6 +233,121 @@ fn managed_node_deletion_uses_normalized_identity_and_keeps_nested_siblings() {
+     );
+ }
+ 
++#[test]
++fn share_link_batch_import_uses_the_core_parser_and_rejects_collisions() {
++    let loaded = managed_source("node { existing: 'socks5://127.0.0.1:1080' }\n");
++    let links = vec![
++        "trojan://secret@example.test:443#first".to_owned(),
++        "vless://00000000-0000-0000-0000-000000000001@example.test:8443#second".to_owned(),
++    ];
++    let (edited, names) = append_share_links_source(&loaded.sources, &links).unwrap();
++    assert_eq!(names, ["first", "second"]);
++    let candidate = managed_source(&edited);
++    assert_eq!(candidate.config.nodes.len(), 3);
++    assert_eq!(candidate.config.nodes[1].name, "first");
++    assert_eq!(candidate.config.nodes[2].name, "second");
++
++    let duplicate = vec![
++        "trojan://secret@example.test:443#duplicate".to_owned(),
++        "socks5://user:pass@127.0.0.1:1080#duplicate".to_owned(),
++    ];
++    let error = append_share_links_source(&loaded.sources, &duplicate).unwrap_err();
++    assert!(!format!("{error:?} {error}").contains("secret"));
++    assert!(append_share_links_source(&loaded.sources, &["unknown://secret".to_owned()]).is_err());
++
++    let root = PathBuf::from("/config/main.dae");
++    let child = PathBuf::from("/config/system.dae");
++    let tree = crate::parser::load_dae_sources_in_memory(
++        &root,
++        &[
++            (
++                root.clone(),
++                Arc::from("include { 'system.dae' }\nnode { root: 'socks5://127.0.0.1:1081' }\n"),
++            ),
++            (
++                child,
++                Arc::from("node { child: 'socks5://127.0.0.1:1082' }\n"),
++            ),
++        ]
++        .into_iter()
++        .collect(),
++        SourceLimits::default(),
++        &mut Vec::new(),
++    )
++    .unwrap();
++    let child_collision = vec!["socks5://127.0.0.1:1082#new".to_owned()];
++    assert!(append_share_links_source(&tree.sources, &child_collision).is_err());
++}
++
++#[test]
++fn dae_import_replaces_only_business_roots_and_excludes_global_settings() {
++    let existing = managed_source(
++        "include { 'system.dae' }\nglobal { log_level: info }\nnode { old: 'socks5://127.0.0.1:1080' }\nrouting { fallback: direct }\n",
++    );
++    let imported = "global { data_dir: '/tmp/attacker' }\nnode { new: 'trojan://secret@example.test:443#new' }\ngroup { proxy { policy: min_moving_avg } }\ndns { upstream { alidns: 'udp://223.5.5.5:53' } }\n";
++    let (outputs, roots, excluded, replaced) =
++        replace_business_sections_sources(&existing.sources, &[], imported).unwrap();
++    let candidate = &outputs[0].1;
++    assert_eq!(roots, ["node", "group", "dns"]);
++    assert_eq!(excluded, ["global"]);
++    assert_eq!(
++        replaced,
++        [("node".to_owned(), 1), ("routing".to_owned(), 1)]
++    );
++    assert!(candidate.contains("include { 'system.dae' }"));
++    assert!(candidate.contains("global { log_level: info }"));
++    assert!(!candidate.contains("old: 'socks5://127.0.0.1:1080'"));
++    assert!(!candidate.contains("/tmp/attacker"));
++    let loaded = managed_source(&candidate);
++    assert_eq!(loaded.config.nodes[0].name, "new");
++    assert!(
++        loaded
++            .config
++            .groups
++            .iter()
++            .any(|group| group.name == "proxy")
++    );
++
++    let with_include = "include { 'extra.dae' }\nnode { n: 'socks5://127.0.0.1:1081' }";
++    assert!(replace_business_sections_sources(&existing.sources, &[], with_include).is_err());
++
++    let current_tree = parse_dae_sources(
++        &[
++            (
++                PathBuf::from("main.dae"),
++                Arc::from("include { 'extra.dae' }\ninclude { 'system.dae' }\nglobal { log_level: info }\n"),
++            ),
++            (
++                PathBuf::from("extra.dae"),
++                Arc::from("node { old: 'socks5://127.0.0.1:1080' }\ngroup { old: 'old' }\nrouting { fallback: direct }\n"),
++            ),
++            (
++                PathBuf::from("system.dae"),
++                Arc::from("global { data_dir: '/etc/honk' }\n"),
++            ),
++        ],
++        SourceLimits::default(),
++        &mut Vec::new(),
++    )
++    .unwrap();
++    let readonly = vec![PathBuf::from("system.dae")];
++    let (outputs, _, _, replaced) = replace_business_sections_sources(
++        &current_tree.sources,
++        &readonly,
++        "node { new: 'trojan://secret@example.test:443#new' }\nrouting { fallback: block }\n",
++    )
++    .unwrap();
++    assert!(
++        replaced
++            .iter()
++            .any(|(section, count)| section == "node" && *count == 1)
++    );
++    assert!(outputs[0].1.contains("node { new:"));
++    assert!(!outputs[1].1.contains("old: 'socks5://127.0.0.1:1080'"));
++    assert!(outputs[1].1.contains("include") == false);
++    assert_eq!(outputs[2].1, "global { data_dir: '/etc/honk' }\n");
++}
++
+ #[test]
+ fn managed_subscription_options_write_a_block_that_reads_back_and_deletes_whole() {
+     for newline in ["\n", "\r\n"] {
+diff --git a/crates/honk-core/src/admin_import.rs b/crates/honk-core/src/admin_import.rs
+new file mode 100644
+index 0000000..3d57a48
+--- /dev/null
++++ b/crates/honk-core/src/admin_import.rs
+@@ -0,0 +1,1210 @@
++use std::collections::HashMap;
++use std::fs::{self, File, OpenOptions};
++use std::io::{Read, Write};
++use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
++use std::path::{Component, Path, PathBuf};
++use std::sync::Arc;
++
++#[cfg(feature = "native-api")]
++use crate::native_api::store::{DbStore, db::Origin};
++#[cfg(feature = "native-api")]
++use crate::state::StateDb;
++use honk_config::Config;
++use honk_config::diagnostic::DetailedDiagnostic;
++use honk_config::parser::{LoadedConfig, SourceLimits, SourceSnapshot};
++use serde::{Deserialize, Serialize};
++
++use crate::configuration::digest;
++
++const CONFIG_ROOT: &str = "/etc/honk";
++const CONFIG_ENTRY: &str = "/etc/honk/config.dae";
++const PREVIEW_ROOT: &str = "/tmp/honk-v2-import";
++const UPLOAD_ROOT: &str = "/tmp/honk-v2-upload";
++const UPLOAD_PATH: &str = "/tmp/honk-v2-upload/import.dae";
++const REQUEST_LIMIT: usize = 2 * 1024 * 1024 + 64 * 1024;
++const DAE_LIMIT: usize = 2 * 1024 * 1024;
++const SHARE_LINK_LIMIT: usize = 16 * 1024;
++const PREVIEW_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
++
++#[derive(Debug, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Request {
++    action: String,
++    #[serde(default)]
++    kind: Option<String>,
++    #[serde(default)]
++    mode: Option<String>,
++    #[serde(default)]
++    name: Option<String>,
++    #[serde(default)]
++    url: Option<String>,
++    #[serde(default)]
++    share_links: Option<String>,
++    #[serde(default)]
++    content: Option<String>,
++    #[serde(default)]
++    upload_sha256: Option<String>,
++    #[serde(default)]
++    preview_id: Option<String>,
++    #[serde(default)]
++    source_sha256: Option<String>,
++}
++
++#[derive(Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct PreviewRecord {
++    preview_id: String,
++    source_sha256: String,
++    candidate_sha256: String,
++    revision: Option<i64>,
++    kind: String,
++    source_count: usize,
++    changed_files: Vec<ChangedFile>,
++    imported_sections: Vec<String>,
++    excluded_sections: Vec<String>,
++    replaced_sections: Vec<(String, usize)>,
++    node_count: usize,
++    subscription_count: usize,
++    created_at: u64,
++    #[serde(default)]
++    runtime_validation: Option<RuntimeValidation>,
++}
++
++#[derive(Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct RuntimeValidation {
++    executed: Vec<String>,
++    skipped: Vec<String>,
++}
++
++#[derive(Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct ChangedFile {
++    name: String,
++    sha256: String,
++}
++
++struct Candidate {
++    loaded: LoadedConfig,
++    changed: Vec<(PathBuf, String)>,
++    kind: String,
++    imported_sections: Vec<String>,
++    excluded_sections: Vec<String>,
++    replaced_sections: Vec<(String, usize)>,
++}
++
++pub(crate) fn capabilities() {
++    println!(
++        "{}",
++        serde_json::json!({
++            "capabilities_version": 1,
++            "import_preview": true,
++            "import_apply": false,
++            "dae_upload_prepare": true,
++            "reset_business": true,
++            "offline_subscription_validation": true
++        })
++    );
++}
++
++pub(crate) fn run(cli: &crate::Cli) -> anyhow::Result<()> {
++    let mut input = Vec::new();
++    let read_result = std::io::stdin()
++        .take((REQUEST_LIMIT + 1) as u64)
++        .read_to_end(&mut input);
++    let result = read_result.map_err(|_| "invalid_request").and_then(|_| {
++        if input.len() > REQUEST_LIMIT {
++            return Err("request_too_large");
++        }
++        let mut request: Request = serde_json::from_slice(&input).map_err(|_| "invalid_request")?;
++        if request.action == "preview" && request.kind.as_deref() == Some("dae") {
++            if request.content.is_some() {
++                return Err("invalid_request");
++            }
++            let expected_sha256 = request.upload_sha256.as_deref().ok_or("invalid_request")?;
++            if expected_sha256.len() != 64
++                || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
++            {
++                return Err("invalid_request");
++            }
++            request.content = Some(read_uploaded_dae(expected_sha256)?);
++            request.upload_sha256 = None;
++        }
++        run_request(cli, request)
++    });
++    match result {
++        Ok(response) => println!("{response}"),
++        Err(message) => println!("{}", serde_json::json!({"ok": false, "message": message})),
++    }
++    Ok(())
++}
++
++fn run_request(cli: &crate::Cli, request: Request) -> Result<serde_json::Value, &'static str> {
++    if cli.config != Path::new(CONFIG_ENTRY) || cli.data_dir != Path::new(CONFIG_ROOT) {
++        return Err("unsupported_runtime_paths");
++    }
++    match request.action.as_str() {
++        "upload_prepare"
++            if request.kind.is_none()
++                && request.mode.is_none()
++                && request.name.is_none()
++                && request.url.is_none()
++                && request.share_links.is_none()
++                && request.content.is_none()
++                && request.upload_sha256.is_none()
++                && request.preview_id.is_none()
++                && request.source_sha256.is_none() =>
++        {
++            prepare_upload()
++        }
++        "preview" => {
++            validate_preview_shape(&request)?;
++            preview(request)
++        }
++        "mark_validated"
++            if request.kind.is_none()
++                && request.mode.is_none()
++                && request.name.is_none()
++                && request.url.is_none()
++                && request.share_links.is_none()
++                && request.content.is_none()
++                && request.upload_sha256.is_none() =>
++        {
++            mark_validated(request)
++        }
++        #[cfg(feature = "native-api")]
++        "apply"
++            if request.kind.is_none()
++                && request.mode.is_none()
++                && request.name.is_none()
++                && request.url.is_none()
++                && request.share_links.is_none()
++                && request.content.is_none()
++                && request.upload_sha256.is_none() =>
++        {
++            apply(request)
++        }
++        #[cfg(not(feature = "native-api"))]
++        "apply" => Err("unsupported_core"),
++        "verify" => verify(request),
++        "verify_validated" => verify_validated(request),
++        "discard" => discard(request),
++        _ => Err("invalid_action"),
++    }
++}
++
++fn validate_preview_shape(request: &Request) -> Result<(), &'static str> {
++    match (request.kind.as_deref(), request.mode.as_deref()) {
++        (Some("share_links"), None)
++            if request.name.is_none()
++                && request.url.is_none()
++                && request.content.is_none()
++                && request.preview_id.is_none()
++                && request.source_sha256.is_none()
++                && request.upload_sha256.is_none() =>
++        {
++            Ok(())
++        }
++        (Some("subscription"), None)
++            if request.name.is_some()
++                && request.url.is_some()
++                && request.share_links.is_none()
++                && request.content.is_none()
++                && request.preview_id.is_none()
++                && request.source_sha256.is_none()
++                && request.upload_sha256.is_none() =>
++        {
++            Ok(())
++        }
++        (Some("dae"), Some("replace"))
++            if request.name.is_none()
++                && request.url.is_none()
++                && request.share_links.is_none()
++                && request.content.is_some()
++                && request.preview_id.is_none()
++                && request.source_sha256.is_none()
++                && request.upload_sha256.is_none() =>
++        {
++            Ok(())
++        }
++        _ => Err("invalid_request"),
++    }
++}
++
++fn preview(request: Request) -> Result<serde_json::Value, &'static str> {
++    let root = Path::new(CONFIG_ROOT);
++    let entry = Path::new(CONFIG_ENTRY);
++    let current = load_sources(entry, &HashMap::new())?;
++    let source_sha256 = tree_sha256(root, &current.sources)?;
++    let revision = active_revision(Path::new(CONFIG_ROOT))?;
++    let candidate = build_candidate(&current, &request)?;
++    candidate
++        .loaded
++        .config
++        .validate_assembled()
++        .map_err(|_| "candidate_rejected")?;
++    let reloaded = load_sources(entry, &HashMap::new())?;
++    if tree_sha256(root, &reloaded.sources)? != source_sha256
++        || active_revision(Path::new(CONFIG_ROOT))? != revision
++    {
++        return Err("source_changed");
++    }
++
++    let preview_id = uuid::Uuid::new_v4().simple().to_string();
++    let preview_root = Path::new(PREVIEW_ROOT);
++    private_directory(preview_root)?;
++    remove_expired(preview_root);
++    let preview_dir = preview_root.join(&preview_id);
++    fs::create_dir(&preview_dir).map_err(|_| "preview_storage_unavailable")?;
++    fs::set_permissions(&preview_dir, fs::Permissions::from_mode(0o700))
++        .map_err(|_| "preview_storage_unavailable")?;
++    let files_root = preview_dir.join("files");
++    fs::create_dir(&files_root).map_err(|_| "preview_storage_unavailable")?;
++    fs::set_permissions(&files_root, fs::Permissions::from_mode(0o700))
++        .map_err(|_| "preview_storage_unavailable")?;
++
++    let mut changed_files = Vec::new();
++    for (path, content) in &candidate.changed {
++        let name = safe_source_name(root, path)?;
++        let file_path = preview_dir.join("files").join(&name);
++        create_private_parents(preview_dir.join("files"), Path::new(&name))?;
++        let mut file = OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .mode(0o600)
++            .open(&file_path)
++            .map_err(|_| "preview_storage_unavailable")?;
++        file.write_all(content.as_bytes())
++            .and_then(|()| file.sync_all())
++            .map_err(|_| "preview_storage_unavailable")?;
++        changed_files.push(ChangedFile {
++            name,
++            sha256: digest(content.as_bytes()),
++        });
++    }
++    write_candidate_tree(
++        &preview_dir.join("candidate/etc/honk"),
++        root,
++        &candidate.loaded.sources,
++    )?;
++    let candidate_sha256 = tree_sha256(root, &candidate.loaded.sources)?;
++    let record = PreviewRecord {
++        preview_id: preview_id.clone(),
++        source_sha256: source_sha256.clone(),
++        candidate_sha256,
++        revision,
++        kind: candidate.kind,
++        source_count: current.sources.len(),
++        changed_files,
++        imported_sections: candidate.imported_sections,
++        excluded_sections: candidate.excluded_sections,
++        replaced_sections: candidate.replaced_sections,
++        node_count: candidate.loaded.config.nodes.len(),
++        subscription_count: candidate.loaded.config.subscriptions.len(),
++        created_at: unix_time(),
++        runtime_validation: None,
++    };
++    let record_bytes = serde_json::to_vec(&record).map_err(|_| "preview_storage_unavailable")?;
++    let mut record_file = OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .mode(0o600)
++        .open(preview_dir.join("record.json"))
++        .map_err(|_| "preview_storage_unavailable")?;
++    record_file
++        .write_all(&record_bytes)
++        .and_then(|()| record_file.sync_all())
++        .map_err(|_| "preview_storage_unavailable")?;
++    File::open(&preview_dir)
++        .and_then(|directory| directory.sync_all())
++        .map_err(|_| "preview_storage_unavailable")?;
++
++    Ok(preview_response(&record))
++}
++
++fn preview_response(record: &PreviewRecord) -> serde_json::Value {
++    let mock = match &record.runtime_validation {
++        Some(validation) => serde_json::json!({
++            "state": "passed",
++            "executed": &validation.executed,
++            "skipped": &validation.skipped,
++        }),
++        None => serde_json::json!({
++            "state": "skipped",
++            "reason": "isolated_runtime_not_run",
++        }),
++    };
++    serde_json::json!({
++        "ok": true,
++        "message": "preview_ready",
++        "preview_id": &record.preview_id,
++        "source_sha256": &record.source_sha256,
++        "revision": record.revision,
++        "source_count": record.source_count,
++        "changed_files": record.changed_files.len(),
++        "imported_sections": &record.imported_sections,
++        "excluded_sections": &record.excluded_sections,
++        "replaced_sections": &record.replaced_sections,
++        "node_count": record.node_count,
++        "subscription_count": record.subscription_count,
++        "parse": {"state": "passed"},
++        "config": {"state": "passed"},
++        "mock": mock,
++        "runtime": {"state": "not_applied"}
++    })
++}
++
++fn mark_validated(request: Request) -> Result<serde_json::Value, &'static str> {
++    let preview_id = request.preview_id.as_deref().ok_or("invalid_request")?;
++    if !valid_id(preview_id) {
++        return Err("invalid_preview_id");
++    }
++    let mut record = read_record(preview_id)?;
++    if request.source_sha256.as_deref() != Some(record.source_sha256.as_str()) {
++        return Err("source_changed");
++    }
++    verify_current_source(&record)?;
++    let candidate_root = preview_dir(preview_id).join("candidate/etc/honk");
++    let candidate = load_sources(&candidate_root.join("config.dae"), &HashMap::new())?;
++    if tree_sha256(&candidate_root, &candidate.sources)? != record.candidate_sha256 {
++        return Err("preview_corrupt");
++    }
++    if record.runtime_validation.is_none() {
++        record.runtime_validation = Some(RuntimeValidation {
++            executed: vec![
++                "parser".into(),
++                "assembled-config".into(),
++                "mock-backend-startup".into(),
++                "loopback-listeners-ready".into(),
++            ],
++            skipped: vec![
++                "subscription-fetch".into(),
++                "ECS-resolution".into(),
++                "health-and-node-probes".into(),
++                "geodata-refresh".into(),
++                "TCP-accept".into(),
++                "UDP-ingress".into(),
++                "kernel-network-setup".into(),
++                "external-network-reachability".into(),
++            ],
++        });
++        write_record(preview_id, &record)?;
++    }
++    Ok(preview_response(&record))
++}
++
++fn write_candidate_tree(
++    candidate_root: &Path,
++    source_root: &Path,
++    sources: &[SourceSnapshot],
++) -> Result<(), &'static str> {
++    fs::create_dir_all(candidate_root).map_err(|_| "preview_storage_unavailable")?;
++    fs::set_permissions(candidate_root, fs::Permissions::from_mode(0o700))
++        .map_err(|_| "preview_storage_unavailable")?;
++    for source in sources {
++        let name = safe_source_name(source_root, &source.path)?;
++        create_private_parents(candidate_root.to_path_buf(), Path::new(&name))?;
++        let path = candidate_root.join(&name);
++        let mut file = OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .mode(0o600)
++            .open(path)
++            .map_err(|_| "preview_storage_unavailable")?;
++        file.write_all(source.content.as_bytes())
++            .and_then(|()| file.sync_all())
++            .map_err(|_| "preview_storage_unavailable")?;
++    }
++    File::open(candidate_root)
++        .and_then(|directory| directory.sync_all())
++        .map_err(|_| "preview_storage_unavailable")?;
++    Ok(())
++}
++
++fn build_candidate(current: &LoadedConfig, request: &Request) -> Result<Candidate, &'static str> {
++    use honk_config::parser::source_edit::{
++        SubscriptionOptions, append_share_links_source, append_subscription_sources,
++        replace_business_sections_sources,
++    };
++
++    let root = current.sources.first().ok_or("invalid_current_config")?;
++    let (kind, edits, imported_sections, excluded_sections, replaced_sections) =
++        match (request.kind.as_deref(), request.mode.as_deref()) {
++            (Some("share_links"), None) => {
++                let raw = request.share_links.as_deref().ok_or("invalid_request")?;
++                if raw.len() > SHARE_LINK_LIMIT {
++                    return Err("share_links_too_large");
++                }
++                let links = raw
++                    .lines()
++                    .map(str::trim)
++                    .filter(|line| !line.is_empty())
++                    .map(str::to_owned)
++                    .collect::<Vec<_>>();
++                let (content, names) = append_share_links_source(&current.sources, &links)
++                    .map_err(|_| "share_links_invalid_or_conflicting")?;
++                (
++                    "share_links".to_owned(),
++                    vec![(root.path.clone(), content)],
++                    names,
++                    Vec::new(),
++                    Vec::new(),
++                )
++            }
++            (Some("subscription"), None) => {
++                let name = request.name.as_deref().ok_or("invalid_request")?;
++                let url = request.url.as_deref().ok_or("invalid_request")?;
++                if name.trim().is_empty() || name.len() > 256 || url.len() > 8192 {
++                    return Err("invalid_subscription");
++                }
++                let content = append_subscription_sources(
++                    &current.sources,
++                    name,
++                    url,
++                    &SubscriptionOptions::default(),
++                )
++                .map_err(|_| "subscription_invalid_or_conflicting")?;
++                (
++                    "subscription".to_owned(),
++                    vec![(root.path.clone(), content)],
++                    vec!["subscription".to_owned()],
++                    Vec::new(),
++                    Vec::new(),
++                )
++            }
++            (Some("dae"), Some("replace")) => {
++                let content = request.content.as_deref().ok_or("invalid_request")?;
++                if content.len() > DAE_LIMIT {
++                    return Err("dae_too_large");
++                }
++                let readonly = [PathBuf::from("/etc/honk/system.dae")];
++                let (edits, imported, excluded, replaced) =
++                    replace_business_sections_sources(&current.sources, &readonly, content)
++                        .map_err(|_| "dae_invalid_or_unsupported")?;
++                (
++                    "dae_replace".to_owned(),
++                    edits,
++                    imported,
++                    excluded,
++                    replaced,
++                )
++            }
++            _ => return Err("invalid_request"),
++        };
++
++    let mut overlay = current
++        .sources
++        .iter()
++        .map(|source| (source.path.clone(), Arc::clone(&source.content)))
++        .collect::<HashMap<_, _>>();
++    for (path, content) in &edits {
++        overlay.insert(path.clone(), Arc::from(content.as_str()));
++    }
++    let mut diagnostics: Vec<DetailedDiagnostic> = Vec::new();
++    let loaded = Config::from_dae_file_with_sources(
++        Path::new(CONFIG_ENTRY),
++        &overlay,
++        SourceLimits::DEFAULT,
++        &mut diagnostics,
++    )
++    .map_err(|_| "candidate_invalid")?;
++    loaded
++        .config
++        .validate_assembled()
++        .map_err(|_| "candidate_invalid")?;
++    let originals = current
++        .sources
++        .iter()
++        .map(|source| (source.path.clone(), source.content.as_ref()))
++        .collect::<HashMap<_, _>>();
++    let changed = loaded
++        .sources
++        .iter()
++        .filter(|source| {
++            originals
++                .get(&source.path)
++                .is_some_and(|old| *old != source.content.as_ref())
++        })
++        .map(|source| (source.path.clone(), source.content.to_string()))
++        .collect();
++    Ok(Candidate {
++        loaded,
++        changed,
++        kind,
++        imported_sections,
++        excluded_sections,
++        replaced_sections,
++    })
++}
++
++fn verify(request: Request) -> Result<serde_json::Value, &'static str> {
++    if request.kind.is_some()
++        || request.mode.is_some()
++        || request.name.is_some()
++        || request.url.is_some()
++        || request.share_links.is_some()
++        || request.content.is_some()
++        || request.upload_sha256.is_some()
++    {
++        return Err("invalid_request");
++    }
++    let preview_id = request.preview_id.as_deref().ok_or("invalid_request")?;
++    if !valid_id(preview_id) {
++        return Err("invalid_preview_id");
++    }
++    let record = read_record(preview_id)?;
++    if request.source_sha256.as_deref() != Some(record.source_sha256.as_str()) {
++        return Err("source_changed");
++    }
++    verify_current_source(&record)?;
++    for changed in &record.changed_files {
++        let files_root = preview_dir(preview_id).join("files");
++        validate_private_parents(&files_root, Path::new(&changed.name))?;
++        let path = files_root.join(&changed.name);
++        let metadata = fs::symlink_metadata(&path).map_err(|_| "preview_missing")?;
++        if !metadata.file_type().is_file()
++            || metadata.uid() != 0
++            || metadata.mode() & 0o777 != 0o600
++        {
++            return Err("preview_unsafe");
++        }
++        let bytes = fs::read(path).map_err(|_| "preview_missing")?;
++        if digest(&bytes) != changed.sha256 {
++            return Err("preview_corrupt");
++        }
++    }
++    Ok(
++        serde_json::json!({"ok": true, "message": "source_current", "source_sha256": record.source_sha256, "revision": record.revision}),
++    )
++}
++
++fn verify_validated(request: Request) -> Result<serde_json::Value, &'static str> {
++    let preview_id = request.preview_id.clone().ok_or("invalid_request")?;
++    if !valid_id(&preview_id) {
++        return Err("invalid_preview_id");
++    }
++    let verified = verify(request)?;
++    let record = read_record(&preview_id)?;
++    if record.runtime_validation.is_none() {
++        return Err("candidate_runtime_unvalidated");
++    }
++    Ok(verified)
++}
++
++fn verify_current_source(record: &PreviewRecord) -> Result<(), &'static str> {
++    let current = load_sources(Path::new(CONFIG_ENTRY), &HashMap::new())?;
++    if tree_sha256(Path::new(CONFIG_ROOT), &current.sources)? != record.source_sha256
++        || active_revision(Path::new(CONFIG_ROOT))? != record.revision
++    {
++        return Err("source_changed");
++    }
++    Ok(())
++}
++
++fn write_record(preview_id: &str, record: &PreviewRecord) -> Result<(), &'static str> {
++    if !valid_id(preview_id) || record.preview_id != preview_id {
++        return Err("invalid_preview_id");
++    }
++    validate_private_directory(Path::new(PREVIEW_ROOT))?;
++    let directory = preview_dir(preview_id);
++    validate_private_directory(&directory)?;
++    let record_path = directory.join("record.json");
++    let metadata = fs::symlink_metadata(&record_path).map_err(|_| "preview_missing")?;
++    if !metadata.file_type().is_file() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o600 {
++        return Err("preview_unsafe");
++    }
++    let temporary = directory.join(format!("record.{}.new", uuid::Uuid::new_v4().simple()));
++    let mut file = OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .mode(0o600)
++        .open(&temporary)
++        .map_err(|_| "preview_storage_unavailable")?;
++    file.write_all(&serde_json::to_vec(record).map_err(|_| "preview_storage_unavailable")?)
++        .and_then(|()| file.sync_all())
++        .map_err(|_| "preview_storage_unavailable")?;
++    fs::rename(&temporary, &record_path).map_err(|_| "preview_storage_unavailable")?;
++    File::open(directory)
++        .and_then(|directory| directory.sync_all())
++        .map_err(|_| "preview_storage_unavailable")
++}
++
++#[cfg(feature = "native-api")]
++fn apply(request: Request) -> Result<serde_json::Value, &'static str> {
++    let preview_id = request.preview_id.as_deref().ok_or("invalid_request")?;
++    if !valid_id(preview_id) {
++        return Err("invalid_preview_id");
++    }
++    let record = read_record(preview_id)?;
++    if request.source_sha256.as_deref() != Some(record.source_sha256.as_str()) {
++        return Err("source_changed");
++    }
++    if record.runtime_validation.is_none() {
++        return Err("candidate_runtime_unvalidated");
++    }
++    let entry = Path::new(CONFIG_ENTRY);
++    let root = Path::new(CONFIG_ROOT);
++    let current = load_sources(entry, &HashMap::new())?;
++    if tree_sha256(root, &current.sources)? != record.source_sha256
++        || active_revision(root)? != record.revision
++    {
++        return Err("source_changed");
++    }
++    let originals = current
++        .sources
++        .iter()
++        .map(|source| (safe_source_name(root, &source.path).ok(), source))
++        .collect::<Vec<_>>();
++    let mut overlay = current
++        .sources
++        .iter()
++        .map(|source| (source.path.clone(), Arc::clone(&source.content)))
++        .collect::<HashMap<_, _>>();
++    let mut edits = Vec::new();
++    let mut seen = std::collections::HashSet::new();
++    for changed in &record.changed_files {
++        if !seen.insert(changed.name.as_str()) {
++            return Err("preview_corrupt");
++        }
++        validate_private_parents(
++            &preview_dir(preview_id).join("files"),
++            Path::new(&changed.name),
++        )?;
++        let source = originals
++            .iter()
++            .find(|(name, _)| name.as_deref() == Some(changed.name.as_str()))
++            .map(|(_, source)| *source)
++            .ok_or("preview_corrupt")?;
++        let path = preview_dir(preview_id).join("files").join(&changed.name);
++        let metadata = fs::symlink_metadata(&path).map_err(|_| "preview_missing")?;
++        if !metadata.file_type().is_file()
++            || metadata.uid() != 0
++            || metadata.mode() & 0o777 != 0o600
++        {
++            return Err("preview_unsafe");
++        }
++        let bytes = fs::read(&path).map_err(|_| "preview_missing")?;
++        if digest(&bytes) != changed.sha256 {
++            return Err("preview_corrupt");
++        }
++        let content = String::from_utf8(bytes).map_err(|_| "preview_corrupt")?;
++        overlay.insert(source.path.clone(), Arc::from(content.as_str()));
++        edits.push((source.path.clone(), source.content.to_string(), content));
++    }
++    let mut diagnostics: Vec<DetailedDiagnostic> = Vec::new();
++    let loaded = Config::from_dae_file_with_sources(
++        entry,
++        &overlay,
++        SourceLimits::DEFAULT,
++        &mut diagnostics,
++    )
++    .map_err(|_| "candidate_invalid")?;
++    loaded
++        .config
++        .validate_assembled()
++        .map_err(|_| "candidate_invalid")?;
++    require_apply_journal()?;
++    let state = StateDb::open_exclusive_for_admin(root).map_err(|_| "state_in_use")?;
++    let db = DbStore::open(Arc::new(state), entry).map_err(|_| "state_unavailable")?;
++    let head = db.head().map_err(|_| "state_unavailable")?;
++    if head != record.revision {
++        return Err("source_changed");
++    }
++    let pending = if head.is_some() {
++        Some(
++            db.stage(&loaded.sources, "luci", Origin::Import)
++                .map_err(|_| "candidate_invalid")?,
++        )
++    } else {
++        None
++    };
++    let candidate_sha256 = tree_sha256(root, &loaded.sources)?;
++    for (path, previous, content) in &edits {
++        replace_source(path, previous, content)?;
++    }
++    let applied = load_sources(entry, &HashMap::new())?;
++    if tree_sha256(root, &applied.sources)? != candidate_sha256 {
++        return Err("source_changed");
++    }
++    let committed = match pending {
++        Some(pending) => db.promote(pending).map_err(|_| "state_commit_failed")?,
++        None => db
++            .initialize_import(&applied.sources, "luci")
++            .map_err(|_| "state_commit_failed")?,
++    };
++    Ok(serde_json::json!({
++        "ok": true,
++        "message": "import_applied",
++        "revision": committed,
++        "runtime": {"state": "skipped", "reason": "service_start_validates_runtime"}
++    }))
++}
++
++#[cfg(feature = "native-api")]
++fn require_apply_journal() -> Result<(), &'static str> {
++    let directory = Path::new("/etc/.honk-maintenance");
++    let directory_metadata =
++        fs::symlink_metadata(directory).map_err(|_| "apply_journal_missing")?;
++    if !directory_metadata.file_type().is_dir()
++        || directory_metadata.uid() != 0
++        || directory_metadata.mode() & 0o777 != 0o700
++    {
++        return Err("apply_journal_invalid");
++    }
++    let path = directory.join("journal");
++    let mut file = OpenOptions::new()
++        .read(true)
++        .custom_flags(libc::O_NOFOLLOW)
++        .open(&path)
++        .map_err(|_| "apply_journal_missing")?;
++    let metadata = file.metadata().map_err(|_| "apply_journal_invalid")?;
++    if !metadata.is_file()
++        || metadata.uid() != 0
++        || metadata.mode() & 0o777 != 0o600
++        || metadata.len() > 1024
++    {
++        return Err("apply_journal_invalid");
++    }
++    let mut content = String::new();
++    file.read_to_string(&mut content)
++        .map_err(|_| "apply_journal_invalid")?;
++    let operation = content
++        .lines()
++        .find_map(|line| line.strip_prefix("operation="));
++    let phase = content.lines().find_map(|line| line.strip_prefix("phase="));
++    let txn_id = content
++        .lines()
++        .find_map(|line| line.strip_prefix("txn_id="));
++    if operation != Some("import_apply")
++        || phase != Some("old_moved")
++        || !txn_id.is_some_and(valid_id)
++    {
++        return Err("apply_journal_invalid");
++    }
++    Ok(())
++}
++
++#[cfg(feature = "native-api")]
++fn replace_source(path: &Path, expected: &str, content: &str) -> Result<(), &'static str> {
++    let parent = validate_source_parent(path)?;
++    let metadata = fs::symlink_metadata(path).map_err(|_| "source_unavailable")?;
++    if !metadata.file_type().is_file() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
++        return Err("source_unsafe");
++    }
++    let mut original = OpenOptions::new()
++        .read(true)
++        .custom_flags(libc::O_NOFOLLOW)
++        .open(path)
++        .map_err(|_| "source_unavailable")?;
++    let opened = original.metadata().map_err(|_| "source_unavailable")?;
++    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
++        return Err("source_changed");
++    }
++    let mut bytes = Vec::new();
++    original
++        .read_to_end(&mut bytes)
++        .map_err(|_| "source_unavailable")?;
++    if bytes != expected.as_bytes() {
++        return Err("source_changed");
++    }
++    let temporary = parent.join(format!(
++        ".honk-import-{}.tmp",
++        uuid::Uuid::new_v4().simple()
++    ));
++    let mut output = OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .mode(0o600)
++        .open(&temporary)
++        .map_err(|_| "source_write_failed")?;
++    if output
++        .write_all(content.as_bytes())
++        .and_then(|()| output.sync_all())
++        .is_err()
++    {
++        let _ = fs::remove_file(&temporary);
++        return Err("source_write_failed");
++    }
++    let latest = fs::symlink_metadata(path).map_err(|_| "source_unavailable")?;
++    if latest.dev() != metadata.dev() || latest.ino() != metadata.ino() {
++        let _ = fs::remove_file(temporary);
++        return Err("source_changed");
++    }
++    if fs::rename(&temporary, path).is_err() {
++        let _ = fs::remove_file(&temporary);
++        return Err("source_write_failed");
++    }
++    File::open(parent)
++        .and_then(|directory| directory.sync_all())
++        .map_err(|_| "source_write_failed")
++}
++
++#[cfg(feature = "native-api")]
++fn validate_source_parent(path: &Path) -> Result<PathBuf, &'static str> {
++    let relative = path
++        .strip_prefix(CONFIG_ROOT)
++        .map_err(|_| "source_path_unsafe")?;
++    let mut components = relative.components().peekable();
++    let mut current = PathBuf::from(CONFIG_ROOT);
++    let root_metadata = fs::symlink_metadata(&current).map_err(|_| "source_unavailable")?;
++    if !root_metadata.file_type().is_dir()
++        || root_metadata.uid() != 0
++        || root_metadata.mode() & 0o022 != 0
++    {
++        return Err("source_unsafe");
++    }
++    while let Some(component) = components.next() {
++        let Component::Normal(name) = component else {
++            return Err("source_path_unsafe");
++        };
++        if components.peek().is_none() {
++            break;
++        }
++        current.push(name);
++        let metadata = fs::symlink_metadata(&current).map_err(|_| "source_unavailable")?;
++        if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
++            return Err("source_unsafe");
++        }
++    }
++    Ok(current)
++}
++
++fn discard(request: Request) -> Result<serde_json::Value, &'static str> {
++    let preview_id = request.preview_id.as_deref().ok_or("invalid_request")?;
++    if !valid_id(preview_id) {
++        return Err("invalid_preview_id");
++    }
++    let directory = preview_dir(preview_id);
++    let metadata = fs::symlink_metadata(&directory).map_err(|_| "preview_missing")?;
++    if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o700 {
++        return Err("preview_unsafe");
++    }
++    let files = directory.join("files");
++    let metadata = fs::symlink_metadata(&files).map_err(|_| "preview_missing")?;
++    if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o700 {
++        return Err("preview_unsafe");
++    }
++    fs::remove_dir_all(directory).map_err(|_| "preview_storage_unavailable")?;
++    Ok(serde_json::json!({"ok": true, "message": "preview_discarded"}))
++}
++
++fn prepare_upload() -> Result<serde_json::Value, &'static str> {
++    let root = Path::new(UPLOAD_ROOT);
++    private_directory(root)?;
++    let path = Path::new(UPLOAD_PATH);
++    match fs::symlink_metadata(path) {
++        Ok(metadata) => {
++            if !metadata.file_type().is_file()
++                || metadata.uid() != 0
++                || metadata.mode() & 0o777 != 0o600
++            {
++                return Err("dae_upload_unsafe");
++            }
++            fs::remove_file(path).map_err(|_| "dae_upload_unavailable")?;
++        }
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
++        Err(_) => return Err("dae_upload_unavailable"),
++    }
++    File::open(root)
++        .and_then(|directory| directory.sync_all())
++        .map_err(|_| "dae_upload_unavailable")?;
++    Ok(serde_json::json!({"ok": true, "message": "upload_ready"}))
++}
++
++fn load_sources(
++    entry: &Path,
++    overlay: &HashMap<PathBuf, Arc<str>>,
++) -> Result<LoadedConfig, &'static str> {
++    Config::from_dae_file_with_sources(entry, overlay, SourceLimits::DEFAULT, &mut Vec::new())
++        .map_err(|_| "current_config_invalid")
++}
++
++fn read_uploaded_dae(expected_sha256: &str) -> Result<String, &'static str> {
++    let upload_root = Path::new(UPLOAD_ROOT);
++    validate_private_directory(upload_root).map_err(|_| "dae_upload_unsafe")?;
++    let root_before = fs::symlink_metadata(upload_root).map_err(|_| "dae_upload_unsafe")?;
++    let path = Path::new(UPLOAD_PATH);
++    let file = OpenOptions::new()
++        .read(true)
++        .custom_flags(libc::O_NOFOLLOW)
++        .open(path)
++        .map_err(|_| "dae_upload_unavailable")?;
++    let metadata = file.metadata().map_err(|_| "dae_upload_unavailable")?;
++    if !metadata.is_file()
++        || metadata.uid() != 0
++        || metadata.mode() & 0o077 != 0
++        || metadata.len() > DAE_LIMIT as u64
++    {
++        return Err("dae_upload_invalid");
++    }
++    let mut bytes = Vec::with_capacity(metadata.len() as usize);
++    file.take((DAE_LIMIT + 1) as u64)
++        .read_to_end(&mut bytes)
++        .map_err(|_| "dae_upload_invalid")?;
++    let live = fs::symlink_metadata(path).map_err(|_| "dae_upload_unavailable")?;
++    let root_live = fs::symlink_metadata(upload_root).map_err(|_| "dae_upload_unsafe")?;
++    if live.dev() != metadata.dev()
++        || live.ino() != metadata.ino()
++        || root_live.dev() != root_before.dev()
++        || root_live.ino() != root_before.ino()
++        || root_live.uid() != 0
++        || root_live.mode() & 0o777 != 0o700
++        || !root_live.file_type().is_dir()
++    {
++        return Err("dae_upload_changed");
++    }
++    fs::remove_file(path).map_err(|_| "dae_upload_unavailable")?;
++    if bytes.len() > DAE_LIMIT {
++        return Err("dae_too_large");
++    }
++    if digest(&bytes) != expected_sha256 {
++        return Err("dae_upload_changed");
++    }
++    String::from_utf8(bytes).map_err(|_| "dae_upload_invalid")
++}
++
++fn tree_sha256(root: &Path, sources: &[SourceSnapshot]) -> Result<String, &'static str> {
++    let rows = sources
++        .iter()
++        .map(|source| {
++            Ok((
++                safe_source_name(root, &source.path)?,
++                digest(source.content.as_bytes()),
++            ))
++        })
++        .collect::<Result<Vec<_>, &'static str>>()?;
++    serde_json::to_vec(&rows)
++        .map(|bytes| digest(&bytes))
++        .map_err(|_| "source_hash_failed")
++}
++
++fn active_revision(root: &Path) -> Result<Option<i64>, &'static str> {
++    use rusqlite::{Connection, OpenFlags, OptionalExtension};
++
++    let state_dir = root.join("state");
++    let database = state_dir.join("honk.db");
++    let Ok(directory) = fs::symlink_metadata(&state_dir) else {
++        return Ok(None);
++    };
++    if !directory.file_type().is_dir() || directory.uid() != 0 || directory.mode() & 0o777 != 0o700
++    {
++        return Err("state_unsafe");
++    }
++    let Ok(metadata) = fs::symlink_metadata(&database) else {
++        return Ok(None);
++    };
++    if !metadata.file_type().is_file() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o600 {
++        return Err("state_unsafe");
++    }
++    let connection = Connection::open_with_flags(
++        &database,
++        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
++    )
++    .map_err(|_| "state_unavailable")?;
++    let application_id: i64 = connection
++        .pragma_query_value(None, "application_id", |row| row.get(0))
++        .map_err(|_| "state_unsupported")?;
++    let schema_version: i64 = connection
++        .pragma_query_value(None, "user_version", |row| row.get(0))
++        .map_err(|_| "state_unsupported")?;
++    if application_id != crate::state::APPLICATION_ID
++        || schema_version != crate::state::SCHEMA_VERSION
++    {
++        return Err("state_unsupported");
++    }
++    let revision_count: i64 = connection
++        .query_row("SELECT count(*) FROM revision", [], |row| row.get(0))
++        .map_err(|_| "state_unsupported")?;
++    let active = connection
++        .query_row("SELECT active FROM head WHERE id=1", [], |row| row.get(0))
++        .optional()
++        .map_err(|_| "state_unsupported")?;
++    if (revision_count > 0) != active.is_some() {
++        return Err("state_corrupt");
++    }
++    Ok(active)
++}
++
++fn safe_source_name(root: &Path, path: &Path) -> Result<String, &'static str> {
++    let relative = path.strip_prefix(root).map_err(|_| "source_outside_root")?;
++    if relative.as_os_str().is_empty()
++        || relative
++            .components()
++            .any(|component| !matches!(component, Component::Normal(_)))
++    {
++        return Err("source_path_unsafe");
++    }
++    let name = relative.to_str().ok_or("source_path_unsafe")?;
++    if name
++        .bytes()
++        .any(|byte| byte.is_ascii_control() || byte == b'\\')
++    {
++        return Err("source_path_unsafe");
++    }
++    Ok(name.to_owned())
++}
++
++fn preview_dir(preview_id: &str) -> PathBuf {
++    Path::new(PREVIEW_ROOT).join(preview_id)
++}
++
++fn read_record(preview_id: &str) -> Result<PreviewRecord, &'static str> {
++    let root = Path::new(PREVIEW_ROOT);
++    let metadata = fs::symlink_metadata(root).map_err(|_| "preview_missing")?;
++    if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o700 {
++        return Err("preview_unsafe");
++    }
++    let directory = preview_dir(preview_id);
++    let metadata = fs::symlink_metadata(&directory).map_err(|_| "preview_missing")?;
++    if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o700 {
++        return Err("preview_unsafe");
++    }
++    let path = directory.join("record.json");
++    let metadata = fs::symlink_metadata(&path).map_err(|_| "preview_missing")?;
++    if !metadata.file_type().is_file() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o600 {
++        return Err("preview_unsafe");
++    }
++    let record: PreviewRecord =
++        serde_json::from_slice(&fs::read(path).map_err(|_| "preview_missing")?)
++            .map_err(|_| "preview_corrupt")?;
++    if record.preview_id != preview_id
++        || unix_time().saturating_sub(record.created_at) > PREVIEW_TTL.as_secs()
++    {
++        return Err("preview_expired");
++    }
++    Ok(record)
++}
++
++fn private_directory(path: &Path) -> Result<(), &'static str> {
++    match fs::create_dir(path) {
++        Ok(()) => fs::set_permissions(path, fs::Permissions::from_mode(0o700))
++            .map_err(|_| "preview_storage_unavailable")?,
++        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
++        Err(_) => return Err("preview_storage_unavailable"),
++    }
++    validate_private_directory(path)
++}
++
++fn validate_private_directory(path: &Path) -> Result<(), &'static str> {
++    let metadata = fs::symlink_metadata(path).map_err(|_| "preview_storage_unavailable")?;
++    if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o700 {
++        return Err("preview_storage_unsafe");
++    }
++    Ok(())
++}
++
++fn create_private_parents(root: PathBuf, relative: &Path) -> Result<(), &'static str> {
++    let mut current = root;
++    for component in relative.parent().into_iter().flat_map(Path::components) {
++        let Component::Normal(component) = component else {
++            return Err("source_path_unsafe");
++        };
++        current.push(component);
++        match fs::create_dir(&current) {
++            Ok(()) => fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
++                .map_err(|_| "preview_storage_unavailable")?,
++            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
++            Err(_) => return Err("preview_storage_unavailable"),
++        }
++        let metadata = fs::symlink_metadata(&current).map_err(|_| "preview_storage_unavailable")?;
++        if !metadata.file_type().is_dir() || metadata.uid() != 0 || metadata.mode() & 0o777 != 0o700
++        {
++            return Err("preview_storage_unsafe");
++        }
++    }
++    Ok(())
++}
++
++fn validate_private_parents(root: &Path, relative: &Path) -> Result<(), &'static str> {
++    validate_private_directory(root)?;
++    let mut current = root.to_path_buf();
++    for component in relative.parent().into_iter().flat_map(Path::components) {
++        let Component::Normal(component) = component else {
++            return Err("source_path_unsafe");
++        };
++        current.push(component);
++        validate_private_directory(&current)?;
++    }
++    Ok(())
++}
++
++fn remove_expired(root: &Path) {
++    let Ok(entries) = fs::read_dir(root) else {
++        return;
++    };
++    for entry in entries.flatten() {
++        let path = entry.path();
++        let Ok(metadata) = fs::symlink_metadata(&path) else {
++            continue;
++        };
++        if !metadata.file_type().is_dir()
++            || metadata.uid() != 0
++            || metadata.mode() & 0o777 != 0o700
++            || metadata
++                .modified()
++                .ok()
++                .and_then(|time| time.elapsed().ok())
++                .is_none_or(|age| age <= PREVIEW_TTL)
++        {
++            continue;
++        }
++        let _ = fs::remove_dir_all(path);
++    }
++}
++
++fn valid_id(value: &str) -> bool {
++    value.len() == 32
++        && value
++            .bytes()
++            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
++}
++
++fn unix_time() -> u64 {
++    std::time::SystemTime::now()
++        .duration_since(std::time::UNIX_EPOCH)
++        .map_or(0, |time| time.as_secs())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn request_rejects_arbitrary_paths_sql_and_unknown_fields() {
++        for input in [
++            r#"{"action":"preview","kind":"dae","path":"/etc/passwd"}"#,
++            r#"{"action":"preview","kind":"dae","sql":"DELETE FROM admin"}"#,
++            r#"{"action":"preview","kind":"dae","unknown":true}"#,
++        ] {
++            assert!(serde_json::from_str::<Request>(input).is_err());
++        }
++    }
++
++    #[test]
++    fn preview_shape_rejects_path_fields_and_requires_fixed_import_fields() {
++        let valid = Request {
++            action: "preview".into(),
++            kind: Some("subscription".into()),
++            mode: None,
++            name: Some("feed".into()),
++            url: Some("https://example.invalid/list".into()),
++            share_links: None,
++            content: None,
++            upload_sha256: None,
++            preview_id: None,
++            source_sha256: None,
++        };
++        assert!(validate_preview_shape(&valid).is_ok());
++
++        let mut with_share_links = valid;
++        with_share_links.share_links = Some("file:///etc/passwd".into());
++        assert!(validate_preview_shape(&with_share_links).is_err());
++    }
++
++    #[test]
++    fn request_limits_match_the_advertised_transport_bounds() {
++        assert_eq!(SHARE_LINK_LIMIT, 16 * 1024);
++        assert_eq!(DAE_LIMIT, 2 * 1024 * 1024);
++        assert!(REQUEST_LIMIT > DAE_LIMIT);
++    }
++}
+diff --git a/crates/honk-core/src/control/bootstrap.rs b/crates/honk-core/src/control/bootstrap.rs
+index 276cb15..75384fc 100644
+--- a/crates/honk-core/src/control/bootstrap.rs
++++ b/crates/honk-core/src/control/bootstrap.rs
+@@ -52,6 +52,7 @@ impl ControlPlane {
+             dns_upstream_pool,
+             ResourceBudget::for_nofile(MAX_EFFECTIVE_NOFILE),
+             Arc::default(),
++            crate::ValidationMode::Normal,
+         )
+     }
+ 
+@@ -65,6 +66,7 @@ impl ControlPlane {
+         dns_upstream_pool: Arc<crate::dns::upstream_pool::UpstreamPool>,
+         resource_budget: ResourceBudget,
+         degradations: Arc<crate::degradations::Degradations>,
++        validation_mode: crate::ValidationMode,
+     ) -> anyhow::Result<Self> {
+         config.validate_assembled()?;
+         honk_outbound::util::init_bypass_mark(config.global.effective_so_mark())?;
+@@ -223,6 +225,7 @@ impl ControlPlane {
+         }
+ 
+         let control_plane = Self {
++            validation_mode,
+             config: config_arc,
+             diagnostics: std::sync::Arc::new(parking_lot::RwLock::new(
+                 crate::config_diagnostics::ActiveDiagnostics::default(),
+diff --git a/crates/honk-core/src/control/lifecycle.rs b/crates/honk-core/src/control/lifecycle.rs
+index f95f75f..b045c99 100644
+--- a/crates/honk-core/src/control/lifecycle.rs
++++ b/crates/honk-core/src/control/lifecycle.rs
+@@ -106,18 +106,28 @@ impl HealthUpdates {
+ 
+ impl ControlPlane {
+     async fn bind_runtime_listeners(&self) -> anyhow::Result<BoundListeners> {
++        let offline_candidate = self.validation_mode.is_offline_candidate();
+         let config = self.config.read().await;
+-        let tproxy_port = config.global.tproxy_port;
++        let tproxy_port = if offline_candidate {
++            0
++        } else {
++            config.global.tproxy_port
++        };
+         let tproxy_mark = config.global.tproxy_mark;
+-        let udp_nfqueue_enabled = config.global.nfqueue_enable
++        let udp_nfqueue_enabled = !offline_candidate
++            && config.global.nfqueue_enable
+             && self.ebpf.read().await.observe_datapath().kind == crate::ebpf::DatapathKind::Real;
+-        let dns_bind_endpoint = config
+-            .dns
+-            .bind_endpoint()
+-            .map_err(|error| anyhow::anyhow!("invalid dns.bind: {error}"))?;
++        let dns_bind_endpoint = if offline_candidate {
++            None
++        } else {
++            config
++                .dns
++                .bind_endpoint()
++                .map_err(|error| anyhow::anyhow!("invalid dns.bind: {error}"))?
++        };
+         drop(config);
+         #[cfg(feature = "ebpf")]
+-        {
++        if !offline_candidate {
+             let _reload = self.reload_lock.lock().await;
+             self.warn_lan_self_protection().await;
+         }
+@@ -126,8 +136,13 @@ impl ControlPlane {
+             .map(dns_listener::BoundDnsListener::bind)
+             .transpose()
+             .map_err(|error| anyhow::anyhow!("bind dns.bind listener: {error}"))?;
+-        let tcp4_addr = SocketAddr::new("0.0.0.0".parse()?, tproxy_port);
+-        let tcp6_addr = SocketAddr::new("::".parse()?, tproxy_port);
++        let (tcp4_ip, tcp6_ip) = if offline_candidate {
++            ("127.0.0.1", "::1")
++        } else {
++            ("0.0.0.0", "::")
++        };
++        let tcp4_addr = SocketAddr::new(tcp4_ip.parse()?, tproxy_port);
++        let tcp6_addr = SocketAddr::new(tcp6_ip.parse()?, tproxy_port);
+         let udp4_addr = tcp4_addr;
+         let udp6_addr = tcp6_addr;
+ 
+@@ -370,38 +385,41 @@ impl ControlPlane {
+                     .record_flows;
+             #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
+             let mut trace_error = None;
+-            let state = UdpLoopState::new(self, daens_netns_exists());
+-            for (socket, family) in epoch
+-                .listeners
+-                .udp4
+-                .iter()
+-                .map(|socket| (socket, "v4"))
+-                .chain(epoch.listeners.udp6.iter().map(|socket| (socket, "v6")))
+-            {
+-                let state = state.clone();
+-                let socket = Arc::clone(socket);
+-                let batch = sockets::UdpRecvBatch::new()?;
+-                #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
+-                let mut batch = batch;
+-                #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
+-                if record_flows
+-                    && let Err(error) = enable_receive_trace(&self.ebpf, &mut batch, &socket).await
++            if !self.validation_mode.is_offline_candidate() {
++                let state = UdpLoopState::new(self, daens_netns_exists());
++                for (socket, family) in epoch
++                    .listeners
++                    .udp4
++                    .iter()
++                    .map(|socket| (socket, "v4"))
++                    .chain(epoch.listeners.udp6.iter().map(|socket| (socket, "v6")))
+                 {
+-                    trace_error.get_or_insert(error);
+-                }
+-                let mut stopping = epoch.stop.subscribe();
+-                let mut exit = CriticalTaskExit {
+-                    name: "udp_listener_loop",
+-                    fatal_tx: critical_tx.clone(),
+-                    expected: false,
+-                };
+-                epoch.ingress.spawn(async move {
+-                    tokio::select! {
+-                        biased;
+-                        _ = stopping.changed() => exit.expected_stop(),
+-                        _ = udp_listener_loop(state, socket, family, batch) => {},
++                    let state = state.clone();
++                    let socket = Arc::clone(socket);
++                    let batch = sockets::UdpRecvBatch::new()?;
++                    #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
++                    let mut batch = batch;
++                    #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
++                    if record_flows
++                        && let Err(error) =
++                            enable_receive_trace(&self.ebpf, &mut batch, &socket).await
++                    {
++                        trace_error.get_or_insert(error);
+                     }
+-                });
++                    let mut stopping = epoch.stop.subscribe();
++                    let mut exit = CriticalTaskExit {
++                        name: "udp_listener_loop",
++                        fatal_tx: critical_tx.clone(),
++                        expected: false,
++                    };
++                    epoch.ingress.spawn(async move {
++                        tokio::select! {
++                            biased;
++                            _ = stopping.changed() => exit.expected_stop(),
++                            _ = udp_listener_loop(state, socket, family, batch) => {},
++                        }
++                    });
++                }
+             }
+             // Every listener socket fails for the same reason; say it once.
+             #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
+@@ -410,23 +428,28 @@ impl ControlPlane {
+             }
+             #[cfg(all(feature = "native-api", feature = "ebpf", target_os = "linux"))]
+             record_udp_trace(&self.degradations, trace_error.is_some());
+-            epoch.removals = Some(spawn_udp_removal_worker(
+-                self.udp_pool.clone(),
+-                self.ebpf.clone(),
+-                self.connection_tracker.clone(),
+-                removal_tx,
+-            ));
+-            epoch.janitor = Some(
+-                BpfJanitor::new(self.ebpf.clone(), self.tcp_flow_pins.clone()).spawn_supervised(
+-                    CriticalTaskExit {
+-                        name: "bpf_janitor",
+-                        fatal_tx: critical_tx,
+-                        expected: false,
+-                    },
+-                    epoch.stop.subscribe(),
+-                ),
+-            );
+-            epoch.health_updates = Some(HealthUpdates::start(self));
++            if !self.validation_mode.is_offline_candidate() {
++                epoch.removals = Some(spawn_udp_removal_worker(
++                    self.udp_pool.clone(),
++                    self.ebpf.clone(),
++                    self.connection_tracker.clone(),
++                    removal_tx,
++                ));
++                epoch.janitor = Some(
++                    BpfJanitor::new(self.ebpf.clone(), self.tcp_flow_pins.clone())
++                        .spawn_supervised(
++                            CriticalTaskExit {
++                                name: "bpf_janitor",
++                                fatal_tx: critical_tx,
++                                expected: false,
++                            },
++                            epoch.stop.subscribe(),
++                        ),
++                );
++            }
++            if !self.validation_mode.is_offline_candidate() {
++                epoch.health_updates = Some(HealthUpdates::start(self));
++            }
+             #[cfg(feature = "ebpf")]
+             {
+                 let sequence_ready = if epoch.listeners.nfqueue_enabled {
+@@ -434,17 +457,23 @@ impl ControlPlane {
+                 } else {
+                     false
+                 };
+-                match self
+-                    .start_nfqueue_runtime(epoch.listeners.nfqueue_enabled, sequence_ready)
+-                    .await
+-                {
+-                    Ok(queue) => epoch.queue = queue,
+-                    Err(error) => {
+-                        self.degrade_nfqueue_startup(&mut epoch.listeners.nfqueue_enabled, error)
++                if !self.validation_mode.is_offline_candidate() {
++                    match self
++                        .start_nfqueue_runtime(epoch.listeners.nfqueue_enabled, sequence_ready)
++                        .await
++                    {
++                        Ok(queue) => epoch.queue = queue,
++                        Err(error) => {
++                            self.degrade_nfqueue_startup(
++                                &mut epoch.listeners.nfqueue_enabled,
++                                error,
++                            )
+                             .await
++                        }
+                     }
+                 }
+-                if let Some(queue) = epoch.queue.as_mut()
++                if !self.validation_mode.is_offline_candidate()
++                    && let Some(queue) = epoch.queue.as_mut()
+                     && let Err(error) = queue.check_startup_health().await
+                 {
+                     self.cleanup_nfqueue_startup_failure(&mut epoch.queue).await;
+@@ -663,8 +692,8 @@ impl RuntimeEpoch {
+     ) -> EpochEvent {
+         tokio::select! {
+             biased;
+-            error = self.removal_errors.recv() => EpochEvent::Fatal(error.unwrap_or_else(|| anyhow::anyhow!("UDP removal owner stopped"))),
+-            error = self.critical_errors.recv() => EpochEvent::Fatal(error.unwrap_or_else(|| anyhow::anyhow!("critical runtime owner stopped"))),
++            error = self.removal_errors.recv(), if !plane.validation_mode.is_offline_candidate() => EpochEvent::Fatal(error.unwrap_or_else(|| anyhow::anyhow!("UDP removal owner stopped"))),
++            error = self.critical_errors.recv(), if !plane.validation_mode.is_offline_candidate() => EpochEvent::Fatal(error.unwrap_or_else(|| anyhow::anyhow!("critical runtime owner stopped"))),
+             event = async {
+                 #[cfg(feature = "ebpf")]
+                 { match wait_nfqueue_event(&mut self.queue, &plane.ebpf).await {
+@@ -676,7 +705,13 @@ impl RuntimeEpoch {
+             } => event,
+             command = commands.recv() => EpochEvent::Command(command),
+             result = self.tcp.join_next(), if !self.tcp.is_empty() => reap_tcp(result),
+-            result = accept_tcp_with_admission(&self.listeners.tcp4, self.listeners.tcp6.as_ref(), plane.concurrency_limit.clone(), plane.stats.clone()), if !plane.drain_tracker.should_reject() => EpochEvent::Accepted(result),
++            result = async {
++                if plane.validation_mode.is_offline_candidate() {
++                    std::future::pending().await
++                } else {
++                    accept_tcp_with_admission(&self.listeners.tcp4, self.listeners.tcp6.as_ref(), plane.concurrency_limit.clone(), plane.stats.clone()).await
++                }
++            }, if !plane.drain_tracker.should_reject() => EpochEvent::Accepted(result),
+         }
+     }
+ }
+@@ -718,7 +753,9 @@ impl ControlPlane {
+         let startup = async {
+             let listeners = self.bind_runtime_listeners().await?;
+             epoch = Some(self.prepare_epoch(listeners).await?);
+-            self.configure_health_loop().await;
++            if !self.validation_mode.is_offline_candidate() {
++                self.configure_health_loop().await;
++            }
+             self.open_epoch(epoch.as_mut().expect("startup epoch"))
+                 .await?;
+             Ok::<(), anyhow::Error>(())
+@@ -727,7 +764,9 @@ impl ControlPlane {
+         let mut fatal = startup.err();
+         if fatal.is_none() {
+             let active = epoch.as_mut().expect("startup epoch");
+-            self.start_epoch_maintenance(active).await;
++            if !self.validation_mode.is_offline_candidate() {
++                self.start_epoch_maintenance(active).await;
++            }
+             #[cfg(feature = "native-api")]
+             self.publish_phase(EnginePhase::Running);
+             #[cfg(target_os = "linux")]
+diff --git a/crates/honk-core/src/control/mod.rs b/crates/honk-core/src/control/mod.rs
+index b1974ca..87e699a 100644
+--- a/crates/honk-core/src/control/mod.rs
++++ b/crates/honk-core/src/control/mod.rs
+@@ -132,6 +132,7 @@ pub(crate) enum EnginePhase {
+ 
+ /// The main control plane.
+ pub struct ControlPlane {
++    validation_mode: crate::ValidationMode,
+     config: Arc<RwLock<Arc<Config>>>,
+     diagnostics: crate::config_diagnostics::SharedDiagnostics,
+     /// Reuse decisions must observe the generation they eventually replace.
+diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
+index bf9c036..80634b2 100644
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -9,6 +9,7 @@
+ //! in dae netns"). Trait-based backends (real aya + mock) for testing
+ //! without kernel eBPF support.
+ 
++mod admin_import;
+ #[cfg(feature = "clash-api")]
+ pub mod clash_api;
+ pub mod config_diagnostics;
+@@ -58,10 +59,24 @@ use logging::{
+     resolved_log_file_path,
+ };
+ use state::startup::{claim_state, open_state_db};
+-use std::path::PathBuf;
++use std::os::unix::fs::MetadataExt;
++use std::path::{Path, PathBuf};
+ use std::sync::Arc;
+ use tracing::{info, warn};
+ 
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub(crate) enum ValidationMode {
++    #[default]
++    Normal,
++    OfflineCandidate,
++}
++
++impl ValidationMode {
++    pub(crate) fn is_offline_candidate(self) -> bool {
++        matches!(self, Self::OfflineCandidate)
++    }
++}
++
+ /// Raise the soft descriptor limit toward the hard maximum, then return the
+ /// one startup snapshot used to size every control-plane descriptor owner.
+ fn raise_nofile_rlimit() -> anyhow::Result<usize> {
+@@ -205,8 +220,18 @@ pub enum ClashCommand {
+ 
+ #[derive(clap::Subcommand, Debug)]
+ pub enum AdminCommand {
++    /// Report fixed offline helper capabilities without touching configuration.
++    Capabilities,
++    /// Run a bounded, fixed-path import preview operation from structured stdin.
++    Import,
+     /// Delete the administrator record so that setup opens again; refused while honk-core runs
+     Reset,
++    /// Clear regenerable Honk state while preserving administrator and listener secrets
++    ResetBusiness {
++        /// Root path used by the reset default revision
++        #[arg(long, value_name = "PATH")]
++        revision_root: Option<PathBuf>,
++    },
+ }
+ 
+ #[derive(clap::Subcommand, Debug)]
+@@ -264,6 +289,10 @@ pub struct Cli {
+     #[arg(long)]
+     pub mock_ebpf: bool,
+ 
++    /// Validate the control plane with cached subscription bodies only; never fetch subscriptions.
++    #[arg(long)]
++    pub offline_validation: bool,
++
+     /// Where the administered configuration lives: the `-c` file tree, or the
+     /// revisions in `<data-dir>/state/honk.db`
+     #[arg(long, value_enum, default_value = "file")]
+@@ -280,6 +309,176 @@ pub enum ConfigStore {
+     Db,
+ }
+ 
++fn offline_candidate_root(cli: &Cli) -> anyhow::Result<PathBuf> {
++    anyhow::ensure!(cli.mock_ebpf, "offline validation requires --mock-ebpf");
++    anyhow::ensure!(
++        cli.store == ConfigStore::File,
++        "offline validation requires the file store"
++    );
++    anyhow::ensure!(
++        cli.log_file.is_none(),
++        "offline validation does not accept --log-file"
++    );
++    anyhow::ensure!(
++        cli.bpf_object.is_none(),
++        "offline validation does not accept --bpf-object"
++    );
++    anyhow::ensure!(
++        cli.data_dir == PathBuf::from(honk_config::paths::DEFAULT_DATA_DIR),
++        "offline validation does not accept --data-dir"
++    );
++    let config_dir = cli
++        .config
++        .parent()
++        .ok_or_else(|| anyhow::anyhow!("offline config has no parent"))?;
++    anyhow::ensure!(
++        cli.config
++            .file_name()
++            .is_some_and(|name| name == "config.dae")
++    );
++    anyhow::ensure!(config_dir.file_name().is_some_and(|name| name == "honk"));
++    let etc = config_dir
++        .parent()
++        .ok_or_else(|| anyhow::anyhow!("offline config has no etc directory"))?;
++    anyhow::ensure!(etc.file_name().is_some_and(|name| name == "etc"));
++    let shadow = etc
++        .parent()
++        .ok_or_else(|| anyhow::anyhow!("offline config has no shadow root"))?;
++    anyhow::ensure!(shadow.file_name().is_some_and(|name| name == "shadow"));
++    let private_root = shadow
++        .parent()
++        .ok_or_else(|| anyhow::anyhow!("offline config has no private root"))?;
++    anyhow::ensure!(
++        private_root.parent() == Some(Path::new("/tmp"))
++            && private_root
++                .file_name()
++                .is_some_and(|name| name.to_string_lossy().starts_with("honk-maint.")),
++        "offline validation requires a private Honk maintenance shadow"
++    );
++    for path in [
++        private_root,
++        shadow,
++        etc,
++        config_dir,
++        &private_root.join("shadow-data"),
++    ] {
++        let metadata = std::fs::symlink_metadata(path)?;
++        anyhow::ensure!(
++            metadata.file_type().is_dir() && metadata.uid() == 0 && metadata.mode() & 0o077 == 0,
++            "offline validation directory is not private"
++        );
++    }
++    let entry = std::fs::symlink_metadata(&cli.config)?;
++    anyhow::ensure!(
++        entry.file_type().is_file()
++            && entry.uid() == 0
++            && entry.mode() & 0o077 == 0
++            && std::fs::canonicalize(&cli.config)?.starts_with(private_root),
++        "offline entry configuration is not a private file"
++    );
++    let tmp_metadata = std::fs::symlink_metadata("/tmp")?;
++    anyhow::ensure!(
++        tmp_metadata.file_type().is_dir()
++            && tmp_metadata.uid() == 0
++            && tmp_metadata.mode() & 0o1000 != 0,
++        "offline validation requires the system temporary directory"
++    );
++    Ok(private_root.to_path_buf())
++}
++
++#[cfg(feature = "native-api")]
++fn validate_offline_sources(
++    root: &Path,
++    sources: &[honk_config::parser::SourceSnapshot],
++) -> anyhow::Result<()> {
++    let config_root = root.join("shadow/etc/honk");
++    let config_root = std::fs::canonicalize(config_root)?;
++    anyhow::ensure!(
++        !sources.is_empty(),
++        "offline validation requires captured sources"
++    );
++    for source in sources {
++        // The parser canonicalizes each include and checks this same entry
++        // directory before opening it; this second check verifies the files
++        // that were actually captured are still inside the private shadow.
++        let path = std::fs::canonicalize(&source.path)?;
++        anyhow::ensure!(
++            path.starts_with(&config_root),
++            "offline source escapes the private shadow"
++        );
++        let metadata = std::fs::symlink_metadata(&source.path)?;
++        anyhow::ensure!(
++            metadata.file_type().is_file() && metadata.uid() == 0 && metadata.mode() & 0o077 == 0,
++            "offline source file is not private"
++        );
++    }
++    Ok(())
++}
++
++fn reset_default_revision(
++    path: &std::path::Path,
++    revision_root: Option<&std::path::Path>,
++) -> anyhow::Result<state::DefaultRevision> {
++    #[derive(serde::Serialize)]
++    struct StoredSource {
++        name: String,
++        parent: Option<usize>,
++        content: String,
++        sha256: String,
++    }
++
++    let source_root = path
++        .parent()
++        .ok_or_else(|| anyhow::anyhow!("default configuration has no parent directory"))?;
++    let stored_root = revision_root.unwrap_or(source_root);
++    let mut diagnostics = Vec::new();
++    let loaded = Config::from_dae_file_with_sources(
++        path,
++        &std::collections::HashMap::new(),
++        honk_config::parser::SourceLimits::DEFAULT,
++        &mut diagnostics,
++    )?;
++    loaded.config.validate_assembled()?;
++    let mut bytes = 0usize;
++    let sources = loaded
++        .sources
++        .iter()
++        .map(|source| {
++            let name = source
++                .path
++                .strip_prefix(source_root)
++                .ok()
++                .and_then(std::path::Path::to_str)
++                .ok_or_else(|| {
++                    anyhow::anyhow!("default configuration source is outside its root")
++                })?;
++            let content = honk_config::parser::source_edit::strip_listener_secrets(&source.content)
++                .map_err(|_| anyhow::anyhow!("default configuration secrets cannot be isolated"))?;
++            bytes = bytes.saturating_add(content.len());
++            Ok(StoredSource {
++                name: name.to_owned(),
++                parent: source.parent,
++                sha256: configuration::digest(content.as_bytes()),
++                content,
++            })
++        })
++        .collect::<anyhow::Result<Vec<_>>>()?;
++    let sources = serde_json::to_string(&sources)?;
++    anyhow::ensure!(
++        bytes <= honk_config::parser::SourceLimits::DEFAULT.max_bytes,
++        "default configuration exceeds the source limit"
++    );
++    Ok(state::DefaultRevision {
++        root: stored_root
++            .to_str()
++            .ok_or_else(|| anyhow::anyhow!("default configuration root is not UTF-8"))?
++            .to_owned(),
++        content_sha256: configuration::digest(sources.as_bytes()),
++        sources,
++        bytes: i64::try_from(bytes)?,
++    })
++}
++
+ pub async fn handle_clash_command(cli: &Cli) -> anyhow::Result<()> {
+     use std::time::Duration;
+ 
+@@ -299,6 +498,16 @@ pub async fn handle_clash_command(cli: &Cli) -> anyhow::Result<()> {
+     };
+ 
+     match cmd {
++        ClashCommand::Admin {
++            action: AdminCommand::Capabilities,
++        } => {
++            admin_import::capabilities();
++        }
++        ClashCommand::Admin {
++            action: AdminCommand::Import,
++        } => {
++            admin_import::run(cli)?;
++        }
+         #[cfg(feature = "native-api")]
+         ClashCommand::Config {
+             action:
+@@ -326,6 +535,20 @@ pub async fn handle_clash_command(cli: &Cli) -> anyhow::Result<()> {
+                 println!("No administrator was set up");
+             }
+         }
++        ClashCommand::Admin {
++            action: AdminCommand::ResetBusiness { revision_root },
++        } => {
++            let default_revision = reset_default_revision(&cli.config, revision_root.as_deref())?;
++            let cleared = state::reset_business_state(&cli.data_dir, Some(&default_revision))
++                .map_err(|error| anyhow::anyhow!("admin reset-business: {error}"))?;
++            if cleared {
++                println!(
++                    "Cleared regenerable Honk state; administrator and listener secrets were preserved"
++                );
++            } else {
++                println!("No Honk state database existed");
++            }
++        }
+         ClashCommand::Reload => {
+             let pid = request_reload(std::path::Path::new(INSTANCE_LOCK_PATH))?;
+             println!("Reload requested for honk-core process {pid}");
+@@ -765,6 +988,21 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+         "--store db needs the native-api feature"
+     );
+     let mock_mode = cli.mock_ebpf || cfg!(not(feature = "ebpf"));
++    let offline_root = if cli.offline_validation {
++        Some(offline_candidate_root(&cli)?)
++    } else {
++        None
++    };
++    #[cfg(not(feature = "native-api"))]
++    anyhow::ensure!(
++        !cli.offline_validation,
++        "offline candidate validation requires native-api"
++    );
++    let validation_mode = if offline_root.is_some() {
++        ValidationMode::OfflineCandidate
++    } else {
++        ValidationMode::Normal
++    };
+     // Everything else in `run` drops before it.
+     let _instance_lock = instance_lock(mock_mode)?;
+     let startup = (|| -> anyhow::Result<_> {
+@@ -797,6 +1035,30 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+             !config.experimental.native_api.enabled,
+             "native-api feature is required"
+         );
++        if let Some(root) = offline_root.as_ref() {
++            let expected_data_dir = root.join("shadow-data");
++            anyhow::ensure!(
++                Path::new(&config.global.data_dir) == expected_data_dir,
++                "offline candidate data directory is outside its private shadow"
++            );
++            anyhow::ensure!(
++                config.experimental.native_api.enabled,
++                "offline validation requires the shadow native API"
++            );
++            let listen = config
++                .experimental
++                .native_api
++                .listen
++                .parse::<std::net::SocketAddr>()?;
++            anyhow::ensure!(
++                listen.ip().is_loopback(),
++                "offline native API must use loopback"
++            );
++            config.global.log_file.clear();
++            config.dns.bind.clear();
++            config.experimental.cache_file.enabled = Some(false);
++            config.experimental.clash_api.external_controller.clear();
++        }
+         let requested_data_dir = PathBuf::from(&config.global.data_dir);
+         let (runtime_data_dir, data_dir_creation_error) =
+             prepare_runtime_data_dir(&requested_data_dir)?;
+@@ -881,6 +1143,18 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+             return Err(error);
+         }
+     };
++    #[cfg(feature = "native-api")]
++    if let Some(root) = offline_root.as_deref() {
++        let sources = native_sources
++            .as_ref()
++            .ok_or_else(|| anyhow::anyhow!("offline validation requires captured source files"))?;
++        validate_offline_sources(root, &sources.sources)?;
++        info!(
++            stages = "parser,assembled-config,mock-backend-startup",
++            skipped = "subscription-fetch,ecs,health-probes,geo-download,standalone-dns,clash-listener,interface-watch,epoch-preconnect,selector-warm,udp-warm,process-global-lock",
++            "Offline candidate validation mode"
++        );
++    }
+ 
+     // Console, optional file, and Clash API output use independent layers.
+     // With no `/logs` subscription, the API layer contributes no callsite interest.
+@@ -940,14 +1214,18 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+         .as_ref()
+         .map(|database| database.store.state())
+         .or(state_db);
+-    let legacy_cache = {
++    let legacy_cache = if validation_mode.is_offline_candidate() {
++        None
++    } else {
+         let (path, cache_id) = config.experimental.cache_file.legacy_cache_file();
+         let config_dir = cli.config.parent();
+         #[cfg(feature = "native-api")]
+         let config_dir = database
+             .as_ref()
+             .map_or(config_dir, |database| database.store.entry().parent());
+-        state::import::LegacyCache::locate(path, cache_id, config_dir)
++        Some(state::import::LegacyCache::locate(
++            path, cache_id, config_dir,
++        ))
+     };
+     if let Some(path) = log_file_path.as_ref() {
+         info!(path = %path.display(), "File logging enabled");
+@@ -1002,12 +1280,14 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+     // A valid stored body makes network refresh non-blocking for startup.
+     // Missing subscriptions still get the bounded first-fetch grace period;
+     // every fetch continues in the background after the control plane starts.
+-    let mut subscription_supervisor = subscription::SubscriptionSupervisor::prepare(
+-        &mut config,
+-        claimed.subscriptions,
+-        diagnostics,
+-    )
+-    .await?;
++    let mut subscription_supervisor =
++        subscription::SubscriptionSupervisor::prepare_with_offline_validation(
++            &mut config,
++            claimed.subscriptions,
++            diagnostics,
++            cli.offline_validation,
++        )
++        .await?;
+     let startup_diagnostics = subscription_supervisor.take_startup_diagnostics();
+ 
+     // Resolve group filters into concrete node IDs. This must run for every
+@@ -1288,7 +1568,15 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+         info!("Skipping eBPF datapath setup (mock mode)");
+     }
+ 
+-    dns::ecs::resolve_client_subnet(&mut config.dns).await;
++    if validation_mode.is_offline_candidate() {
++        info!(
++            stage = "ecs",
++            result = "skipped",
++            reason = "offline_candidate_no_network"
++        );
++    } else {
++        dns::ecs::resolve_client_subnet(&mut config.dns).await;
++    }
+     let dns_client_subnet = config
+         .dns
+         .effective_client_subnet()
+@@ -1379,6 +1667,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+         dns_upstream_pool.clone(),
+         resource_budget,
+         Arc::clone(&degradations),
++        validation_mode,
+     )?;
+     #[cfg(feature = "native-api")]
+     let native_observation = if native_enabled {
+@@ -1417,7 +1706,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+     // `experimental.cache_file` enabled, imports a legacy cache.db, restores
+     // Selector choices, and wires change persistence into the group manager.
+     control_plane
+-        .init_cache_db(state_db.clone(), Some(legacy_cache))
++        .init_cache_db(state_db.clone(), legacy_cache)
+         .await;
+ 
+     #[cfg(feature = "clash-api")]
+@@ -1485,6 +1774,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                 started,
+                 engine_level,
+                 &native_log_binding,
++                validation_mode,
+             )
+             .await?,
+         ),
+diff --git a/crates/honk-core/src/native_api.rs b/crates/honk-core/src/native_api.rs
+index e3754ee..506c624 100644
+--- a/crates/honk-core/src/native_api.rs
++++ b/crates/honk-core/src/native_api.rs
+@@ -283,6 +283,16 @@ pub fn router(state: Arc<NativeState>) -> Router {
+         .with_state(state)
+ }
+ 
++pub(crate) fn offline_validation_router(state: Arc<NativeState>) -> Router {
++    handlers::offline_validation_routes()
++        .fallback(not_found)
++        .layer(axum::middleware::from_fn_with_state(
++            Arc::clone(&state),
++            security::boundary,
++        ))
++        .with_state(state)
++}
++
+ async fn observation_request(
+     State(state): State<Arc<NativeState>>,
+     request: axum::extract::Request,
+@@ -804,7 +814,11 @@ mod tests {
+             .byte_counters("first", crate::stats::OutboundKind::Node);
+         upload.store(100, Ordering::Relaxed);
+         let (stop, receiver) = watch::channel(false);
+-        let sampler = tokio::spawn(sample_traffic(state.clone(), receiver));
++        let sampler = tokio::spawn(sample_traffic(
++            state.clone(),
++            receiver,
++            crate::ValidationMode::Normal,
++        ));
+         while state.sample.read().is_none() {
+             tokio::task::yield_now().await;
+         }
+@@ -870,7 +884,11 @@ mod tests {
+     async fn native_sampler_measures_cpu_after_two_samples() {
+         let state = state().await;
+         let (stop, receiver) = watch::channel(false);
+-        let sampler = tokio::spawn(sample_traffic(state.clone(), receiver));
++        let sampler = tokio::spawn(sample_traffic(
++            state.clone(),
++            receiver,
++            crate::ValidationMode::Normal,
++        ));
+         while state.sample.read().is_none() {
+             tokio::task::yield_now().await;
+         }
+diff --git a/crates/honk-core/src/native_api/handlers.rs b/crates/honk-core/src/native_api/handlers.rs
+index 14efda9..5605156 100644
+--- a/crates/honk-core/src/native_api/handlers.rs
++++ b/crates/honk-core/src/native_api/handlers.rs
+@@ -655,6 +655,27 @@ pub(super) fn routes() -> Router<Arc<NativeState>> {
+         )
+ }
+ 
++pub(super) fn offline_validation_routes() -> Router<Arc<NativeState>> {
++    Router::new().route(
++        "/api",
++        resource(
++            get(|State(state): App, uri: Uri| async move {
++                if let Err(error) = parse_query(&uri, &[], &RequestId("offline-check".into())) {
++                    return error.into_response();
++                }
++                if let Err(error) = state.require_running() {
++                    return error.into_response();
++                }
++                Json(serde_json::json!({
++                    "auth": { "setup_required": state.auth_discovery().setup_required }
++                }))
++                .into_response()
++            }),
++            &["GET"],
++        ),
++    )
++}
++
+ fn resource(
+     router: MethodRouter<Arc<NativeState>>,
+     methods: &'static [&'static str],
+diff --git a/crates/honk-core/src/native_api/server.rs b/crates/honk-core/src/native_api/server.rs
+index 42feac5..e784749 100644
+--- a/crates/honk-core/src/native_api/server.rs
++++ b/crates/honk-core/src/native_api/server.rs
+@@ -16,9 +16,14 @@ use tokio::task::{JoinHandle, JoinSet};
+ 
+ use super::types::{TrafficBytes, TrafficConnections, TrafficRates, TrafficSummary};
+ use super::{NativeState, Peer, router, timestamp};
++use crate::ValidationMode;
+ use crate::connection_tracker::ConnectionTracker;
+ 
+-pub(super) async fn sample_traffic(state: Arc<NativeState>, mut stop: watch::Receiver<bool>) {
++pub(super) async fn sample_traffic(
++    state: Arc<NativeState>,
++    mut stop: watch::Receiver<bool>,
++    validation_mode: ValidationMode,
++) {
+     let mut interval = tokio::time::interval(Duration::from_secs(1));
+     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+     let mut previous: Option<(Instant, Option<(u64, u64)>)> = None;
+@@ -29,7 +34,9 @@ pub(super) async fn sample_traffic(state: Arc<NativeState>, mut stop: watch::Rec
+             _ = stop.changed() => break,
+             _ = interval.tick() => {
+                 state.observation.settings.maintain(&state.observation);
+-                reconcile_kernel_trace(&state).await;
++                if !validation_mode.is_offline_candidate() {
++                    reconcile_kernel_trace(&state).await;
++                }
+                 state.observation.core.flows.maintain();
+                 let now = Instant::now();
+                 let totals = state.stats.traffic_totals();
+@@ -102,10 +109,24 @@ pub struct NativeServer {
+ 
+ impl NativeServer {
+     pub fn start(listener: TcpListener, state: Arc<NativeState>) -> Self {
++        Self::start_with_validation_mode(listener, state, ValidationMode::Normal)
++    }
++
++    pub(crate) fn start_with_validation_mode(
++        listener: TcpListener,
++        state: Arc<NativeState>,
++        validation_mode: ValidationMode,
++    ) -> Self {
+         let (stop, receiver) = watch::channel(false);
+         state.tracker.enable_native();
+         let consumer = NativeConsumer(Arc::clone(&state.tracker));
+-        let supervisor = tokio::spawn(supervise(listener, state, receiver, consumer));
++        let supervisor = tokio::spawn(supervise(
++            listener,
++            state,
++            receiver,
++            consumer,
++            validation_mode,
++        ));
+         Self { stop, supervisor }
+     }
+ 
+@@ -339,30 +360,49 @@ async fn supervise(
+     state: Arc<NativeState>,
+     mut stop: watch::Receiver<bool>,
+     _consumer: NativeConsumer,
++    validation_mode: ValidationMode,
+ ) {
+-    let router = router(Arc::clone(&state));
++    let offline_candidate = validation_mode.is_offline_candidate();
++    let router = if offline_candidate {
++        super::offline_validation_router(Arc::clone(&state))
++    } else {
++        router(Arc::clone(&state))
++    };
+     let observation = Arc::clone(&state.observation);
+     let (sampler_stop, sampler_receiver) = watch::channel(false);
+     let (connections_stop, connection_receiver) = watch::channel(false);
+     let (probes_stop, probes_receiver) = watch::channel(false);
+-    let mut probes = observation
+-        .probes
+-        .start(Arc::clone(&state), probes_receiver);
++    let mut probes = (!offline_candidate).then(|| {
++        observation
++            .probes
++            .start(Arc::clone(&state), probes_receiver)
++    });
+     let mut probes_running = true;
+     let (schedule_stop, schedule_receiver) = watch::channel(false);
+-    let mut schedule = tokio::spawn(super::geodata::schedule(
++    let mut schedule = (!offline_candidate).then(|| {
++        tokio::spawn(super::geodata::schedule(
++            Arc::clone(&state),
++            schedule_receiver,
++        ))
++    });
++    let mut schedule_running = true;
++    let mut sampler = tokio::spawn(sample_traffic(
+         Arc::clone(&state),
+-        schedule_receiver,
++        sampler_receiver,
++        validation_mode,
+     ));
+-    let mut schedule_running = true;
+-    let mut sampler = tokio::spawn(sample_traffic(Arc::clone(&state), sampler_receiver));
+     let mut sampler_running = true;
+     let mut children = JoinSet::new();
+     loop {
+         tokio::select! {
+             biased;
+             _ = stop.changed() => break,
+-            _ = &mut probes => {
++            _ = async {
++                match probes.as_mut() {
++                    Some(probes) => probes.await,
++                    None => std::future::pending().await,
++                }
++            }, if probes.is_some() => {
+                 probes_running = false;
+                 tracing::error!(message = "native probe supervisor stopped unexpectedly");
+                 break;
+@@ -372,7 +412,12 @@ async fn supervise(
+                 tracing::error!(message = "native HTTP sampler stopped unexpectedly");
+                 break;
+             }
+-            _ = &mut schedule => {
++            _ = async {
++                match schedule.as_mut() {
++                    Some(schedule) => schedule.await,
++                    None => std::future::pending().await,
++                }
++            }, if schedule.is_some() => {
+                 schedule_running = false;
+                 tracing::error!(message = "native geodata schedule stopped unexpectedly");
+                 break;
+@@ -409,7 +454,9 @@ async fn supervise(
+     }
+     let _ = probes_stop.send(true);
+     if probes_running {
+-        let _ = probes.await;
++        if let Some(probes) = probes.take() {
++            let _ = probes.await;
++        }
+     }
+     observation.settings.shutdown(&observation);
+     observation.logs.shutdown();
+@@ -418,10 +465,14 @@ async fn supervise(
+     if sampler_running {
+         let _ = sampler.await;
+     }
+-    reconcile_kernel_trace(&state).await;
++    if !offline_candidate {
++        reconcile_kernel_trace(&state).await;
++    }
+     let _ = schedule_stop.send(true);
+     if schedule_running {
+-        let _ = schedule.await;
++        if let Some(schedule) = schedule.take() {
++            let _ = schedule.await;
++        }
+     }
+     let _ = connections_stop.send(true);
+     if tokio::time::timeout(Duration::from_secs(5), async {
+diff --git a/crates/honk-core/src/native_api/startup.rs b/crates/honk-core/src/native_api/startup.rs
+index 98f3e2b..0d8f449 100644
+--- a/crates/honk-core/src/native_api/startup.rs
++++ b/crates/honk-core/src/native_api/startup.rs
+@@ -15,6 +15,7 @@ use super::logs::{EngineLevel, LogBinding};
+ use super::observation::NativeObservation;
+ use super::store::{DatabaseStartup, SourceStore};
+ use super::{NativeServer, NativeState};
++use crate::ValidationMode;
+ use crate::configuration::SourceUpdate;
+ use crate::control::{ControlCommand, ControlPlane, EnginePhase};
+ use crate::subscription::SubscriptionSupervisorHandle;
+@@ -36,6 +37,7 @@ impl NativeRuntime {
+         started: Instant,
+         engine_level: EngineLevel,
+         log_binding: &LogBinding,
++        validation_mode: ValidationMode,
+     ) -> anyhow::Result<Self> {
+         let listen = control_plane
+             .config_handle()
+@@ -60,7 +62,8 @@ impl NativeRuntime {
+         let logs = &observation.logs;
+         logs.attach_engine_level(engine_level);
+         log_binding.bind(Arc::downgrade(logs));
+-        let server = NativeServer::start(listener, Arc::new(state));
++        let server =
++            NativeServer::start_with_validation_mode(listener, Arc::new(state), validation_mode);
+         info!(target: "honk_core", %listen, message = "native API listener ready");
+         Ok(Self {
+             server,
+diff --git a/crates/honk-core/src/native_api/store/db.rs b/crates/honk-core/src/native_api/store/db.rs
+index cde29e7..a16e339 100644
+--- a/crates/honk-core/src/native_api/store/db.rs
++++ b/crates/honk-core/src/native_api/store/db.rs
+@@ -395,6 +395,37 @@ impl DbStore {
+         Ok(number)
+     }
+ 
++    /// Seeds the first import revision without changing administrator or API secrets.
++    pub(crate) fn initialize_import(
++        &self,
++        sources: &[SourceSnapshot],
++        principal: &str,
++    ) -> Result<i64, StoreError> {
++        let forbidden = ListenerSecrets::empty().with_all(&self.secrets.lock());
++        let stored = self.stored(sources, &forbidden)?;
++        let mut connection = self.state.strict();
++        let transaction = connection
++            .transaction_with_behavior(TransactionBehavior::Immediate)
++            .map_err(sql)?;
++        if head(&transaction)?.is_some() {
++            return Err(StoreError::NotEmpty);
++        }
++        let number = insert(
++            &transaction,
++            None,
++            &self.root,
++            &stored,
++            principal,
++            Origin::Import,
++        )?;
++        transaction
++            .execute("INSERT INTO head (id, active) VALUES (1, ?1)", [number])
++            .map_err(sql)?;
++        transaction.commit().map_err(sql)?;
++        *self.head.lock() = Some((number, None));
++        Ok(number)
++    }
++
+     /// Lexical: the db holds virtual paths, so nothing under `root` is opened.
+     pub(crate) fn resolve(&self, label: &str) -> Result<PathBuf, ApiError> {
+         let input = Path::new(label);
+diff --git a/crates/honk-core/src/state.rs b/crates/honk-core/src/state.rs
+index acdb5d4..d70f166 100644
+--- a/crates/honk-core/src/state.rs
++++ b/crates/honk-core/src/state.rs
+@@ -217,14 +217,33 @@ impl StateDb {
+         Self::open_with_ceiling(data_dir, MAX_PAGE_COUNT)
+     }
+ 
++    pub(crate) fn open_exclusive_for_admin(data_dir: &Path) -> Result<Self, StateError> {
++        Self::open_with_lock(data_dir, MAX_PAGE_COUNT, true)
++    }
++
+     fn open_with_ceiling(data_dir: &Path, max_page_count: i64) -> Result<Self, StateError> {
++        Self::open_with_lock(data_dir, max_page_count, false)
++    }
++
++    fn open_with_lock(
++        data_dir: &Path,
++        max_page_count: i64,
++        exclusive: bool,
++    ) -> Result<Self, StateError> {
+         let directory = state_directory(data_dir, true, tighten)?;
+-        let directory = Flock::lock(directory, FlockArg::LockSharedNonblock).map_err(
+-            |(_, error)| match error {
+-                Errno::EWOULDBLOCK => StateError::Locked,
+-                _ => StateError::Unavailable,
++        let directory = Flock::lock(
++            directory,
++            if exclusive {
++                FlockArg::LockExclusiveNonblock
++            } else {
++                FlockArg::LockSharedNonblock
+             },
+-        )?;
++        )
++        .map_err(|(_, error)| match error {
++            Errno::EWOULDBLOCK if exclusive => StateError::InUse,
++            Errno::EWOULDBLOCK => StateError::Locked,
++            _ => StateError::Unavailable,
++        })?;
+         let (file, created) = match openat(
+             &*directory,
+             DB_FILE,
+@@ -297,6 +316,14 @@ impl StateDb {
+     }
+ }
+ 
++#[derive(Debug, Clone)]
++pub struct DefaultRevision {
++    pub root: String,
++    pub sources: String,
++    pub content_sha256: String,
++    pub bytes: i64,
++}
++
+ /// Deletes the administrator record, for `honk-core admin reset`; `Ok(false)`
+ /// when there was none. Refused while any process has the db open through
+ /// `StateDb`, because each holds a shared lock on `state/`.
+@@ -345,6 +372,156 @@ pub fn reset_admin(data_dir: &Path) -> Result<bool, StateError> {
+     Ok(deleted > 0)
+ }
+ 
++/// Clear regenerable Honk state while retaining administrator credentials,
++/// listener secrets, and a fresh pinned default configuration revision.
++pub fn reset_business_state(
++    data_dir: &Path,
++    default_revision: Option<&DefaultRevision>,
++) -> Result<bool, StateError> {
++    let directory = state_directory(data_dir, true, tighten)?;
++    let directory = Flock::lock(directory, FlockArg::LockExclusiveNonblock).map_err(
++        |(_, error)| match error {
++            Errno::EWOULDBLOCK => StateError::InUse,
++            _ => StateError::Unavailable,
++        },
++    )?;
++    match nix::sys::stat::fstatat(
++        &*directory,
++        DB_FILE,
++        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
++    ) {
++        Err(Errno::ENOENT) => return Ok(false),
++        Err(error) => return Err(path_error(Target::Database, error)),
++        Ok(_) => {}
++    }
++    let file = existing(&directory)?;
++    tighten(&file, Target::Database)?;
++    let metadata = file.metadata().map_err(|_| StateError::Unavailable)?;
++    drop(file);
++    let path = resolved(&directory)?.join(DB_FILE);
++    let mut connection = open_checked(
++        &path,
++        (metadata.dev(), metadata.ino()),
++        OpenFlags::SQLITE_OPEN_READ_WRITE,
++    )?;
++    check(&connection)?;
++    verify_reset_schema(&connection)?;
++    connection
++        .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")
++        .map_err(sql)?;
++    let transaction = connection
++        .transaction_with_behavior(TransactionBehavior::Immediate)
++        .map_err(sql)?;
++    let revision_count: i64 = transaction
++        .query_row("SELECT count(*) FROM revision", [], |row| row.get(0))
++        .map_err(sql)?;
++    let active: Option<i64> = transaction
++        .query_row("SELECT active FROM head WHERE id=1", [], |row| row.get(0))
++        .optional()
++        .map_err(sql)?;
++    if (revision_count > 0) != active.is_some() {
++        return Err(StateError::Corrupt);
++    }
++    for table in [
++        "subscription_body",
++        "legacy_import",
++        "selector",
++        "delay_sample",
++        "dns_answer",
++        "clash_state",
++        "geodata_settings",
++    ] {
++        transaction
++            .execute(&format!("DELETE FROM {table}"), [])
++            .map_err(sql)?;
++    }
++    if revision_count > 0 {
++        let candidate = default_revision.ok_or(StateError::Unsupported)?;
++        if candidate.root.is_empty()
++            || candidate.sources.len() > 16 * 1024 * 1024
++            || candidate.bytes < 0
++            || crate::configuration::digest(candidate.sources.as_bytes())
++                != candidate.content_sha256
++        {
++            return Err(StateError::Unsupported);
++        }
++        let created_at = std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .map_or(0, |elapsed| elapsed.as_secs() as i64);
++        transaction
++            .execute(
++                "INSERT INTO revision (parent, created_at, principal, origin, root, sources, content_sha256, bytes)
++                 VALUES (?1, ?2, 'honk-reset', 'import', ?3, ?4, ?5, ?6)",
++                rusqlite::params![
++                    active,
++                    created_at,
++                    candidate.root,
++                    candidate.sources,
++                    candidate.content_sha256,
++                    candidate.bytes,
++                ],
++            )
++            .map_err(sql)?;
++        let new_head = transaction.last_insert_rowid();
++        transaction
++            .execute("UPDATE head SET active=?1 WHERE id=1", [new_head])
++            .map_err(sql)?;
++        transaction
++            .execute("DELETE FROM revision WHERE number != ?1", [new_head])
++            .map_err(sql)?;
++    }
++    transaction.commit().map_err(sql)?;
++    check(&connection)?;
++    connection
++        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
++        .map_err(sql)?;
++    Ok(true)
++}
++
++fn verify_reset_schema(connection: &Connection) -> Result<(), StateError> {
++    if pragma(connection, "application_id")? != APPLICATION_ID
++        || pragma(connection, "user_version")? != SCHEMA_VERSION
++    {
++        return Err(StateError::Unsupported);
++    }
++    let expected = Connection::open_in_memory().map_err(sql)?;
++    expected.execute_batch(SCHEMA).map_err(sql)?;
++    let schema_objects =
++        |connection: &Connection| -> Result<Vec<(String, String, String)>, StateError> {
++            let mut statement = connection
++            .prepare(
++                "SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
++            )
++            .map_err(sql)?;
++            let rows = statement
++                .query_map([], |row| {
++                    Ok((
++                        row.get::<_, String>(0)?,
++                        row.get::<_, String>(1)?,
++                        row.get::<_, String>(2)?,
++                    ))
++                })
++                .map_err(sql)?;
++            rows.collect::<Result<Vec<_>, _>>().map_err(sql)
++        };
++    let normalize = |objects: Vec<(String, String, String)>| {
++        objects
++            .into_iter()
++            .map(|(kind, name, sql)| {
++                (
++                    kind,
++                    name,
++                    sql.split_whitespace().collect::<Vec<_>>().join(" "),
++                )
++            })
++            .collect::<Vec<_>>()
++    };
++    if normalize(schema_objects(connection)?) != normalize(schema_objects(&expected)?) {
++        return Err(StateError::Unsupported);
++    }
++    Ok(())
++}
++
+ /// Which owners of the cache tables are configured.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub struct ActiveOwners {
+diff --git a/crates/honk-core/src/state/tests.rs b/crates/honk-core/src/state/tests.rs
+index 38e59af..2fc95cf 100644
+--- a/crates/honk-core/src/state/tests.rs
++++ b/crates/honk-core/src/state/tests.rs
+@@ -6,6 +6,38 @@ fn db_path(data_dir: &Path) -> PathBuf {
+     data_dir.join(STATE_DIR).join(DB_FILE)
+ }
+ 
++fn reset_revision() -> DefaultRevision {
++    let sources = format!(
++        "[{{\"name\":\"config.dae\",\"parent\":null,\"content\":\"\",\"sha256\":\"{}\"}}]",
++        crate::configuration::digest(b"")
++    );
++    DefaultRevision {
++        root: "/etc/honk".to_owned(),
++        content_sha256: crate::configuration::digest(sources.as_bytes()),
++        sources,
++        bytes: 0,
++    }
++}
++
++#[test]
++fn admin_exclusive_state_lock_refuses_running_and_blocks_new_daemons() {
++    let directory = tempfile::tempdir().unwrap();
++    let daemon = StateDb::open(directory.path()).unwrap();
++    assert!(matches!(
++        StateDb::open_exclusive_for_admin(directory.path()),
++        Err(StateError::InUse)
++    ));
++    drop(daemon);
++
++    let admin = StateDb::open_exclusive_for_admin(directory.path()).unwrap();
++    assert!(matches!(
++        StateDb::open(directory.path()),
++        Err(StateError::Locked)
++    ));
++    drop(admin);
++    assert!(StateDb::open(directory.path()).is_ok());
++}
++
+ fn read_pragmas(connection: &Connection) -> Vec<(&'static str, String)> {
+     [
+         "journal_mode",
+@@ -476,6 +508,155 @@ fn admin_reset_refuses_startup_before_the_database_exists() {
+     assert_eq!(reset_admin(data.path()), Ok(false));
+ }
+ 
++#[test]
++fn business_reset_clears_business_state_and_replaces_revision_history() {
++    let data = tempfile::tempdir().unwrap();
++    let state = StateDb::open(data.path()).unwrap();
++    state
++        .strict()
++        .execute_batch(
++            "INSERT INTO admin (id, record) VALUES (1, 'pbkdf2-record');
++             INSERT INTO listener_secret (api, value) VALUES ('native_api', 'listener-secret');
++             INSERT INTO revision (parent, created_at, principal, origin, root, sources, content_sha256, bytes)
++             VALUES (NULL, 1, 'test', 'import', '/etc/honk/config.dae', '[]', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1);
++             INSERT INTO head (id, active) VALUES (1, last_insert_rowid());
++             INSERT INTO subscription_body (key, fetched_at, body) VALUES ('sub', 1, X'01');
++             INSERT INTO legacy_import (source, done_at) VALUES ('legacy', 1);
++             INSERT INTO selector (grp, network, member) VALUES ('g', 'tcp', 'n');
++             INSERT INTO delay_sample (node, delay_ms, measured_at) VALUES ('n', 1, 1);
++             INSERT INTO dns_answer (key, expire_at, entry) VALUES ('k', 1, X'01');
++             INSERT INTO clash_state (key, value) VALUES ('mode', 'rule');
++             INSERT INTO geodata_settings (id, record) VALUES (1, '{}');",
++        )
++        .unwrap();
++    drop(state);
++
++    let default = reset_revision();
++    assert!(reset_business_state(data.path(), Some(&default)).unwrap());
++    let state = StateDb::open(data.path()).unwrap();
++    let connection = state.strict();
++    for table in [
++        "subscription_body",
++        "legacy_import",
++        "selector",
++        "delay_sample",
++        "dns_answer",
++        "clash_state",
++        "geodata_settings",
++    ] {
++        assert_eq!(
++            connection
++                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
++                    .get::<_, i64>(0))
++                .unwrap(),
++            0,
++            "{table}"
++        );
++    }
++    assert_eq!(
++        connection
++            .query_row("SELECT record FROM admin WHERE id=1", [], |row| row
++                .get::<_, String>(0))
++            .unwrap(),
++        "pbkdf2-record"
++    );
++    assert_eq!(
++        connection
++            .query_row(
++                "SELECT value FROM listener_secret WHERE api='native_api'",
++                [],
++                |row| row.get::<_, String>(0)
++            )
++            .unwrap(),
++        "listener-secret"
++    );
++    assert_eq!(
++        connection
++            .query_row("SELECT active FROM head WHERE id=1", [], |row| row
++                .get::<_, i64>(0))
++            .unwrap(),
++        2
++    );
++    assert_eq!(
++        connection
++            .query_row("SELECT count(*) FROM revision", [], |row| row
++                .get::<_, i64>(0))
++            .unwrap(),
++        1
++    );
++    drop(connection);
++    drop(state);
++    assert!(reset_business_state(data.path(), Some(&default)).unwrap());
++    let state = StateDb::open(data.path()).unwrap();
++    let connection = state.strict();
++    assert_eq!(
++        connection
++            .query_row("SELECT active FROM head WHERE id=1", [], |row| row
++                .get::<_, i64>(0))
++            .unwrap(),
++        3
++    );
++    assert_eq!(
++        connection
++            .query_row("SELECT count(*) FROM revision", [], |row| row
++                .get::<_, i64>(0))
++            .unwrap(),
++        1
++    );
++    assert_eq!(
++        connection
++            .query_row(
++                "SELECT seq FROM sqlite_sequence WHERE name='revision'",
++                [],
++                |row| row.get::<_, i64>(0)
++            )
++            .unwrap(),
++        3
++    );
++}
++
++#[test]
++fn business_reset_refuses_unknown_schema_and_active_state_owners() {
++    let data = tempfile::tempdir().unwrap();
++    let state = StateDb::open(data.path()).unwrap();
++    assert_eq!(
++        reset_business_state(data.path(), Some(&reset_revision())),
++        Err(StateError::InUse)
++    );
++    drop(state);
++    let connection = Connection::open(db_path(data.path())).unwrap();
++    connection
++        .execute_batch("CREATE TABLE unexpected (value TEXT);")
++        .unwrap();
++    drop(connection);
++    assert_eq!(
++        reset_business_state(data.path(), Some(&reset_revision())),
++        Err(StateError::Unsupported)
++    );
++}
++
++#[test]
++fn business_reset_accepts_a_valid_database_without_admin_or_listener_secrets() {
++    let data = tempfile::tempdir().unwrap();
++    drop(StateDb::open(data.path()).unwrap());
++    assert!(reset_business_state(data.path(), Some(&reset_revision())).unwrap());
++    let state = StateDb::open(data.path()).unwrap();
++    let connection = state.strict();
++    assert_eq!(
++        connection
++            .query_row("SELECT count(*) FROM admin", [], |row| row.get::<_, i64>(0))
++            .unwrap(),
++        0
++    );
++    assert_eq!(
++        connection
++            .query_row("SELECT count(*) FROM listener_secret", [], |row| row
++                .get::<_, i64>(0))
++            .unwrap(),
++        0
++    );
++}
++
+ #[test]
+ fn cache_connections_sync_fully_without_wal() {
+     assert_eq!(synchronous(Class::Cache, true), "NORMAL");
+diff --git a/crates/honk-core/src/subscription/supervisor.rs b/crates/honk-core/src/subscription/supervisor.rs
+index 9eb8c3b..9dfdcc4 100644
+--- a/crates/honk-core/src/subscription/supervisor.rs
++++ b/crates/honk-core/src/subscription/supervisor.rs
+@@ -266,6 +266,7 @@ impl Provider {
+ struct SupervisorState {
+     manager: Arc<SubscriptionManager>,
+     store: Option<SubscriptionStore>,
++    offline_validation: bool,
+     observations: Observations,
+     providers: HashMap<uuid::Uuid, Provider>,
+     fetches: JoinSet<FetchCompletion>,
+@@ -280,9 +281,18 @@ struct SupervisorState {
+ 
+ impl SupervisorState {
+     fn new(manager: Arc<SubscriptionManager>, store: Option<SubscriptionStore>) -> Self {
++        Self::new_with_offline_validation(manager, store, false)
++    }
++
++    fn new_with_offline_validation(
++        manager: Arc<SubscriptionManager>,
++        store: Option<SubscriptionStore>,
++        offline_validation: bool,
++    ) -> Self {
+         Self {
+             manager,
+             store,
++            offline_validation,
+             observations: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+             providers: HashMap::new(),
+             fetches: JoinSet::new(),
+@@ -297,6 +307,9 @@ impl SupervisorState {
+     }
+ 
+     fn schedule(&mut self, id: uuid::Uuid) {
++        if self.offline_validation {
++            return;
++        }
+         let Some(provider) = self.providers.get(&id) else {
+             return;
+         };
+@@ -507,6 +520,10 @@ impl SupervisorState {
+ 
+     #[cfg(feature = "native-api")]
+     fn refresh(&mut self, subscription: Subscription, operation: Box<dyn RefreshReport>) {
++        if self.offline_validation {
++            operation.reject(RefreshRefusal::Unavailable);
++            return;
++        }
+         let id = subscription.id;
+         let Some(provider) = self.providers.get_mut(&id) else {
+             operation.reject(RefreshRefusal::NotRefreshable);
+@@ -839,10 +856,20 @@ pub(crate) struct SubscriptionSupervisor {
+ }
+ 
+ impl SubscriptionSupervisor {
++    #[cfg(test)]
+     pub(crate) async fn prepare(
+         config: &mut Config,
+         store: Option<SubscriptionStore>,
+         static_diagnostics: Vec<honk_config::diagnostic::DetailedDiagnostic>,
++    ) -> anyhow::Result<Self> {
++        Self::prepare_with_offline_validation(config, store, static_diagnostics, false).await
++    }
++
++    pub(crate) async fn prepare_with_offline_validation(
++        config: &mut Config,
++        store: Option<SubscriptionStore>,
++        static_diagnostics: Vec<honk_config::diagnostic::DetailedDiagnostic>,
++        offline_validation: bool,
+     ) -> anyhow::Result<Self> {
+         let authorizations = SubscriptionAuthorizations::new(&config.subscriptions)?;
+         let initial = authorizations.committed(&config.subscriptions);
+@@ -854,7 +881,12 @@ impl SubscriptionSupervisor {
+         };
+         #[cfg(not(feature = "native-api"))]
+         let manager = SubscriptionManager::new()?;
+-        let mut state = SupervisorState::new(Arc::new(manager), store);
++        let manager = Arc::new(manager);
++        let mut state = if offline_validation {
++            SupervisorState::new_with_offline_validation(manager, store, true)
++        } else {
++            SupervisorState::new(manager, store)
++        };
+         state.reconcile(initial);
+         let startup_diagnostics = state.prepare_startup(config, static_diagnostics).await;
+ 
+diff --git a/crates/honk-core/src/subscription/supervisor/startup.rs b/crates/honk-core/src/subscription/supervisor/startup.rs
+index 510325b..be3f970 100644
+--- a/crates/honk-core/src/subscription/supervisor/startup.rs
++++ b/crates/honk-core/src/subscription/supervisor/startup.rs
+@@ -13,7 +13,9 @@ impl SupervisorState {
+         let mut requires_network = HashSet::new();
+         for subscription in config.subscriptions.iter().filter(|s| s.enabled) {
+             let Some(store) = self.store.as_ref() else {
+-                requires_network.insert(subscription.id);
++                if !self.offline_validation {
++                    requires_network.insert(subscription.id);
++                }
+                 continue;
+             };
+             let mut diagnostics = Vec::new();
+@@ -39,7 +41,9 @@ impl SupervisorState {
+                     );
+                 }
+                 Ok(None) => {
+-                    requires_network.insert(subscription.id);
++                    if !self.offline_validation {
++                        requires_network.insert(subscription.id);
++                    }
+                 }
+                 Err(error) => {
+                     honk_config::diagnostic::report_detailed_diagnostics(&diagnostics);
+@@ -48,7 +52,9 @@ impl SupervisorState {
+                         %error,
+                         "Failed to restore subscription"
+                     );
+-                    requires_network.insert(subscription.id);
++                    if !self.offline_validation {
++                        requires_network.insert(subscription.id);
++                    }
+                     self.observations
+                         .write()
+                         .get_mut(&subscription.id)
+diff --git a/crates/honk-core/src/subscription/supervisor/tests.rs b/crates/honk-core/src/subscription/supervisor/tests.rs
+index c490588..c1ff8c0 100644
+--- a/crates/honk-core/src/subscription/supervisor/tests.rs
++++ b/crates/honk-core/src/subscription/supervisor/tests.rs
+@@ -20,6 +20,43 @@ fn state() -> SupervisorState {
+     SupervisorState::new(Arc::new(SubscriptionManager::new().unwrap()), None)
+ }
+ 
++#[tokio::test]
++async fn offline_validation_skips_missing_subscription_bodies_without_fetching() {
++    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let provider = authorized(
++        uuid::Uuid::new_v4(),
++        1,
++        format!("http://{}", listener.local_addr().unwrap()),
++    );
++    let mut config = Config {
++        subscriptions: vec![provider.subscription.clone()],
++        ..Default::default()
++    };
++    let mut state = SupervisorState::new_with_offline_validation(
++        Arc::new(SubscriptionManager::new().unwrap()),
++        None,
++        true,
++    );
++    state.reconcile(vec![provider]);
++
++    let diagnostics = tokio::time::timeout(
++        Duration::from_millis(100),
++        state.prepare_startup(&mut config, Vec::new()),
++    )
++    .await
++    .expect("offline startup must not wait for a fetch");
++
++    assert!(diagnostics.providers.is_empty());
++    assert!(state.pending.is_empty());
++    assert!(state.fetches.is_empty());
++    assert!(
++        tokio::time::timeout(Duration::from_millis(25), listener.accept())
++            .await
++            .is_err()
++    );
++    state.shutdown().await.unwrap();
++}
++
+ #[test]
+ fn an_interval_past_the_clock_range_is_never_due() {
+     let mut subscription = authorized(uuid::Uuid::new_v4(), 1, "http://provider".into());

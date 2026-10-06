@@ -1,0 +1,9 @@
+/artifacts/
+/.cache/
+/honk/generated-stage.mk
+/honk/generated-provenance.json
+/luci-app-honk/generated-doona-stage.mk
+/localdocs/
+/openwrt-sdk-*/
+/build/
+.env.local
