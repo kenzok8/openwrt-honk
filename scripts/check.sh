@@ -39,8 +39,8 @@ const badAdditions = lines.filter(line => line.startsWith('+') && !line.startsWi
 if (badAdditions.length)
 	throw new Error(`Patch contains added lines with trailing whitespace (${badAdditions.length})`);
 const whitespaceContext = lines.filter(line => /^[\t ]+$/.test(line));
-if (whitespaceContext.length !== 10 || whitespaceContext.some(line => line !== ' '))
-	throw new Error(`Expected exactly ten single-space unified-diff context lines; found ${whitespaceContext.length}`);
+if (whitespaceContext.some(line => line !== ' '))
+	throw new Error('Unified-diff context lines must be a single space');
 NODE
 
 verify_stage() {

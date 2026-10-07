@@ -1,120 +1,5 @@
---- a/src/api/index.ts
-+++ b/src/api/index.ts
-@@ -1,19 +1,38 @@
- import type {Api} from './api';
- import {createApi} from './client';
- import {createServerClock, selectServerClock} from './serverClock';
--import {isDemoApi, pinnedProfile, storageRevision, touchStorage} from './profiles';
-+import {hostedRoot, isDemoApi, pinnedProfile, readProfiles, storageRevision, touchStorage, writeProfiles} from './profiles';
- import {sessionToken} from './session';
- 
- let selected: Api | undefined;
- let configuration = '';
-+const openwrtHonk = import.meta.env.VITE_OPENWRT_HONK === '1';
- let mockFactory: typeof import('../../mock').createMockApi | undefined;
- // Every store hook asks for the client on every render; storage is read again only once something may have changed it.
- let checked = -1;
- if (typeof window !== 'undefined') window.addEventListener('storage', touchStorage);
- 
-+function ensureOpenWrtProfile() {
-+  const current = readProfiles();
-+  const loc = globalThis.location;
-+  const api = hostedRoot(loc);
-+  if (!current.profiles.length) {
-+    writeProfiles({profiles: [{id: 'hosted', name: loc.host, api, token: ''}], activeId: 'hosted'});
-+  } else if (current.profiles.some(profile => isDemoApi(profile.api))) {
-+    writeProfiles({
-+      profiles: current.profiles.map(profile => (isDemoApi(profile.api) ? {...profile, name: loc.host, api, token: ''} : profile)),
-+      activeId: current.activeId
-+    });
-+  }
-+  return pinnedProfile();
-+}
-+
- export async function initializeApi(): Promise<Api> {
--  const base = pinnedProfile()?.api;
--  if (isDemoApi(base)) mockFactory = (await import('../../mock')).createMockApi;
-+  if (openwrtHonk) ensureOpenWrtProfile();
-+  else {
-+    const base = pinnedProfile()?.api;
-+    if (isDemoApi(base)) mockFactory = (await import('../../mock')).createMockApi;
-+  }
-   return getApi();
- }
- 
-@@ -23,13 +42,18 @@
- export function getApi(): Api {
-   if (selected && checked === storageRevision()) return selected;
-   // Another tab editing or deleting this tab's profile does not move this tab: it keeps that backend until it is reloaded.
--  const profile = pinnedProfile();
-+  const profile = openwrtHonk ? ensureOpenWrtProfile() : pinnedProfile();
-   const base = profile?.api;
-   // A password session opened in this tab takes the place of the profile's configured bearer.
-   const token = (profile && base ? sessionToken(profile.id, base) : null) ?? profile?.token;
-   const key = JSON.stringify([profile?.id, base, token]);
-   if (!selected || configuration !== key) {
--    if (!isDemoApi(base)) {
-+    if (openwrtHonk) {
-+      if (!profile || isDemoApi(base)) throw new Error('OpenWrt backend profile is unavailable');
-+      const clock = createServerClock();
-+      selected = createApi(base, token ?? undefined, clock);
-+      selectServerClock(clock);
-+    } else if (!isDemoApi(base)) {
-       const clock = createServerClock();
-       selected = createApi(base, token ?? undefined, clock);
-       selectServerClock(clock);
---- a/src/api/auth.ts
-+++ b/src/api/auth.ts
-@@ -1,6 +1,8 @@
- import type {components} from './types';
- import {LocalError, responseError, send} from './error';
--import {isDemoApi} from './profiles';
-+import {hostedRoot, isDemoApi} from './profiles';
-+
-+const openwrtHonk = import.meta.env.VITE_OPENWRT_HONK === '1';
- 
- // Sign-in reads only what the public discovery view carries; the admitted view's auth adds anonymous_loopback.
- export type AuthDiscovery = components['schemas']['PublicDiscovery']['auth'];
-@@ -14,13 +16,14 @@
- // The demo backend signs in through the in-browser mock, loaded only when that backend is asked. Its one account is
- // published on the sign-in page, so it guards nothing.
- const demoAuth = () => import('../../mock/auth');
-+const apiBase = (base: string) => (openwrtHonk && isDemoApi(base) ? hostedRoot(globalThis.location) : base);
- export const DEMO_ACCOUNT = {username: 'demo', password: 'demo'} as const;
- 
- // Discovery is public, so it is read without a token. An engine that still reports the old API name serves an API
- // older than this doona, which it cannot sign in to.
- export async function discoverAuth(base: string, signal?: AbortSignal): Promise<AuthDiscovery> {
--  if (isDemoApi(base)) return (await demoAuth()).mockDiscovery();
--  const response = await send(url(base, '/api'), {headers: {Accept: 'application/json'}, cache: 'no-store', signal});
-+  if (!openwrtHonk && isDemoApi(base)) return (await demoAuth()).mockDiscovery();
-+  const response = await send(url(apiBase(base), '/api'), {headers: {Accept: 'application/json'}, cache: 'no-store', signal});
-   if (!response.ok) throw await responseError(response);
-   const body: {name?: string; auth: AuthDiscovery} = await response.json();
-   if (body.name === 'dae/honk-native') throw new LocalError('login.engineOutdated');
-@@ -41,9 +44,9 @@
- // Setup and login carry no Authorization: a stale token from an earlier session would be refused as invalid. Only
- // setup changes what the backend holds: a login that timed out is simply tried again, so it keeps the read wording.
- export async function openSession(base: string, kind: 'setup' | 'login', credentials: AuthCredentials, signal?: AbortSignal): Promise<AuthSession> {
--  if (isDemoApi(base)) return (await demoAuth()).mockOpenSession(kind, credentials);
-+  if (!openwrtHonk && isDemoApi(base)) return (await demoAuth()).mockOpenSession(kind, credentials);
-   const response = await send(
--    url(base, `/api/v1/auth/${kind}`),
-+    url(apiBase(base), `/api/v1/auth/${kind}`),
-     {
-       method: 'POST',
-       headers: {Accept: 'application/json', 'Content-Type': 'application/json'},
-@@ -59,8 +62,8 @@
- 
- export async function closeSession(base: string, token: string, signal?: AbortSignal): Promise<void> {
-   // The demo keeps no sessions to revoke; dropping the tab's token ends it.
--  if (isDemoApi(base)) return;
--  const response = await send(url(base, '/api/v1/auth/logout'), {
-+  if (!openwrtHonk && isDemoApi(base)) return;
-+  const response = await send(url(apiBase(base), '/api/v1/auth/logout'), {
-     method: 'POST',
-     headers: {Accept: 'application/json', Authorization: 'Bearer ' + token},
-     cache: 'no-store',
+diff --git a/src/shell/widgets/samples.ts b/src/shell/widgets/samples.ts
+index f986741..426c146 100644
 --- a/src/shell/widgets/samples.ts
 +++ b/src/shell/widgets/samples.ts
 @@ -1,7 +1,8 @@
@@ -127,26 +12,17 @@
  const sampleNotices: ApiEvent[] = [{id: 'sample-ready', event: 'stream.ready', data: {instance_id: 'sample-engine', observed_at: new Date(now).toISOString()}}];
  
  async function createSamples() {
-@@ -57,4 +58,4 @@
+@@ -57,4 +58,4 @@ async function createSamples() {
  }
  export type PreviewSamples = Awaited<ReturnType<typeof createSamples>>;
  let pending: Promise<PreviewSamples> | undefined;
 -export const loadSamples = () => (pending ??= createSamples());
 +export const loadSamples = () => (openwrtHonk ? Promise.resolve({} as PreviewSamples) : (pending ??= createSamples()));
---- a/src/shell/useLogin.ts
-+++ b/src/shell/useLogin.ts
-@@ -127,7 +127,7 @@
-     return () => controller.abort();
-   }, [api, discovery.attempt, missingApi]);
-   // The demo backend publishes its account, so its form arrives filled in and says so.
--  const demo = isDemoApi(api);
-+  const demo = import.meta.env.VITE_OPENWRT_HONK !== '1' && isDemoApi(api);
-   const [username, setUsername] = useState(demo ? DEMO_ACCOUNT.username : '');
-   const [password, setPassword] = useState(demo ? DEMO_ACCOUNT.password : '');
-   const [confirm, setConfirm] = useState('');
+diff --git a/src/vite-env.d.ts b/src/vite-env.d.ts
+index fbd5962..5cedcfd 100644
 --- a/src/vite-env.d.ts
 +++ b/src/vite-env.d.ts
-@@ -15,6 +15,7 @@
+@@ -15,6 +15,7 @@ declare module 'virtual:startup-text' {
  // Filled in by vite.config.ts from package.json.
  interface ImportMetaEnv {
    readonly VITE_DOONA_VERSION: string;
@@ -154,70 +30,3 @@
    readonly VITE_DOONA_CONTRACT_COMMIT: string;
    readonly VITE_DOONA_REPO: string;
    readonly VITE_ENGINE_ORG: string;
---- a/src/api/index.test.ts
-+++ b/src/api/index.test.ts
-@@ -2,6 +2,7 @@
- 
- afterEach(() => {
-   vi.unstubAllGlobals();
-+  vi.unstubAllEnvs();
-   vi.useRealTimers();
- });
- 
-@@ -17,6 +18,56 @@
-   };
-   return port;
- }
-+
-+it.each([
-+  {name: 'no saved profile', saved: null, api: 'https://gateway.example/honk', token: ''},
-+  {name: 'saved mock profile', saved: {id: 'demo', name: 'Demo', api: 'mock', token: 'demo-token'}, api: 'https://gateway.example/honk', token: ''},
-+  {
-+    name: 'explicit real profile',
-+    saved: {id: 'home', name: 'Home', api: 'https://backend.example/prefix', token: 'real-token'},
-+    api: 'https://backend.example/prefix',
-+    token: 'real-token'
-+  }
-+])('uses a real same-origin API for the OpenWrt build ($name)', async ({saved, api, token}) => {
-+  const values = new Map<string, string>();
-+  if (saved) {
-+    values.set('doona-profiles', JSON.stringify([saved]));
-+    values.set('doona-profile', saved.id);
-+  }
-+  const local = storage(values);
-+  const requests: Array<[string, string | null]> = [];
-+  vi.stubEnv('VITE_OPENWRT_HONK', '1');
-+  vi.stubGlobal('localStorage', local);
-+  vi.stubGlobal('sessionStorage', storage(new Map()));
-+  vi.stubGlobal('window', new EventTarget());
-+  vi.stubGlobal('location', {origin: 'https://gateway.example', pathname: '/honk/ui/', protocol: 'https:', host: 'gateway.example'});
-+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-+    const request = new Request(input, init);
-+    requests.push([request.url, request.headers.get('Authorization')]);
-+    return Response.json({});
-+  });
-+  vi.resetModules();
-+  const {getApi, initializeApi, startedOnMock} = await import('./index');
-+  await initializeApi();
-+  expect(startedOnMock()).toBe(false);
-+  const {readProfiles} = await import('./profiles');
-+  const profile = readProfiles().profiles[0];
-+  expect(profile?.api).toBe(api);
-+  expect(profile?.token).toBe(token);
-+  await getApi().version();
-+  expect(requests).toEqual([[`${api}/api/v1/version`, token ? `Bearer ${token}` : null]]);
-+});
-+
-+it('keeps the in-browser demo in an unflagged build', async () => {
-+  vi.stubEnv('VITE_OPENWRT_HONK', '');
-+  vi.stubGlobal('localStorage', storage(new Map()));
-+  vi.stubGlobal('sessionStorage', storage(new Map()));
-+  vi.stubGlobal('window', new EventTarget());
-+  vi.resetModules();
-+  const {initializeApi, startedOnMock} = await import('./index');
-+  await initializeApi();
-+  expect(startedOnMock()).toBe(true);
-+});
- 
- it('reads storage for the client again only after a write or a storage event', async () => {
-   const local = storage(new Map([['doona-profiles', JSON.stringify([{id: 'home', name: 'Home', api: 'https://home.example', token: ''}])]]));
