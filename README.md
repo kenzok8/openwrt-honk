@@ -1,10 +1,41 @@
-# Honk for OpenWrt
+<h1 align="center">openwrt-honk</h1>
 
-Honk 是 OpenWrt x86_64 的透明代理核心，提供 LuCI 管理页，并用 Doona 提供核心 Web 界面。仓库包含 `honk` 与 `luci-app-honk` 两个软件包；LuCI 中文翻译直接编译进 `luci-app-honk`，不再单独提供 `luci-i18n-honk-zh-cn`。Doona 随 LuCI 包安装到 `/usr/share/doona`，供核心 Web 界面使用，不另起服务。
+<p align="center">OpenWrt x86_64 透明代理一体包：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
+
+## 界面预览
+
+<table>
+<tr>
+<td align="center"><b>概览</b><br><img width="420" src="https://raw.githubusercontent.com/kenzok8/kenzok8/main/screenshot/honk/honk-overview.png"></td>
+<td align="center"><b>配置</b><br><img width="420" src="https://raw.githubusercontent.com/kenzok8/kenzok8/main/screenshot/honk/honk-configuration.png"></td>
+</tr>
+<tr>
+<td align="center"><b>维护</b><br><img width="420" src="https://raw.githubusercontent.com/kenzok8/kenzok8/main/screenshot/honk/honk-maintenance.png"></td>
+<td align="center"><b>Doona 核心界面</b><br><img width="420" src="https://raw.githubusercontent.com/kenzok8/kenzok8/main/screenshot/honk/honk-doona.png"></td>
+</tr>
+</table>
+
+## 关于 Honk
+
+- **honk** —— 基于 eBPF 的高性能透明代理核心（dae 风格的 Rust 重写），流量在内核态分流，直连流量几乎零开销，适合做软路由主力代理。
+- **luci-app-honk** —— LuCI 管理界面：概览、配置（订阅 / 粘贴节点 / dae 导入）、日志、维护（Geo 数据更新、软件包升级、配置备份、系统检查）。
+- **Doona** —— 核心自带 Web 界面（随 LuCI 包安装到 `/usr/share/doona`），管理节点、分组、路由、DNS 与订阅，不另起服务。
+
+## 包含什么
+
+- `honk` —— honk-core 二进制 + 服务脚本 + 默认配置
+- `luci-app-honk` —— LuCI 界面 + 中文翻译（直接编译进主包）+ Doona 资产
+- Geo 数据由 `v2ray-geoip` / `v2ray-geosite`（`kenzok8/wall` 源）提供，可在维护页手动更新或定时更新
 
 ## 使用
 
-安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。`honk` 依赖 `v2ray-geoip` 与 `v2ray-geosite` 提供路由 GeoIP/GeoSite 数据（来自 `kenzok8/wall` 源），可在「维护」页手动更新或配置每日/每周自动更新。核心 Web 界面仅在已初始化、正在运行且 API 就绪时开放。
+安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。核心 Web 界面仅在已初始化、正在运行且 API 就绪时开放。
+
+配置页支持三种导入方式：
+
+- **添加订阅**：填写名称与订阅地址，直连下载（`route: direct`）
+- **粘贴节点**：粘贴 Clash YAML / Surge INI / Base64 / 分享链接，本地解析成节点后一键导入
+- **导入配置**：上传 `.dae` 业务配置，替换业务段
 
 管理入口和 API 只应在可信 LAN 内使用。若 LuCI 通过未加密的 HTTP 提供，浏览器到路由器间的登录信息和 API 流量没有传输加密保护；请勿将管理页面暴露到互联网。
 
@@ -25,6 +56,28 @@ ci/build-sdk.sh
 
 脚本将归档写入被 Git 忽略的 `artifacts/cache/`，APK 写入 `artifacts/apk/`。本地没有生成的阶段归档时，`honk/Makefile` 保留一个 debug 预构建核心作为原型输入；其下载地址可能指向滚动的 debug 资产，但 SHA256 仍必须精确匹配 Makefile 中固定值。正式阶段构建会生成带实际 SHA256 的忽略文件并覆盖该默认值，SDK 构建也会预先把同名归档放进下载缓存；任何散列不匹配都会使构建失败，不跳过校验。
 
-## 许可
+## 依赖
+
+| 包名 | 说明 |
+|------|------|
+| `ca-bundle` | CA 证书包 |
+| `kmod-sched-core` / `kmod-sched-bpf` | eBPF 流量调度 |
+| `kmod-veth` | 虚拟以太网设备 |
+| `kmod-nft-queue` | nftables 队列 |
+| `v2ray-geoip` / `v2ray-geosite` | 路由 GeoIP/GeoSite 数据 |
+| `rpcd` / `luci-base` / `cgi-io` | LuCI 运行依赖 |
+
+内核需要 BTF（`/sys/kernel/btf/vmlinux`），honk-core 用 CO-RE eBPF，缺少 BTF 会启动失败。
+
+## 系统要求
+
+- OpenWrt x86_64（推荐 25.x，需 Linux 6.12+ 且内核开启 BTF）
+
+## 致谢
+
+- [honk](https://github.com/Glassyiris/honk) — eBPF 透明代理核心
+- [doona](https://github.com/Zakkaus/doona) — 核心 Web 界面
+
+## 许可证
 
 本仓库原创集成文件采用 GPL-3.0-only。Honk 核心与 Doona 各自保留上游许可和第三方声明；打包时随软件安装至 `/usr/share/licenses/`。核心提交、Doona 提交、补丁摘要及实际阶段归档散列记录在构建生成的 provenance 文件中。
