@@ -463,7 +463,7 @@ index 0000000..3d57a48
 +const UPLOAD_PATH: &str = "/tmp/honk-v2-upload/import.dae";
 +const REQUEST_LIMIT: usize = 2 * 1024 * 1024 + 64 * 1024;
 +const DAE_LIMIT: usize = 2 * 1024 * 1024;
-+const SHARE_LINK_LIMIT: usize = 16 * 1024;
++const SHARE_LINK_LIMIT: usize = 1 * 1024 * 1024;
 +const PREVIEW_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 +
 +#[derive(Debug, Deserialize)]
@@ -1643,7 +1643,7 @@ index 0000000..3d57a48
 +
 +    #[test]
 +    fn request_limits_match_the_advertised_transport_bounds() {
-+        assert_eq!(SHARE_LINK_LIMIT, 16 * 1024);
++        assert_eq!(SHARE_LINK_LIMIT, 1 * 1024 * 1024);
 +        assert_eq!(DAE_LIMIT, 2 * 1024 * 1024);
 +        assert!(REQUEST_LIMIT > DAE_LIMIT);
 +    }

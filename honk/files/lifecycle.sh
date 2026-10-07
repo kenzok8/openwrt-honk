@@ -169,7 +169,7 @@ honk_lifecycle_start() {
 					hlp_starttime=$hlp_new_starttime
 					hlp_stable=1
 				fi
-				if [ "$hlp_stable" -ge 6 ]; then
+				if [ "$hlp_stable" -ge 3 ]; then
 					HONK_LIFECYCLE_STOP_PID=$hlp_new_pid
 					HONK_LIFECYCLE_STOP_STARTTIME=$hlp_new_starttime
 					return 0
