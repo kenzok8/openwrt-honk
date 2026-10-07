@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=2026.10.05
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 include $(CURDIR)/generated-stage.mk
 
@@ -38,7 +38,7 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
   URL:=https://github.com/Glassyiris/honk
-	DEPENDS:=@TARGET_x86_64 +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +curl +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat $(HONK_BTF_BUILD_DEPENDS)
+	DEPENDS:=@TARGET_x86_64 +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +curl +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite $(HONK_BTF_BUILD_DEPENDS)
 endef
 
 define Package/honk/description

@@ -1,14 +1,14 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
-# update-pkg.sh <honk|luci-app-honk|luci-i18n-honk-zh-cn>
+# update-pkg.sh <honk|luci-app-honk>
 # Refresh package indexes and upgrade the named package via apk. Forks to
 # background; the result is streamed to /tmp/luci-app-honk.pkg.<name>.log.
 
 PKG="$1"
 case "$PKG" in
-	honk|luci-app-honk|luci-i18n-honk-zh-cn) ;;
+	honk|luci-app-honk) ;;
 	*)
-		echo "usage: $0 <honk|luci-app-honk|luci-i18n-honk-zh-cn>" >&2
+		echo "usage: $0 <honk|luci-app-honk>" >&2
 		exit 64
 		;;
 esac

@@ -43,7 +43,7 @@ mkdir -p "$STAGE/packages"
 chmod 0755 "$STAGE/packages"
 
 packages=()
-for name in honk luci-app-honk luci-i18n-honk-zh-cn; do
+for name in honk luci-app-honk; do
 	mapfile -t matches < <(find "$APK_DIR" -maxdepth 1 -type f -name "$name-*.apk" -print | sort)
 	[ "${#matches[@]}" -eq 1 ] || { echo "Expected exactly one $name APK; found ${#matches[@]}." >&2; exit 1; }
 	package=${matches[0]}
@@ -99,10 +99,9 @@ if (sourceResult.status !== 0 ||
 	throw new Error('The Doona archive SOURCE record does not match the pinned build.');
 const expectedVersions = {
 	honk: `${makeValue(path.join(root, 'honk/Makefile'), 'PKG_VERSION')}-r${makeValue(path.join(root, 'honk/Makefile'), 'PKG_RELEASE')}`,
-	'luci-app-honk': `${makeValue(path.join(root, 'luci-app-honk/Makefile'), 'PKG_VERSION')}-r${makeValue(path.join(root, 'luci-app-honk/Makefile'), 'PKG_RELEASE')}`,
-	'luci-i18n-honk-zh-cn': `${makeValue(path.join(root, 'luci-app-honk/Makefile'), 'PKG_VERSION')}-r${makeValue(path.join(root, 'luci-app-honk/Makefile'), 'PKG_RELEASE')}`
+	'luci-app-honk': `${makeValue(path.join(root, 'luci-app-honk/Makefile'), 'PKG_VERSION')}-r${makeValue(path.join(root, 'luci-app-honk/Makefile'), 'PKG_RELEASE')}`
 };
-const expectedNames = new Set(['honk', 'luci-app-honk', 'luci-i18n-honk-zh-cn']);
+const expectedNames = new Set(['honk', 'luci-app-honk']);
 const packages = files.map(file => {
 	const dump = spawnSync(apkTool, ['adbdump', '--format', 'json', file], { encoding: 'utf8' });
 	if (dump.status !== 0) throw new Error(`Could not read APK metadata: ${path.basename(file)}`);

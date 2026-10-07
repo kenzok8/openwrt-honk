@@ -1,10 +1,10 @@
 # Honk for OpenWrt
 
-Honk 是 OpenWrt x86_64 的透明代理核心，提供 LuCI 管理页，并用 Doona 提供核心 Web 界面。仓库包含 `honk` 与 `luci-app-honk` 两个软件包；LuCI 中文翻译按 OpenWrt 标准作为对应的 `luci-i18n-honk-zh-cn` 语言包构建。Doona 随 LuCI 包安装到 `/usr/share/doona`，供核心 Web 界面使用，不另起服务。
+Honk 是 OpenWrt x86_64 的透明代理核心，提供 LuCI 管理页，并用 Doona 提供核心 Web 界面。仓库包含 `honk` 与 `luci-app-honk` 两个软件包；LuCI 中文翻译直接编译进 `luci-app-honk`，不再单独提供 `luci-i18n-honk-zh-cn`。Doona 随 LuCI 包安装到 `/usr/share/doona`，供核心 Web 界面使用，不另起服务。
 
 ## 使用
 
-安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。需要中文界面时也安装 `luci-i18n-honk-zh-cn`。核心 Web 界面仅在已初始化、正在运行且 API 就绪时开放。
+安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。`honk` 依赖 `v2ray-geoip` 与 `v2ray-geosite` 提供路由 GeoIP/GeoSite 数据（来自 `kenzok8/wall` 源），可在「维护」页手动更新或配置每日/每周自动更新。核心 Web 界面仅在已初始化、正在运行且 API 就绪时开放。
 
 管理入口和 API 只应在可信 LAN 内使用。若 LuCI 通过未加密的 HTTP 提供，浏览器到路由器间的登录信息和 API 流量没有传输加密保护；请勿将管理页面暴露到互联网。
 

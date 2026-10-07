@@ -95,7 +95,7 @@ validate_manifest() {
 	[ "$validate_packages_type" = array ] || return 1
 	json_select packages || return 1
 	json_get_keys validate_package_keys
-	[ "$(printf '%s\n' "$validate_package_keys" | wc -w | tr -d ' ')" = 3 ] || return 1
+	[ "$(printf '%s\n' "$validate_package_keys" | wc -w | tr -d ' ')" = 2 ] || return 1
 	json_select .. || return 1
 	[ "$(manifest_field '@.schema')" = 1 ] || return 1
 	[ "$(manifest_field '@.product')" = openwrt-honk ] || return 1
@@ -135,7 +135,7 @@ validate_manifest() {
 	: > "$RECORDS" || return 1
 	validate_seen=' '
 	validate_available=0
-	for validate_index in 0 1 2; do
+	for validate_index in 0 1; do
 		validate_name=$(manifest_field "@.packages[$validate_index].name")
 		validate_version=$(manifest_field "@.packages[$validate_index].version")
 		validate_arch=$(manifest_field "@.packages[$validate_index].arch")
@@ -143,12 +143,12 @@ validate_manifest() {
 		validate_size=$(manifest_field "@.packages[$validate_index].size")
 		validate_sha=$(manifest_field "@.packages[$validate_index].sha256")
 		validate_package_url=$(manifest_field "@.packages[$validate_index].url")
-		case "$validate_name" in honk|luci-app-honk|luci-i18n-honk-zh-cn) ;; *) return 1 ;; esac
+		case "$validate_name" in honk|luci-app-honk) ;; *) return 1 ;; esac
 		case "$validate_seen" in *" $validate_name "*) return 1 ;; esac
 		validate_seen="$validate_seen$validate_name "
 		case "$validate_version" in ''|*[!A-Za-z0-9.+~-]*) return 1 ;; esac
 		case "$validate_arch" in x86_64|noarch) ;; *) return 1 ;; esac
-		case "$validate_name:$validate_arch" in honk:x86_64|luci-app-honk:x86_64|luci-app-honk:noarch|luci-i18n-honk-zh-cn:x86_64|luci-i18n-honk-zh-cn:noarch) ;; *) return 1 ;; esac
+		case "$validate_name:$validate_arch" in honk:x86_64|luci-app-honk:x86_64|luci-app-honk:noarch) ;; *) return 1 ;; esac
 		[ "$validate_filename" = "$validate_name-$validate_version.apk" ] || return 1
 		case "$validate_filename" in *'/'*|*'..'*|*[!A-Za-z0-9.+_-]*) return 1 ;; esac
 		case "$validate_size" in ''|*[!0-9]*) return 1 ;; esac
@@ -159,8 +159,8 @@ validate_manifest() {
 		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$validate_name" "$validate_version" "$validate_arch" "$validate_filename" "$validate_size" "$validate_sha" "$validate_package_url" >> "$RECORDS" || return 1
 		[ "$(installed_version "$validate_name")" = "$validate_version" ] || validate_available=1
 	done
-	[ "$(wc -l < "$RECORDS" | tr -d ' ')" = 3 ] || return 1
-	for validate_required in honk luci-app-honk luci-i18n-honk-zh-cn; do
+	[ "$(wc -l < "$RECORDS" | tr -d ' ')" = 2 ] || return 1
+	for validate_required in honk luci-app-honk; do
 		case "$validate_seen" in *" $validate_required "*) ;; *) return 1 ;; esac
 	done
 	update_version=$(awk -F '\t' '$1 == "honk" { print $2; exit }' "$RECORDS")

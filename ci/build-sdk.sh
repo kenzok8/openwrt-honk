@@ -62,21 +62,23 @@ if test -f feeds.conf.default; then
 	sed -E '/^src-(git|svn|hg|bzr|link)[[:space:]]+([^[:space:]]+[[:space:]]+)*base([[:space:]]|$)/d' feeds.conf.default > feeds.conf
 fi
 printf '%s\n' 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' >> feeds.conf
-./scripts/feeds update base packages luci
+printf '%s\n' 'src-git wall https://github.com/kenzok8/wall.git' >> feeds.conf
+./scripts/feeds update base packages luci wall
 ./scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo
 ./scripts/feeds install -p packages luasrcdiet
 ./scripts/feeds install luci-base
+./scripts/feeds install -p wall v2ray-geodata
 cat >> .config <<'EOF'
 CONFIG_PACKAGE_honk=m
 CONFIG_PACKAGE_luci-app-honk=m
-CONFIG_PACKAGE_luci-i18n-honk-zh-cn=m
-CONFIG_LUCI_LANG_zh_Hans=y
+CONFIG_PACKAGE_v2ray-geoip=m
+CONFIG_PACKAGE_v2ray-geosite=m
 EOF
 make defconfig
 grep -qx 'CONFIG_PACKAGE_honk=m' .config || { echo 'The honk package is not selected; check its kernel BTF dependency.' >&2; exit 1; }
 grep -qx 'CONFIG_PACKAGE_luci-app-honk=m' .config || { echo 'The LuCI app package is not selected.' >&2; exit 1; }
-grep -qx 'CONFIG_PACKAGE_luci-i18n-honk-zh-cn=m' .config || { echo 'The Chinese LuCI translation package is not selected.' >&2; exit 1; }
-grep -qx 'CONFIG_LUCI_LANG_zh_Hans=y' .config || { echo 'The Simplified Chinese LuCI translation is not enabled.' >&2; exit 1; }
+grep -qx 'CONFIG_PACKAGE_v2ray-geoip=m' .config || { echo 'The GeoIP data package is not selected.' >&2; exit 1; }
+grep -qx 'CONFIG_PACKAGE_v2ray-geosite=m' .config || { echo 'The GeoSite data package is not selected.' >&2; exit 1; }
 
 make -j1 package/utils/lua/host/compile package/utils/lua/compile \
 	package/libs/libjson-c/host/compile package/libs/libjson-c/compile \
@@ -86,11 +88,11 @@ make -j1 package/utils/lua/host/compile package/utils/lua/compile \
 	package/feeds/base/zlib/compile package/feeds/base/libnl-tiny/compile \
 	package/feeds/base/iwinfo/compile \
 	package/utils/ucode/host/compile package/utils/ucode/compile \
+	package/feeds/luci/luci-base/host/compile \
 	package/feeds/luci/lucihttp/compile V=s
-make -j1 package/honk/compile package/luci-app-honk/compile V=s
-find bin/packages -type f \( -name 'honk-*.apk' -o -name 'luci-app-honk-*.apk' -o -name 'luci-i18n-honk-zh-cn-*.apk' \) -exec cp -v {} "$OUT_DIR/" \;
+make -j1 package/honk/compile package/luci-app-honk/compile package/feeds/wall/v2ray-geodata/compile V=s
+find bin/packages -type f \( -name 'honk-*.apk' -o -name 'luci-app-honk-*.apk' \) -exec cp -v {} "$OUT_DIR/" \;
 compgen -G "$OUT_DIR/honk-*.apk" >/dev/null || { echo 'Honk APK was not produced.' >&2; exit 1; }
 compgen -G "$OUT_DIR/luci-app-honk-*.apk" >/dev/null || { echo 'LuCI APK was not produced.' >&2; exit 1; }
-compgen -G "$OUT_DIR/luci-i18n-honk-zh-cn-*.apk" >/dev/null || { echo 'Chinese translation APK was not produced.' >&2; exit 1; }
-(cd "$OUT_DIR" && sha256sum honk-*.apk luci-app-honk-*.apk luci-i18n-honk-zh-cn-*.apk > SHA256SUMS)
+(cd "$OUT_DIR" && sha256sum honk-*.apk luci-app-honk-*.apk > SHA256SUMS)
 printf 'APK artifacts are in %s\n' "$OUT_DIR"

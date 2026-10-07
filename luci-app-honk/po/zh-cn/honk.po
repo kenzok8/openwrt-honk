@@ -840,8 +840,8 @@ msgstr "维护操作超时。"
 msgid "The maintenance worker stopped unexpectedly; check system recovery status before retrying."
 msgstr "维护进程意外停止。请先检查系统恢复状态，再重试。"
 
-msgid "This permanently clears Honk subscriptions, nodes, policies, DNS data, history, and cache. The administrator account is kept, and Honk will be stopped. Continue?"
-msgstr "此操作会永久清除 Honk 订阅、节点、策略、DNS 数据、历史记录和缓存，但保留管理员账号并停止 Honk。是否继续？"
+msgid "This permanently clears Honk subscriptions, nodes, policies, DNS data, history, and cache, then restores the default configuration. The administrator account is kept, and Honk will be stopped. Continue?"
+msgstr "此操作会永久清除 Honk 订阅、节点、策略、DNS 数据、历史记录和缓存，并恢复默认配置，但保留管理员账号并停止 Honk。是否继续？"
 
 msgid "Update check failed."
 msgstr "检查更新失败。"
@@ -1049,3 +1049,45 @@ msgstr "导出备份归档、从电脑导入，或将 Honk 恢复为默认配置
 
 msgid "Package updates, config backup and system recovery for the Honk installation."
 msgstr "Honk 安装的软件包更新、配置备份与系统恢复。"
+
+msgid "Geo data"
+msgstr "Geo 数据"
+
+msgid "GeoIP and GeoSite routing data can be updated here. Updates run in the background and reload Honk when done."
+msgstr "可在此更新 GeoIP 与 GeoSite 路由数据。更新在后台运行，完成后自动重载 Honk。"
+
+msgid "missing — click Update to fetch"
+msgstr "缺失 — 点击更新获取"
+
+msgid "Custom"
+msgstr "自定义"
+
+msgid "Disabled"
+msgstr "关闭"
+
+msgid "Daily"
+msgstr "每天"
+
+msgid "Weekly"
+msgstr "每周"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Source"
+msgstr "数据源"
+
+msgid "Auto-update"
+msgstr "自动更新"
+
+msgid "Geo data source saved."
+msgstr "Geo 数据源已保存。"
+
+msgid "Save failed"
+msgstr "保存失败"
+
+msgid "Import"
+msgstr "导入"
+
+msgid "Update"
+msgstr "更新"

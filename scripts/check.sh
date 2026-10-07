@@ -11,7 +11,7 @@ done
 for script in ci/build-core.sh ci/build-doona.sh ci/build-sdk.sh ci/create-release-feed.sh scripts/check.sh; do
 	bash -n "$script"
 done
-for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk; do
+for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
 	sh -n "$script"
 done
 sh -n honk/files/honk.init
@@ -145,7 +145,9 @@ rm -rf "$reset_fixture"
 node <<'NODE'
 const fs = require('fs');
 const crypto = require('crypto');
-const sha256 = new Function(fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/sha256.js', 'utf8'))();
+const sha256Source = fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/sha256.js', 'utf8')
+	.replace(/return baseclass\.extend\(\{ sha256: sha256 \}\);/, 'return sha256;');
+const sha256 = new Function(sha256Source)();
 for (const input of [Buffer.alloc(0), Buffer.from('abc'), Buffer.alloc(2 * 1024 * 1024, 0x5a)]) {
 	const actual = sha256(input);
 	const expected = crypto.createHash('sha256').update(input).digest('hex');
@@ -154,11 +156,12 @@ for (const input of [Buffer.alloc(0), Buffer.from('abc'), Buffer.alloc(2 * 1024 
 }
 NODE
 
-grep -Fq 'include $(TOPDIR)/feeds/luci/luci.mk' luci-app-honk/Makefile
-grep -Fq '# call BuildPackage - OpenWrt buildroot signature' luci-app-honk/Makefile
-! grep -Fq 'include $(INCLUDE_DIR)/package.mk' luci-app-honk/Makefile
-! grep -Fq '$(eval $(call BuildPackage' luci-app-honk/Makefile
-grep -Fq 'Build/Prepare/luci-app-honk' luci-app-honk/Makefile
+grep -Fq 'include $(INCLUDE_DIR)/package.mk' luci-app-honk/Makefile
+grep -Fq '$(eval $(call BuildPackage,luci-app-honk))' luci-app-honk/Makefile
+! grep -Fq 'include $(TOPDIR)/feeds/luci/luci.mk' luci-app-honk/Makefile
+grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
+grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
+grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
 grep -Fq '"/tmp/honk-v2-upload/import.dae": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 grep -Fq 'CORE_PATCH_SHA256:=$(shell sed -n' honk/Makefile
@@ -168,17 +171,23 @@ grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 grep -Fq 'install -m 0644 "$ROOT/ci/pins.env" "$SDK_DIR/package/ci/pins.env"' ci/build-sdk.sh
 grep -Fq 'CONFIG_PACKAGE_honk=m' ci/build-sdk.sh
 grep -Fq 'CONFIG_PACKAGE_luci-app-honk=m' ci/build-sdk.sh
-grep -Fq 'CONFIG_PACKAGE_luci-i18n-honk-zh-cn=m' ci/build-sdk.sh
+! grep -Fq 'CONFIG_PACKAGE_luci-i18n-honk-zh-cn=m' ci/build-sdk.sh
+grep -Fq 'CONFIG_PACKAGE_v2ray-geoip=m' ci/build-sdk.sh
+grep -Fq 'CONFIG_PACKAGE_v2ray-geosite=m' ci/build-sdk.sh
 ! grep -Fq './scripts/config' ci/build-sdk.sh
 grep -Fq 'export HONK_SDK_PACKAGE' ci/build-sdk.sh
 grep -Fq 'package-pack.mk' ci/build-sdk.sh
 grep -Fq '$(if $(APK_SIGN_KEY),--sign-key "$(APK_SIGN_KEY)")' ci/build-sdk.sh
 grep -Fq 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' ci/build-sdk.sh
-grep -Fq './scripts/feeds update base packages luci' ci/build-sdk.sh
+grep -Fq './scripts/feeds update base packages luci wall' ci/build-sdk.sh
+grep -Fq "src-git wall https://github.com/kenzok8/wall.git" ci/build-sdk.sh
+grep -Fq './scripts/feeds install -p wall v2ray-geodata' ci/build-sdk.sh
 grep -Fq './scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo' ci/build-sdk.sh
 grep -Fq 'package/feeds/base/iwinfo/compile' ci/build-sdk.sh
 grep -Fq './scripts/feeds install -p packages luasrcdiet' ci/build-sdk.sh
 grep -Fq 'package/utils/ucode/host/compile package/utils/ucode/compile' ci/build-sdk.sh
+grep -Fq 'package/feeds/luci/luci-base/host/compile' ci/build-sdk.sh
+grep -Fq 'package/feeds/wall/v2ray-geodata/compile' ci/build-sdk.sh
 grep -Fq 'package/feeds/base/libubox/host/compile package/feeds/base/libubox/compile' ci/build-sdk.sh
 grep -Fq 'package/feeds/luci/lucihttp/compile V=s' ci/build-sdk.sh
 grep -Fq "'adbdump'" ci/create-release-feed.sh
