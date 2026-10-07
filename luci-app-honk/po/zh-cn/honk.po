@@ -1091,3 +1091,36 @@ msgstr "导入"
 
 msgid "Update"
 msgstr "更新"
+
+msgid "Preview nodes"
+msgstr "预览节点"
+
+msgid "Paste nodes"
+msgstr "粘贴节点"
+
+msgid "Clash YAML, Surge INI, Base64 or share links"
+msgstr "Clash YAML、Surge INI、Base64 或分享链接"
+
+msgid "Paste subscription content or share links; they are parsed locally into nodes. A parsed request is limited to 16 KiB, so paste larger lists in batches."
+msgstr "粘贴订阅内容或分享链接，本地解析为节点。解析后的请求限制为 16 KiB，请分批粘贴较大的列表。"
+
+msgid "Paste subscription content or share links."
+msgstr "请粘贴订阅内容或分享链接。"
+
+msgid "The pasted content is too large. Paste a smaller selection."
+msgstr "粘贴内容过大，请粘贴较小的内容。"
+
+msgid "Parsing pasted content…"
+msgstr "正在解析粘贴内容…"
+
+msgid "No importable nodes were found in the pasted content."
+msgstr "未在粘贴内容中找到可导入的节点。"
+
+msgid "Parsed nodes exceed the 16 KiB per request limit. Paste them in smaller batches."
+msgstr "解析出的节点超过每请求 16 KiB 限制，请分批粘贴。"
+
+msgid "Failed to parse the pasted content."
+msgstr "解析粘贴内容失败。"
+
+msgid "YAML parser failed to load"
+msgstr "YAML 解析器加载失败"

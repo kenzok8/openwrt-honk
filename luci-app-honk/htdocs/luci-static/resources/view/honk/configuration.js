@@ -5,10 +5,12 @@
 'require view';
 'require view.honk.rpc as honk';
 'require view.honk.sha256 as sha256Fallback';
+'require view.honk.converter as converter';
 
 const DAE_UPLOAD_PATH = '/tmp/honk-v2-upload/import.dae';
 const DAE_LIMIT = 2 * 1024 * 1024;
 const SHARE_LINK_LIMIT = 16 * 1024;
+const PASTE_LIMIT = 256 * 1024;
 
 function utf8Length(value) {
 	return new TextEncoder().encode(value).length;
@@ -63,6 +65,61 @@ function field(label, input, help) {
 	if (help)
 		row.appendChild(E('div', { 'class': 'cbi-value-description honk-note' }, help));
 	return row;
+}
+
+function loadYamlParser() {
+	if (window.jsyaml && window.jsyaml.load)
+		return Promise.resolve(window.jsyaml);
+
+	return new Promise(function(resolve, reject) {
+		const script = document.createElement('script');
+		script.src = L.resource('view/honk/vendor/js-yaml.min.js');
+		script.onload = function() {
+			if (window.jsyaml && window.jsyaml.load)
+				resolve(window.jsyaml);
+			else
+				reject(new Error(_('YAML parser failed to load')));
+		};
+		script.onerror = function() { reject(new Error(_('YAML parser failed to load'))); };
+		document.head.appendChild(script);
+	});
+}
+
+function parsePasted(content) {
+	let text = String(content || '').trim();
+	if (!text)
+		return Promise.resolve({ links: [], rejected: 1 });
+
+	if (!converter.looksLikeNodeList(text)) {
+		const decoded = converter.tryBase64Decode(text);
+		if (decoded && (converter.looksLikeNodeList(decoded) ||
+			converter.looksLikeClashYaml(decoded) || converter.looksLikeSurge(decoded)))
+			text = decoded;
+	}
+
+	if (converter.looksLikeClashYaml(text)) {
+		return loadYamlParser().then(function(yaml) {
+			const doc = yaml.load(text);
+			const proxies = (doc && doc.proxies) || [];
+			const links = [];
+			let rejected = 0;
+			proxies.forEach(function(node) {
+				if (converter.isMetadataProxy(node)) {
+					rejected++;
+					return;
+				}
+				const result = converter.convertProxy(node);
+				if (result.ok) links.push(result.link);
+				else rejected++;
+			});
+			return { links: links, rejected: rejected };
+		});
+	}
+
+	if (converter.looksLikeSurge(text))
+		return Promise.resolve(converter.parseSurgeProxies(text));
+
+	return Promise.resolve(converter.parseUriList(text));
 }
 
 return view.extend({
@@ -248,15 +305,15 @@ return view.extend({
 		const linksPanel = E('form', { 'class': 'honk-card', 'id': 'honk-panel-links', 'role': 'tabpanel', 'tabindex': '0', 'hidden': true });
 		const linksInput = E('textarea', {
 			'class': 'cbi-input-textarea', 'id': 'honk-share-links', 'name': 'share_links',
-			'rows': '7', 'maxlength': String(SHARE_LINK_LIMIT), 'spellcheck': 'false', 'required': true
+			'rows': '10', 'maxlength': String(PASTE_LIMIT), 'spellcheck': 'false', 'required': true
 		});
-		const linksButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview share links'));
+		const linksButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview nodes'));
 		inputs.push(linksInput);
 		actionButtons.push(linksButton);
-		linksPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Add nodes')));
-		linksPanel.appendChild(E('label', { 'class': 'cbi-value-title', 'for': linksInput.id }, _('Share links, one per line')));
+		linksPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Paste nodes')));
+		linksPanel.appendChild(E('label', { 'class': 'cbi-value-title', 'for': linksInput.id }, _('Clash YAML, Surge INI, Base64 or share links')));
 		linksPanel.appendChild(linksInput);
-		linksPanel.appendChild(E('p', { 'class': 'honk-note' }, _('A request is limited to 16 KiB. Add larger lists in batches; name or node conflicts are shown in the preview.')));
+		linksPanel.appendChild(E('p', { 'class': 'honk-note' }, _('Paste subscription content or share links; they are parsed locally into nodes. A parsed request is limited to 16 KiB, so paste larger lists in batches.')));
 		linksPanel.appendChild(E('div', { 'class': 'honk-actions' }, linksButton));
 		linksPanel.addEventListener('submit', function(ev) {
 			ev.preventDefault();
@@ -265,15 +322,34 @@ return view.extend({
 			if (!linksPanel.reportValidity())
 				return;
 			if (!linksInput.value.trim()) {
-				linksInput.setCustomValidity(_('Enter one or more share links.'));
+				linksInput.setCustomValidity(_('Paste subscription content or share links.'));
 				linksInput.reportValidity();
 				return;
 			}
-			if (utf8Length(linksInput.value) > SHARE_LINK_LIMIT) {
-				previewMessage.textContent = _('Share links exceed the 16 KiB per request limit. Submit them in smaller batches.');
+			if (utf8Length(linksInput.value) > PASTE_LIMIT) {
+				previewMessage.textContent = _('The pasted content is too large. Paste a smaller selection.');
 				return;
 			}
-			preview({ action: 'preview', kind: 'share_links', share_links: linksInput.value });
+			setBusy(true);
+			previewMessage.textContent = _('Parsing pasted content…');
+			parsePasted(linksInput.value).then(function(parsed) {
+				if (!parsed.links.length) {
+					setBusy(false);
+					previewMessage.textContent = _('No importable nodes were found in the pasted content.');
+					return;
+				}
+				const uris = parsed.links.join('\n');
+				if (utf8Length(uris) > SHARE_LINK_LIMIT) {
+					setBusy(false);
+					previewMessage.textContent = _('Parsed nodes exceed the 16 KiB per request limit. Paste them in smaller batches.');
+					return;
+				}
+				setBusy(false);
+				preview({ action: 'preview', kind: 'share_links', share_links: uris });
+			}).catch(function() {
+				setBusy(false);
+				previewMessage.textContent = _('Failed to parse the pasted content.');
+			});
 		});
 		linksInput.addEventListener('input', function() { linksInput.setCustomValidity(''); invalidatePreview(); });
 
@@ -330,7 +406,7 @@ return view.extend({
 		const tabs = [];
 		[
 			{ id: 'subscription', panel: subscriptionPanel, label: _('Add subscription') },
-			{ id: 'links', panel: linksPanel, label: _('Add nodes') },
+			{ id: 'links', panel: linksPanel, label: _('Paste nodes') },
 			{ id: 'dae', panel: daePanel, label: _('Import configuration') }
 		].forEach(function(entry, index, entries) {
 			const tab = E('button', {

@@ -16,7 +16,7 @@ for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-
 done
 sh -n honk/files/honk.init
 sh -n honk/files/90-honk-boot
-for file in luci-app-honk/htdocs/luci-static/resources/view/honk/{rpc,overview,settings,dashboard,configuration,logs,maintenance,sha256}.js; do
+for file in luci-app-honk/htdocs/luci-static/resources/view/honk/{rpc,overview,settings,dashboard,configuration,logs,maintenance,sha256,converter}.js; do
 	node --check "$file"
 done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
@@ -162,6 +162,7 @@ grep -Fq '$(eval $(call BuildPackage,luci-app-honk))' luci-app-honk/Makefile
 grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
 grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
 grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
+grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
 grep -Fq '"/tmp/honk-v2-upload/import.dae": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 grep -Fq 'CORE_PATCH_SHA256:=$(shell sed -n' honk/Makefile
