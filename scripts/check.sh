@@ -178,13 +178,10 @@ grep -Fq 'package-pack.mk' ci/build-sdk.sh
 grep -Fq '$(if $(APK_SIGN_KEY),--sign-key "$(APK_SIGN_KEY)")' ci/build-sdk.sh
 grep -Fq 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' ci/build-sdk.sh
 grep -Fq './scripts/feeds update base packages luci' ci/build-sdk.sh
-grep -Fq './scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo' ci/build-sdk.sh
-grep -Fq 'package/feeds/base/iwinfo/compile' ci/build-sdk.sh
+grep -Fq './scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo lua ucode libjson-c libmd' ci/build-sdk.sh
 grep -Fq './scripts/feeds install -p packages luasrcdiet' ci/build-sdk.sh
-grep -Fq 'package/utils/ucode/host/compile package/utils/ucode/compile' ci/build-sdk.sh
 grep -Fq 'package/feeds/luci/luci-base/host/compile' ci/build-sdk.sh
 grep -Fq 'package/v2ray-geodata/compile' ci/build-sdk.sh
-grep -Fq 'package/feeds/base/libubox/host/compile package/feeds/base/libubox/compile' ci/build-sdk.sh
 grep -Fq 'package/feeds/luci/lucihttp/compile V=s' ci/build-sdk.sh
 grep -Fq "'adbdump'" ci/create-release-feed.sh
 grep -Fq ' -V -m "$STAGE/manifest.json" -p "$MANIFEST_PUBLIC_KEY"' ci/create-release-feed.sh

@@ -64,7 +64,7 @@ if test -f feeds.conf.default; then
 fi
 printf '%s\n' 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' >> feeds.conf
 ./scripts/feeds update base packages luci
-./scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo
+./scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo lua ucode libjson-c libmd
 ./scripts/feeds install -p packages luasrcdiet
 ./scripts/feeds install luci-base
 cat >> .config <<'EOF'
@@ -79,16 +79,7 @@ grep -qx 'CONFIG_PACKAGE_luci-app-honk=m' .config || { echo 'The LuCI app packag
 grep -qx 'CONFIG_PACKAGE_v2ray-geoip=m' .config || { echo 'The GeoIP data package is not selected.' >&2; exit 1; }
 grep -qx 'CONFIG_PACKAGE_v2ray-geosite=m' .config || { echo 'The GeoSite data package is not selected.' >&2; exit 1; }
 
-make -j1 package/utils/lua/host/compile package/utils/lua/compile \
-	package/libs/libjson-c/host/compile package/libs/libjson-c/compile \
-	package/libs/libmd/compile \
-	package/feeds/base/libubox/host/compile package/feeds/base/libubox/compile \
-	package/feeds/base/ubus/compile package/feeds/base/uci/compile \
-	package/feeds/base/zlib/compile package/feeds/base/libnl-tiny/compile \
-	package/feeds/base/iwinfo/compile \
-	package/utils/ucode/host/compile package/utils/ucode/compile \
-	package/feeds/luci/luci-base/host/compile \
-	package/feeds/luci/lucihttp/compile V=s
+make -j1 package/feeds/luci/luci-base/host/compile package/feeds/luci/lucihttp/compile V=s
 make -j1 package/honk/compile package/luci-app-honk/compile package/v2ray-geodata/compile V=s
 find bin/packages -type f \( -name 'honk-*.apk' -o -name 'luci-app-honk-*.apk' \) -exec cp -v {} "$OUT_DIR/" \;
 compgen -G "$OUT_DIR/honk-*.apk" >/dev/null || { echo 'Honk APK was not produced.' >&2; exit 1; }
