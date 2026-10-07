@@ -174,8 +174,7 @@ grep -Fq 'CONFIG_PACKAGE_v2ray-geoip=m' ci/build-sdk.sh
 grep -Fq 'CONFIG_PACKAGE_v2ray-geosite=m' ci/build-sdk.sh
 ! grep -Fq './scripts/config' ci/build-sdk.sh
 grep -Fq 'export HONK_SDK_PACKAGE' ci/build-sdk.sh
-grep -Fq 'package-pack.mk' ci/build-sdk.sh
-grep -Fq '$(if $(APK_SIGN_KEY),--sign-key "$(APK_SIGN_KEY)")' ci/build-sdk.sh
+
 grep -Fq 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' ci/build-sdk.sh
 grep -Fq './scripts/feeds update base packages luci' ci/build-sdk.sh
 grep -Fq './scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo lua ucode libjson-c libmd' ci/build-sdk.sh

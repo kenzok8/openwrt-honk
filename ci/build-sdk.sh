@@ -45,18 +45,6 @@ install -m 0644 "$CACHE_DIR/$CORE_ARCHIVE" "$SDK_DIR/dl/$CORE_ARCHIVE"
 install -m 0644 "$CACHE_DIR/$DOONA_ARCHIVE" "$SDK_DIR/dl/$DOONA_ARCHIVE"
 
 cd "$SDK_DIR"
-PACK_RULE="$SDK_DIR/include/package-pack.mk"
-test -f "$PACK_RULE" || { echo 'Pinned SDK package pack rule is missing.' >&2; exit 1; }
-node - "$PACK_RULE" <<'NODE'
-const fs = require('fs');
-const filename = process.argv[2];
-const source = fs.readFileSync(filename, 'utf8');
-const needle = '--output "$$(PACK_$(1))"';
-if (source.split(needle).length - 1 !== 1)
-	throw new Error('Pinned SDK package pack rule changed; refusing an ambiguous signing edit.');
-const signing = '$(if $(APK_SIGN_KEY),--sign-key "$(APK_SIGN_KEY)") ' + String.fromCharCode(92, 10);
-fs.writeFileSync(filename, source.replace(needle, signing + needle), { mode: fs.statSync(filename).mode });
-NODE
 HONK_SDK_PACKAGE=1
 export HONK_SDK_PACKAGE
 if test -f feeds.conf.default; then
