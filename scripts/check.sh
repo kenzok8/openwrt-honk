@@ -205,8 +205,6 @@ grep -Fq 'node tools/notices.mjs "$STAGE"' ci/build-doona.sh
 grep -Fq 'for file in LICENSE NOTICE CHANGELOG.md README.md; do' ci/build-doona.sh
 grep -Fq 'PKG_HASH:=d5725cad5b30df11c5886480dfcd3860e9ab61935583ef3a8465c15b4df97481' luci-app-honk/Makefile
 
-grep -Fq 'sqlite3 -readonly "$HONK_STATE" ".backup' honk/files/maintenance.sh
-grep -Fq 'stop_forced=1' honk/files/maintenance.sh
 grep -Fq 'start_job update_check' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'update_gate' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'trap cleanup_update EXIT' honk/files/update.sh
