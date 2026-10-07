@@ -1,0 +1,148 @@
+name: Check honk/doona upstream
+
+# Scheduled runs only report upstream changes without touching pins or
+# publishing. Manual runs stage the new pins on an isolated branch and gate
+# them through the real source build before they can be promoted.
+
+on:
+  schedule:
+    - cron: '30 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-bump-honk
+  cancel-in-progress: false
+
+env:
+  STAGING: auto-bump-staging-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect upstream changes
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . ci/pins.env
+
+          require_sha() {
+            if ! [[ "$1" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::$2 is not a full 40-character commit SHA: ${1:-<empty>}"
+              exit 1
+            fi
+          }
+
+          core_new=$(git ls-remote https://github.com/Glassyiris/honk.git HEAD | cut -f1)
+          doona_new=$(git ls-remote https://github.com/Zakkaus/doona.git HEAD | cut -f1)
+          require_sha "$core_new" core
+          require_sha "$doona_new" doona
+
+          if [ "$core_new" = "$CORE_COMMIT" ] && [ "$doona_new" = "$DOONA_COMMIT" ]; then
+            echo "No upstream change."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          doona_version_new=$(curl -fsSL "https://raw.githubusercontent.com/Zakkaus/doona/$doona_new/package.json" | jq -r .version)
+          if [ -z "$doona_version_new" ] || [ "$doona_version_new" = null ]; then
+            echo "::error::cannot read doona version from package.json at $doona_new"
+            exit 1
+          fi
+
+          changes=""
+          if [ "$core_new" != "$CORE_COMMIT" ]; then
+            changes="core $(printf '%s' "$CORE_COMMIT" | cut -c1-7)→$(printf '%s' "$core_new" | cut -c1-7)"
+          fi
+          if [ "$doona_new" != "$DOONA_COMMIT" ]; then
+            changes="${changes:+$changes, }doona $(printf '%s' "$DOONA_COMMIT" | cut -c1-7)→$(printf '%s' "$doona_new" | cut -c1-7)"
+          fi
+
+          {
+            echo "changed=true"
+            echo "core_new=$core_new"
+            echo "doona_new=$doona_new"
+            echo "doona_version_new=$doona_version_new"
+            echo "changes=$changes"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summarize scheduled check
+        if: github.event_name == 'schedule' && steps.detect.outputs.changed == 'true'
+        run: |
+          {
+            echo "## honk/doona upstream check"
+            echo ""
+            echo "Pending review: ${{ steps.detect.outputs.changes }}"
+            echo ""
+            echo "- honk core: \`${{ steps.detect.outputs.core_new }}\`"
+            echo "- doona: \`${{ steps.detect.outputs.doona_new }}\` (v${{ steps.detect.outputs.doona_version_new }})"
+            echo ""
+            echo "Run this workflow manually to stage and validate the candidate."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage new pins
+        id: stage
+        if: github.event_name == 'workflow_dispatch' && steps.detect.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s/^CORE_COMMIT=.*/CORE_COMMIT=${{ steps.detect.outputs.core_new }}/" \
+            -e "s/^CORE_ARCHIVE=.*/CORE_ARCHIVE=honk-core-${{ steps.detect.outputs.core_new }}-x86_64-unknown-linux-musl-stock.tar.gz/" \
+            -e "s/^DOONA_COMMIT=.*/DOONA_COMMIT=${{ steps.detect.outputs.doona_new }}/" \
+            -e "s/^DOONA_VERSION=.*/DOONA_VERSION=${{ steps.detect.outputs.doona_version_new }}/" \
+            -e "s/^DOONA_ARCHIVE=.*/DOONA_ARCHIVE=doona-${{ steps.detect.outputs.doona_new }}.tar.gz/" \
+            ci/pins.env
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$STAGING"
+          git add ci/pins.env
+          git commit -m "chore: bump pins (${{ steps.detect.outputs.changes }})"
+          git -c credential.helper='!gh auth git-credential' \
+            push --force origin "HEAD:refs/heads/$STAGING"
+          echo "staging_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify candidate source build
+        id: verify
+        if: github.event_name == 'workflow_dispatch' && steps.detect.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Pushing the staging branch already triggered build.yml's
+          # source-build via `on: push`; find and watch that run. It runs
+          # check.sh, ci/build-doona.sh and ci/build-core.sh, so a green run
+          # proves the new commit still patches and compiles.
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --workflow=build.yml --branch "$STAGING" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          if [ -z "${run_id:-}" ]; then
+            echo "::error::could not find the source-build run for $STAGING"
+            exit 1
+          fi
+          echo "watching build.yml run $run_id on $STAGING"
+          gh run watch "$run_id" --exit-status
+
+          {
+            echo "## Candidate ready for review"
+            echo ""
+            echo "Staging branch: \`$STAGING\`"
+            echo "Validated commit: \`${{ steps.stage.outputs.staging_sha }}\`"
+            echo ""
+            echo "Source build passed (check.sh + doona + honk core)."
+            echo "Promote only after maintainer review; see the manual bump steps in README."
+          } >> "$GITHUB_STEP_SUMMARY"
