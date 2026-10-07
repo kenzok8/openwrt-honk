@@ -62,7 +62,7 @@ const fs = require('fs');
 const rpcSource = fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/rpc.js', 'utf8');
 const backend = fs.readFileSync('luci-app-honk/root/usr/libexec/rpcd/honk', 'utf8');
 const acl = JSON.parse(fs.readFileSync('luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json', 'utf8'))['luci-app-honk'];
-const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'repair', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'import_capabilities', 'import_upload_prepare', 'import_preview', 'import_apply', 'update_check', 'update_apply'];
+const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'repair', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
 const frontend = [...rpcSource.matchAll(/method:\s*'([^']+)'/g)].map(match => match[1]);
 const list = backend.match(/echo '([^']+)'/);
 if (!list) throw new Error('RPC backend has no list method declaration');
@@ -204,14 +204,9 @@ grep -Fq "! rg -n 'MockBackend|mockBackend|mock-backend' dist" ci/build-doona.sh
 grep -Fq 'node tools/notices.mjs "$STAGE"' ci/build-doona.sh
 grep -Fq 'for file in LICENSE NOTICE CHANGELOG.md README.md; do' ci/build-doona.sh
 grep -Fq 'PKG_HASH:=d5725cad5b30df11c5886480dfcd3860e9ab61935583ef3a8465c15b4df97481' luci-app-honk/Makefile
-grep -Fq 'candidate_health_start:import_apply:new_installed' honk/files/maintenance.sh
-grep -Fq 'rollback_old_start:import_apply:rollback_old_start' honk/files/maintenance.sh
-grep -Fq 'candidate_health_start:import_apply:new_installed' honk/files/control.sh
-grep -Fq 'rollback_old_start:import_apply:rollback_old_start' honk/files/control.sh
-grep -Fq 'verify_validated' honk/files/maintenance.sh
+
 grep -Fq 'sqlite3 -readonly "$HONK_STATE" ".backup' honk/files/maintenance.sh
 grep -Fq 'stop_forced=1' honk/files/maintenance.sh
-grep -Fq 'start_job import_preview' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'start_job update_check' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'update_gate' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'trap cleanup_update EXIT' honk/files/update.sh

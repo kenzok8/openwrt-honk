@@ -83,7 +83,6 @@ check_config() {
 	[ -f /etc/honk/config.dae ] && [ ! -L /etc/honk/config.dae ] || { fail "main config must be a regular file"; return 1; }
 	[ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] || { fail "system config must be a regular file"; return 1; }
 	system_config_readonly || { fail "system config must be read-only (0444)"; return 1; }
-	[ -r /usr/share/doona/index.html ] || { fail "Doona UI index.html unavailable"; return 1; }
 	case "$listen_port" in
 		''|*[!0-9]*) fail "listen_port must be numeric"; return 1 ;;
 	esac
@@ -302,9 +301,9 @@ write_runtime_system() {
 		printf "    log_level: info\n    dial_mode: domain\n    allow_insecure: false\n"
 		printf "    auto_config_kernel_parameter: true\n    data_dir: '/etc/honk'\n"
 		printf "    store_subscribe: false\n    nfqueue_enable: true\n}\n\n"
-		printf "experimental {\n    native_api {\n        enabled: true\n        listen: '%s:%s'\n" "$system_listen" "$system_port"
-		printf "        password_auth: true\n        allow_anonymous_loopback: false\n"
-		printf "        config_write: true\n        ui: '/usr/share/doona'\n    }\n}\n"
+		printf "experimental {\n    clash_api {\n        external_controller: '%s:%s'\n" "$system_listen" "$system_port"
+		printf "        external_ui: '/usr/share/honk-ui'\n"
+		printf "        secret: ''\n    }\n}\n"
 	} > "$temp_system" || { rm -f "$temp_system"; return 1; }
 	chmod 0444 "$temp_system" || { rm -f "$temp_system"; return 1; }
 	current_hash=$(sha256sum /etc/honk/system.dae 2>/dev/null | awk '{print $1}')
@@ -529,12 +528,11 @@ repair() {
 		check_port || { echo '{"ok":false,"message":"listen_port_occupied"}'; return 1; }
 	fi
 	if [ "$initialized" = 1 ]; then system_host=$lan_ip; else system_host=127.0.0.1; fi
-	if [ -r /usr/share/doona/index.html ] && [ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] && system_config_readonly && \
+	if [ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] && system_config_readonly && \
 		grep -Fqx '    wan_interface: auto' /etc/honk/system.dae && grep -Fqx "    lan_interface: '$lan_device'" /etc/honk/system.dae && \
 		grep -Fqx "    data_dir: '/etc/honk'" /etc/honk/system.dae && grep -Fqx '    nfqueue_enable: true' /etc/honk/system.dae && \
-		grep -Fqx "        listen: '$system_host:$listen_port'" /etc/honk/system.dae && \
-		grep -Fqx "        ui: '/usr/share/doona'" /etc/honk/system.dae && grep -Fqx '        password_auth: true' /etc/honk/system.dae && \
-		grep -Fqx '        allow_anonymous_loopback: false' /etc/honk/system.dae && grep -Fqx '        config_write: true' /etc/honk/system.dae; then
+		grep -Fqx "        external_controller: '$system_host:$listen_port'" /etc/honk/system.dae && \
+		grep -Fqx "        external_ui: '/usr/share/honk-ui'" /etc/honk/system.dae; then
 		echo '{"ok":true,"message":"system_config_healthy"}'
 		return 0
 	fi
@@ -542,7 +540,6 @@ repair() {
 		echo '{"ok":false,"message":"system_config_not_regular_file"}'
 		return 1
 	fi
-	[ -r /usr/share/doona/index.html ] || { echo '{"ok":false,"message":"ui_assets_missing"}'; return 1; }
 	umask 077
 	repair_dir=$(mktemp -d /tmp/honk-repair.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
 	old_system=$repair_dir/system.dae
@@ -595,7 +592,7 @@ repair() {
 }
 
 api_discovery() {
-	curl -fsS --noproxy '*' --connect-timeout 1 --max-time 3 "$1/api" -o "$2"
+	curl -fsS --noproxy '*' --connect-timeout 1 --max-time 3 "$1/version" -o "$2"
 }
 
 mock_start() {
@@ -656,10 +653,6 @@ initialize_preflight() {
 	load_settings
 	[ "$enabled" = 0 ] && [ "$initialized" = 0 ] || { echo '{"ok":false,"message":"disable_service_before_initialization"}'; return 1; }
 	[ "$config_file" = /etc/honk/config.dae ] || { echo '{"ok":false,"message":"invalid_config_path"}'; return 1; }
-	[ -r /usr/share/doona/index.html ] || { echo '{"ok":false,"message":"ui_assets_missing"}'; return 1; }
-	if [ "$1" = read_credentials ]; then
-		read_credentials || { echo '{"ok":false,"message":"invalid_credentials"}'; return 1; }
-	fi
 	[ -x "$HONK_CORE" ] || { echo '{"ok":false,"message":"core_missing"}'; return 1; }
 	pidof honk-core >/dev/null 2>&1 && { echo '{"ok":false,"message":"core_already_running"}'; return 1; }
 	no_honk_resources || { echo '{"ok":false,"message":"honk_resources_already_exist"}'; return 1; }
@@ -674,7 +667,7 @@ initialize_preflight() {
 initialize() {
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
 	. /usr/share/libubox/jshn.sh || return 1
-	initialize_preflight read_credentials || return 1
+	initialize_preflight || return 1
 	honk_lock_acquire || { echo '{"ok":false,"message":"operation_in_progress"}'; return 1; }
 	trap 'honk_lock_release >/dev/null 2>&1' 0
 	initialize_preflight || return 1
@@ -704,12 +697,10 @@ global {
     fallback: direct
 }
  experimental {
-    native_api {
-        enabled: true
-        listen: '127.0.0.1:$listen_port'
-        password_auth: true
-        allow_anonymous_loopback: false
-        config_write: true
+    clash_api {
+        external_controller: '127.0.0.1:$listen_port'
+        external_ui: '/usr/share/honk-ui'
+        secret: ''
     }
 }
 EOF
@@ -719,31 +710,13 @@ EOF
 		echo '{"ok":false,"message":"mock_core_start_failed"}'
 		return 1
 	fi
-	setup_required=$(jsonfilter -i "$response_file" -e '@.auth.setup_required' 2>/dev/null)
-	case "$setup_required" in
-		true)
-			status=$(post_credentials "$loopback_url/api/v1/auth/setup" "$response_file")
-			[ "$status" = 201 ] || { echo '{"ok":false,"message":"administrator_setup_failed"}'; return 1; }
-			;;
-		false)
-			status=$(post_credentials "$loopback_url/api/v1/auth/login" "$response_file")
-			[ "$status" = 200 ] || { echo '{"ok":false,"message":"administrator_exists_reuse_credentials_or_reset_state"}'; return 1; }
-			;;
-		*) echo '{"ok":false,"message":"native_api_setup_state_unavailable"}'; return 1 ;;
-	esac
 	api_discovery "$loopback_url" "$response_file" || { echo '{"ok":false,"message":"setup_verification_failed"}'; return 1; }
-	setup_required=$(jsonfilter -i "$response_file" -e '@.auth.setup_required' 2>/dev/null)
-	[ "$setup_required" = false ] || { echo '{"ok":false,"message":"setup_verification_failed"}'; return 1; }
 	mock_stop || { echo '{"ok":false,"message":"mock_core_stop_failed"}'; return 1; }
 	if ! mock_start "$mock_config" "$mock_log" "$loopback_url" "$response_file"; then
 		echo '{"ok":false,"message":"mock_core_restart_failed"}'
 		return 1
 	fi
 	api_discovery "$loopback_url" "$response_file" || { echo '{"ok":false,"message":"persistence_verification_failed"}'; return 1; }
-	setup_required=$(jsonfilter -i "$response_file" -e '@.auth.setup_required' 2>/dev/null)
-	[ "$setup_required" = false ] || { echo '{"ok":false,"message":"persistence_verification_failed"}'; return 1; }
-	status=$(post_credentials "$loopback_url/api/v1/auth/login" "$response_file")
-	[ "$status" = 200 ] || { echo '{"ok":false,"message":"persistence_login_failed"}'; return 1; }
 	mock_stop || { echo '{"ok":false,"message":"mock_core_stop_failed"}'; return 1; }
 
 	write_runtime_system "$lan_device" "$lan_ip" || { restore_system; echo '{"ok":false,"message":"system_config_write_failed"}'; return 1; }
@@ -772,8 +745,6 @@ EOF
 		return 1
 	}
 	system_written_hash=""
-	password=""
-	username=""
 	echo '{"ok":true,"message":"administrator_initialized"}'
 }
 

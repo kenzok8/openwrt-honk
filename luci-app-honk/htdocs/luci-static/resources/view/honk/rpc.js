@@ -19,7 +19,6 @@ const callCheck = rpc.declare({
 const callInitialize = rpc.declare({
 	object: 'honk',
 	method: 'initialize',
-	params: [ 'username', 'password' ],
 	expect: { '': {} }
 });
 
@@ -49,28 +48,6 @@ const callLogs = rpc.declare({
 	object: 'honk',
 	method: 'logs',
 	params: [ 'source', 'level', 'limit' ],
-	expect: { '': {} }
-});
-const callImportCapabilities = rpc.declare({
-	object: 'honk',
-	method: 'import_capabilities',
-	expect: { '': {} }
-});
-const callImportUploadPrepare = rpc.declare({
-	object: 'honk',
-	method: 'import_upload_prepare',
-	expect: { '': {} }
-});
-const callImportPreview = rpc.declare({
-	object: 'honk',
-	method: 'import_preview',
-	params: [ 'action', 'kind', 'mode', 'name', 'url', 'share_links', 'content', 'upload_sha256', 'preview_id', 'source_sha256' ],
-	expect: { '': {} }
-});
-const callImportApply = rpc.declare({
-	object: 'honk',
-	method: 'import_apply',
-	params: [ 'preview_id', 'source_sha256' ],
 	expect: { '': {} }
 });
 const callUpdateCheck = rpc.declare({ object: 'honk', method: 'update_check', expect: { '': {} } });
@@ -241,13 +218,6 @@ function ensureOk(result) {
 	return result;
 }
 
-function importPreview(request) {
-	request = request || {};
-	return callImportPreview(request.action, request.kind, request.mode, request.name,
-		request.url, request.share_links, request.content, request.upload_sha256,
-		request.preview_id, request.source_sha256);
-}
-
 function waitJob(jobId, onProgress) {
 	if (!/^[0-9a-f]{32}$/.test(jobId || ''))
 		return Promise.reject(new Error('invalid_job_id'));
@@ -299,10 +269,6 @@ return baseclass.extend({
 	restorePrepare: callRestorePrepare,
 	reset: callReset,
 	logs: callLogs,
-	importCapabilities: callImportCapabilities,
-	importUploadPrepare: callImportUploadPrepare,
-	importPreview: importPreview,
-	importApply: function(preview) { return callImportApply(preview.preview_id, preview.source_sha256); },
 	updateCheck: callUpdateCheck,
 	updateApply: callUpdateApply,
 	waitJob: waitJob,

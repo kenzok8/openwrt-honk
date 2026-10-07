@@ -91,7 +91,7 @@ issue_capability() {
 	cap_phase=$1
 	[ "$(id -u 2>/dev/null)" = 0 ] || return 1
 	case "$cap_phase:$journal_operation:$journal_phase" in
-		candidate_health_start:restore:new_installed|candidate_health_start:import_apply:new_installed|rollback_old_start:restore:rollback_old_start|rollback_old_start:reset:rollback_old_start|rollback_old_start:import_apply:rollback_old_start) ;;
+		candidate_health_start:restore:new_installed|rollback_old_start:restore:rollback_old_start|rollback_old_start:reset:rollback_old_start) ;;
 		*) return 1 ;;
 	esac
 	cap_nonce=$(new_nonce) || return 1
@@ -204,7 +204,7 @@ recover_transaction() {
 	old_stop_link=$(journal_value old_stop_link)
 	[ "$journal_format" = 1 ] || return 1
 	case "$txn_id" in [0-9a-f][0-9a-f]*) [ "${#txn_id}" = 32 ] || return 1 ;; *) return 1 ;; esac
-	case "$journal_operation:$journal_phase" in backup:prepared|backup:stopped|backup:committed|restore:prepared|restore:stopped|restore:old_moved|restore:new_installed|restore:uci_applied|restore:service_started|restore:rollback_old_start|restore:committed|reset:prepared|reset:stopped|reset:old_moved|reset:new_installed|reset:uci_applied|reset:rollback_old_start|reset:committed|import_apply:prepared|import_apply:stopped|import_apply:old_moved|import_apply:new_installed|import_apply:service_started|import_apply:rollback_old_start|import_apply:committed) ;;
+	case "$journal_operation:$journal_phase" in backup:prepared|backup:stopped|backup:committed|restore:prepared|restore:stopped|restore:old_moved|restore:new_installed|restore:uci_applied|restore:service_started|restore:rollback_old_start|restore:committed|reset:prepared|reset:stopped|reset:old_moved|reset:new_installed|reset:uci_applied|reset:rollback_old_start|reset:committed) ;;
 		*) return 1 ;;
 	esac
 	case "$old_running:$old_enabled:$old_boot:$old_initialized" in
@@ -225,7 +225,7 @@ recover_transaction() {
 		return 0
 	fi
 	foreign_core_running && return 1
-	if [ "$journal_operation" = restore ] || [ "$journal_operation" = reset ] || [ "$journal_operation" = import_apply ]; then
+	if [ "$journal_operation" = restore ] || [ "$journal_operation" = reset ]; then
 		if managed_core_pid >/dev/null 2>&1; then
 			honk_lifecycle_stop 30 || return 1
 		fi
@@ -243,7 +243,7 @@ recover_transaction() {
 	restore_boot_links || return 1
 	if [ "$old_running" = 1 ]; then
 		if ! managed_core_pid >/dev/null 2>&1; then
-	if [ "$journal_operation" = restore ] || [ "$journal_operation" = reset ] || [ "$journal_operation" = import_apply ]; then
+	if [ "$journal_operation" = restore ] || [ "$journal_operation" = reset ]; then
 				journal_write rollback_old_start || return 1
 				issue_capability rollback_old_start || return 1
 			else
@@ -562,13 +562,10 @@ global {
 }
 
 experimental {
-    native_api {
-        enabled: true
-        listen: '$listen_addr'
-        password_auth: true
-        allow_anonymous_loopback: false
-        config_write: true
-        ui: '/usr/share/doona'
+    clash_api {
+        external_controller: ''
+        external_ui: '/usr/share/honk-ui'
+        secret: ''
     }
 }
 EOF
@@ -695,13 +692,10 @@ global {
 }
 
 experimental {
-    native_api {
-        enabled: true
-        listen: '127.0.0.1:$shadow_port'
-        password_auth: true
-        allow_anonymous_loopback: false
-        config_write: true
-        ui: '/usr/share/doona'
+    clash_api {
+        external_controller: '127.0.0.1:$shadow_port'
+        external_ui: '/usr/share/honk-ui'
+        secret: ''
     }
 }
 EOF
@@ -729,13 +723,10 @@ global {
 }
 
 experimental {
-    native_api {
-        enabled: true
-        listen: '$live_host:$live_port'
-        password_auth: true
-        allow_anonymous_loopback: false
-        config_write: true
-        ui: '/usr/share/doona'
+    clash_api {
+        external_controller: '$live_host:$live_port'
+        external_ui: '/usr/share/honk-ui'
+        secret: ''
     }
 }
 EOF
@@ -1001,172 +992,6 @@ restore() {
 	json_result true "" restored
 }
 
-import_apply() {
-	import_preview_id=$1
-	import_source_sha256=$2
-	case "$import_preview_id" in ''|*[!0-9a-f]*) error invalid_request; return 1 ;; esac
-	case "$import_source_sha256" in ''|*[!0-9a-f]*) error invalid_request; return 1 ;; esac
-	[ "${#import_preview_id}" = 32 ] && [ "${#import_source_sha256}" = 64 ] || { error invalid_request; return 1; }
-	if foreign_core_running; then error unmanaged_core_running; return 1; fi
-	if managed_core_pid >/dev/null 2>&1; then old_running=1; fi
-	if ! acquire_lock; then error "$lock_error"; return 1; fi
-	foreign_core_running && { error unmanaged_core_running; return 1; }
-	if [ "$old_running" = 1 ]; then managed_core_pid >/dev/null 2>&1 || { error service_state_changed; return 1; }
-	else managed_core_pid >/dev/null 2>&1 && { error service_state_changed; return 1; }; fi
-	temp_dir=$(mktemp -d /tmp/honk-maint.XXXXXX) || { error temporary_storage_unavailable; return 1; }
-	chmod 0700 "$temp_dir" || { error temporary_storage_unavailable; return 1; }
-	load_uci_values || { error current_uci_invalid; return 1; }
-	old_enabled=$u_enabled
-	old_boot=$u_boot
-	old_initialized=$u_initialized
-	uci export honk > "$temp_dir/old-uci" 2>/dev/null || { error current_uci_snapshot_failed; return 1; }
-	capture_boot_links || { error boot_link_state_unavailable; return 1; }
-	[ -d "$HONK_ROOT" ] && [ ! -L "$HONK_ROOT" ] || { error current_tree_unavailable; return 1; }
-	import_request=$(printf '{"action":"verify_validated","preview_id":"%s","source_sha256":"%s"}' "$import_preview_id" "$import_source_sha256")
-	import_result=$(printf '%s' "$import_request" | "$HONK_CORE" --config "$HONK_CONFIG" --data-dir "$HONK_ROOT" admin import 2>/dev/null) || { error import_preview_invalid; return 1; }
-	json_load "$import_result" 2>/dev/null || { error import_preview_invalid; return 1; }
-	json_get_var import_ok ok
-	[ "$import_ok" = 1 ] || { json_get_var import_error message; error "${import_error:-import_preview_invalid}"; return 1; }
-	journal_create import_apply || { error transaction_journal_create_failed; return 1; }
-	if [ "$old_running" = 1 ]; then
-		service_stopped=1
-		stop_managed || { restore_abort service_stop_failed; return 1; }
-	fi
-	journal_write stopped || { restore_abort transaction_journal_write_failed; return 1; }
-	foreign_core_running && { restore_abort unmanaged_core_running; return 1; }
-	checkpoint_sqlite || { restore_abort sqlite_checkpoint_failed; return 1; }
-	old_tree_stage=$temp_dir/old-tree
-	cp -pR "$HONK_ROOT" "$old_tree_stage" || { restore_abort snapshot_failed; return 1; }
-	find "$old_tree_stage" -type l -print 2>/dev/null | grep -q . && { restore_abort unsupported_honk_tree_entry; return 1; }
-	find "$old_tree_stage" ! -type f ! -type d -print 2>/dev/null | grep -q . && { restore_abort unsupported_honk_tree_entry; return 1; }
-	mv "$old_tree_stage" "$TXN_DIR/old-tree" || { restore_abort snapshot_failed; return 1; }
-	journal_write old_moved || { restore_abort transaction_journal_write_failed; return 1; }
-	import_request=$(printf '{"action":"apply","preview_id":"%s","source_sha256":"%s"}' "$import_preview_id" "$import_source_sha256")
-	import_result=$(printf '%s' "$import_request" | "$HONK_CORE" --config "$HONK_CONFIG" --data-dir "$HONK_ROOT" admin import 2>/dev/null) || { restore_abort import_apply_failed; return 1; }
-	json_load "$import_result" 2>/dev/null || { restore_abort import_apply_failed; return 1; }
-	json_get_var import_ok ok
-	[ "$import_ok" = 1 ] || { json_get_var import_error message; restore_abort "${import_error:-import_apply_failed}"; return 1; }
-	import_candidate=$temp_dir/import-candidate
-	mkdir -p "$import_candidate/etc" || { restore_abort candidate_stage_failed; return 1; }
-	cp -pR "$HONK_ROOT" "$import_candidate/etc/honk" || { restore_abort candidate_stage_failed; return 1; }
-	validate_candidate "$import_candidate" "" present || { restore_abort candidate_validation_failed; return 1; }
-	journal_write new_installed || { restore_abort transaction_journal_write_failed; return 1; }
-	if [ "$old_running" = 1 ]; then
-		issue_capability candidate_health_start || { restore_abort candidate_start_failed; return 1; }
-		journal_write service_started || { restore_abort transaction_journal_write_failed; return 1; }
-	fi
-	journal_write committed || { restore_abort transaction_journal_write_failed; return 1; }
-	rm -rf "$TXN_DIR" || { error import_succeeded_snapshot_cleanup_pending; return 1; }
-	journal_active=0
-	swap_started=0
-	service_stopped=0
-	json_result true "" import_applied
-}
-
-json_type_is_null() {
-	[ -z "$1" ] || [ "$1" = null ]
-}
-
-import_preview() {
-	request=$(cat) || { error invalid_request; return 1; }
-	json_load "$request" 2>/dev/null || { error invalid_request; return 1; }
-	json_get_keys import_keys
-	for import_key in $import_keys; do
-		case "$import_key" in action|kind|mode|name|url|share_links|content|upload_sha256|preview_id|source_sha256) ;; *) error invalid_request; return 1 ;; esac
-	done
-	json_get_type import_action_type action
-	json_get_var import_action action
-	[ "$import_action_type" = string ] && [ "$import_action" = preview ] || { error invalid_request; return 1; }
-	json_get_type import_kind_type kind
-	json_get_var import_kind kind
-	json_get_type import_mode_type mode
-	json_get_var import_mode mode
-	json_get_type import_name_type name
-	json_get_var import_name name
-	json_get_type import_url_type url
-	json_get_var import_url url
-	json_get_type import_links_type share_links
-	json_get_var import_links share_links
-	json_get_type import_content_type content
-	json_get_type import_upload_type upload_sha256
-	json_get_type import_preview_id_type preview_id
-	json_get_type import_source_sha_type source_sha256
-	json_type_is_null "$import_preview_id_type" && json_type_is_null "$import_source_sha_type" || { error invalid_request; return 1; }
-	request_json=''
-	case "$import_kind" in
-		share_links)
-			[ "$import_kind_type" = string ] && [ "$import_links_type" = string ] || { error invalid_request; return 1; }
-			json_type_is_null "$import_mode_type" && json_type_is_null "$import_name_type" && json_type_is_null "$import_url_type" && json_type_is_null "$import_content_type" && json_type_is_null "$import_upload_type" || { error invalid_request; return 1; }
-			json_init; json_add_string action preview; json_add_string kind share_links; json_add_string share_links "$import_links"; request_json=$(json_dump)
-			;;
-		subscription)
-			[ "$import_kind_type" = string ] && [ "$import_name_type" = string ] && [ "$import_url_type" = string ] || { error invalid_request; return 1; }
-			json_type_is_null "$import_mode_type" && json_type_is_null "$import_links_type" && json_type_is_null "$import_content_type" && json_type_is_null "$import_upload_type" || { error invalid_request; return 1; }
-			json_init; json_add_string action preview; json_add_string kind subscription; json_add_string name "$import_name"; json_add_string url "$import_url"; request_json=$(json_dump)
-			;;
-		dae)
-			[ "$import_kind_type" = string ] && [ "$import_mode_type" = string ] && [ "$import_mode" = replace ] && [ "$import_upload_type" = string ] || { error invalid_request; return 1; }
-			json_type_is_null "$import_name_type" && json_type_is_null "$import_url_type" && json_type_is_null "$import_links_type" && json_type_is_null "$import_content_type" || { error invalid_request; return 1; }
-			json_init; json_add_string action preview; json_add_string kind dae; json_add_string mode replace; json_add_string upload_sha256 "$import_upload"; request_json=$(json_dump)
-			;;
-		*) error invalid_request; return 1 ;;
-	esac
-	request=$request_json
-	if foreign_core_running; then error unmanaged_core_running; return 1; fi
-	if ! acquire_lock; then error "$lock_error"; return 1; fi
-	foreign_core_running && { error unmanaged_core_running; return 1; }
-	temp_dir=$(mktemp -d /tmp/honk-maint.XXXXXX) || { error temporary_storage_unavailable; return 1; }
-	chmod 0700 "$temp_dir" || { error temporary_storage_unavailable; return 1; }
-	preview_result=$(printf '%s' "$request" | "$HONK_CORE" --config "$HONK_CONFIG" --data-dir "$HONK_ROOT" admin import 2>/dev/null) || { error import_preview_failed; return 1; }
-	json_load "$preview_result" 2>/dev/null || { error import_preview_failed; return 1; }
-	preview_ok=
-	json_get_var preview_ok ok
-	[ "$preview_ok" = 1 ] || { json_get_var preview_error message; error "${preview_error:-import_preview_failed}"; return 1; }
-	json_get_var preview_id preview_id
-	json_get_var preview_sha source_sha256
-	case "$preview_id" in ''|*[!0-9a-f]*) error import_preview_failed; return 1 ;; esac
-	case "$preview_sha" in ''|*[!0-9a-f]*) error import_preview_failed; return 1 ;; esac
-	[ "${#preview_id}" = 32 ] && [ "${#preview_sha}" = 64 ] || { error import_preview_failed; return 1; }
-	preview_request=$(printf '{"action":"verify","preview_id":"%s","source_sha256":"%s"}' "$preview_id" "$preview_sha")
-	verify_result=$(printf '%s' "$preview_request" | "$HONK_CORE" --config "$HONK_CONFIG" --data-dir "$HONK_ROOT" admin import 2>/dev/null) || { error import_preview_invalid; return 1; }
-	json_load "$verify_result" 2>/dev/null || { error import_preview_invalid; return 1; }
-	verify_ok=
-	json_get_var verify_ok ok
-	[ "$verify_ok" = 1 ] || { json_get_var verify_error message; error "${verify_error:-import_preview_invalid}"; return 1; }
-	preview_root=$IMPORT_PREVIEW_ROOT/$preview_id
-	preview_tree=$preview_root/candidate/etc/honk
-	[ -d "$IMPORT_PREVIEW_ROOT" ] && [ ! -L "$IMPORT_PREVIEW_ROOT" ] && [ "$(stat -c '%u:%a' "$IMPORT_PREVIEW_ROOT" 2>/dev/null)" = 0:700 ] || { error import_preview_invalid; return 1; }
-	[ -d "$preview_root" ] && [ ! -L "$preview_root" ] && [ "$(stat -c '%u:%a' "$preview_root" 2>/dev/null)" = 0:700 ] || { error import_preview_invalid; return 1; }
-	[ -d "$preview_tree" ] && [ ! -L "$preview_tree" ] && [ "$(stat -c '%u:%a' "$preview_tree" 2>/dev/null)" = 0:700 ] || { error import_preview_invalid; return 1; }
-	find "$preview_root/candidate" -type l -print 2>/dev/null | grep -q . && { error import_preview_invalid; return 1; }
-	find "$preview_root/candidate" ! -type f ! -type d -print 2>/dev/null | grep -q . && { error import_preview_invalid; return 1; }
-	mkdir -p "$temp_dir/candidate/etc" || { error candidate_stage_failed; return 1; }
-	cp -pR "$preview_tree" "$temp_dir/candidate/etc/honk" || { error candidate_stage_failed; return 1; }
-	if [ -e "$HONK_STATE" ] || [ -L "$HONK_STATE" ]; then
-		state_dir=$(dirname "$HONK_STATE")
-		[ -d "$state_dir" ] && [ ! -L "$state_dir" ] && [ "$(stat -c '%u:%a' "$state_dir" 2>/dev/null)" = 0:700 ] || { error state_snapshot_unsafe; return 1; }
-		[ -f "$HONK_STATE" ] && [ ! -L "$HONK_STATE" ] && [ "$(stat -c '%u:%a' "$HONK_STATE" 2>/dev/null)" = 0:600 ] || { error state_snapshot_unsafe; return 1; }
-		mkdir -p "$temp_dir/candidate/etc/honk/state" || { error state_snapshot_failed; return 1; }
-		state_snapshot=$temp_dir/candidate/etc/honk/state/honk.db
-		sqlite3 -readonly "$HONK_STATE" ".backup '$state_snapshot'" >/dev/null 2>&1 || { error state_snapshot_failed; return 1; }
-		chmod 0600 "$state_snapshot" || { error state_snapshot_failed; return 1; }
-		check_sqlite "$state_snapshot" || { error state_snapshot_invalid; return 1; }
-	fi
-	validate_candidate "$temp_dir/candidate" "" preview || { error candidate_runtime_validation_failed; return 1; }
-	verify_result=$(printf '%s' "$preview_request" | "$HONK_CORE" --config "$HONK_CONFIG" --data-dir "$HONK_ROOT" admin import 2>/dev/null) || { error import_preview_invalid; return 1; }
-	json_load "$verify_result" 2>/dev/null || { error import_preview_invalid; return 1; }
-	verify_ok=
-	json_get_var verify_ok ok
-	[ "$verify_ok" = 1 ] || { json_get_var verify_error message; error "${verify_error:-source_changed}"; return 1; }
-	validated_request=$(printf '{"action":"mark_validated","preview_id":"%s","source_sha256":"%s"}' "$preview_id" "$preview_sha")
-	validated_result=$(printf '%s' "$validated_request" | "$HONK_CORE" --config "$HONK_CONFIG" --data-dir "$HONK_ROOT" admin import 2>/dev/null) || { error candidate_runtime_validation_failed; return 1; }
-	json_load "$validated_result" 2>/dev/null || { error candidate_runtime_validation_failed; return 1; }
-	validated_ok=
-	json_get_var validated_ok ok
-	[ "$validated_ok" = 1 ] || { json_get_var validated_error message; error "${validated_error:-candidate_runtime_validation_failed}"; return 1; }
-	printf '%s\n' "$validated_result"
-}
-
 reset_data() {
 	if foreign_core_running; then error unmanaged_core_running; return 1; fi
 	if managed_core_pid >/dev/null 2>&1; then old_running=1; fi
@@ -1283,8 +1108,6 @@ case "$1" in
 	backup) backup ;;
 	restore) restore ;;
 	reset) reset_data ;;
-	import_apply) import_apply "$2" "$3" ;;
 	recover) recover_action ;;
-	import_preview) import_preview ;;
 	*) error invalid_action ;;
 esac

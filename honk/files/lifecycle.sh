@@ -73,7 +73,7 @@ honk_lifecycle_api_owned() {
 	hlp_pid=$1
 	honk_lifecycle_parse_listen || return 1
 	honk_lifecycle_listener_owned "$hlp_pid" "$HONK_LIFECYCLE_PORT" && \
-		curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://$HONK_LIFECYCLE_LISTEN/api" -o /dev/null 2>/dev/null
+		curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://$HONK_LIFECYCLE_LISTEN/version" -o /dev/null 2>/dev/null
 }
 
 honk_lifecycle_resources_clear() {
@@ -161,7 +161,7 @@ honk_lifecycle_start() {
 			if [ -n "$hlp_new_starttime" ] && \
 				{ [ -z "${HONK_LIFECYCLE_STOP_PID:-}" ] || [ "$hlp_new_pid:$hlp_new_starttime" != "$HONK_LIFECYCLE_STOP_PID:$HONK_LIFECYCLE_STOP_STARTTIME" ]; } && \
 				honk_lifecycle_listener_owned "$hlp_new_pid" "$hlp_port" && \
-				curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://$hlp_listen/api" -o /dev/null 2>/dev/null; then
+				curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://$hlp_listen/version" -o /dev/null 2>/dev/null; then
 				if [ "$hlp_pid:$hlp_starttime" = "$hlp_new_pid:$hlp_new_starttime" ]; then
 					hlp_stable=$((hlp_stable + 1))
 				else

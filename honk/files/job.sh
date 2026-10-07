@@ -32,7 +32,7 @@ case "$job_id" in
 	*[!0-9a-f]*|'') exit 2 ;;
 esac
 [ "${#job_id}" -eq 32 ] || exit 2
-case "$operation" in backup|restore|reset|import_apply|import_preview|update_check|update_apply) ;; *) exit 2 ;; esac
+case "$operation" in backup|restore|reset|update_check|update_apply) ;; *) exit 2 ;; esac
 
 job_dir=$JOBS/$job_id
 [ -d "$JOBS" ] && [ ! -L "$JOBS" ] && [ -d "$job_dir" ] && [ ! -L "$job_dir" ] || exit 2
@@ -41,25 +41,7 @@ job_dir=$JOBS/$job_id
 write_status running preparing true preparing || exit 1
 : > "$job_dir/output" || exit 1
 chmod 0600 "$job_dir/output" || exit 1
-if [ "$operation" = import_apply ]; then
-	[ -f "$job_dir/request" ] && [ ! -L "$job_dir/request" ] && [ "$(stat -c '%u:%a' "$job_dir/request" 2>/dev/null)" = 0:600 ] || exit 2
-	job_request=$(cat "$job_dir/request")
-	json_load "$job_request" 2>/dev/null || exit 2
-	json_get_keys request_keys
-	case " $request_keys " in *' preview_id '*) ;; *) exit 2 ;; esac
-	case " $request_keys " in *' source_sha256 '*) ;; *) exit 2 ;; esac
-	[ "$(printf '%s\n' "$request_keys" | wc -w | tr -d ' ')" = 2 ] || exit 2
-	json_get_var preview_id preview_id
-	json_get_var source_sha256 source_sha256
-	case "$preview_id" in ''|*[!0-9a-f]*) exit 2 ;; esac
-	case "$source_sha256" in ''|*[!0-9a-f]*) exit 2 ;; esac
-	[ "${#preview_id}" = 32 ] && [ "${#source_sha256}" = 64 ] || exit 2
-	"$MAINT" "$operation" "$preview_id" "$source_sha256" > "$job_dir/output" 2>&1 &
-elif [ "$operation" = import_preview ]; then
-	[ -f "$job_dir/request" ] && [ ! -L "$job_dir/request" ] && [ "$(stat -c '%u:%a' "$job_dir/request" 2>/dev/null)" = 0:600 ] || exit 2
-	[ "$(wc -c < "$job_dir/request" | tr -d ' ')" -le 32768 ] || exit 2
-	"$MAINT" import_preview < "$job_dir/request" > "$job_dir/output" 2>&1 &
-elif [ "$operation" = update_apply ]; then
+if [ "$operation" = update_apply ]; then
 	/usr/share/honk/update.sh apply > "$job_dir/output" 2>&1 &
 elif [ "$operation" = update_check ]; then
 	/usr/share/honk/update.sh check > "$job_dir/output" 2>&1 &
@@ -70,9 +52,7 @@ maint_pid=$!
 logger -t honk-maintenance "$operation started" 2>/dev/null || :
 while kill -0 "$maint_pid" 2>/dev/null; do
 	journal_phase=$(sed -n 's/^phase=//p' /etc/.honk-maintenance/journal 2>/dev/null | sed -n '1p')
-	if [ "$operation" = import_preview ]; then
-		status_phase=validating_candidate
-	elif [ "$operation" = update_apply ]; then
+	if [ "$operation" = update_apply ]; then
 		update_phase=$(cat /etc/.honk-update/phase 2>/dev/null)
 		case "$update_phase" in
 			downloading) status_phase=downloading ;;
@@ -99,9 +79,6 @@ while kill -0 "$maint_pid" 2>/dev/null; do
 done
 wait "$maint_pid"
 operation_rc=$?
-if [ "$operation" = import_preview ]; then
-	rm -f "$job_dir/request"
-fi
 json_load "$(cat "$job_dir/output" 2>/dev/null)" 2>/dev/null || {
 	if [ -e /etc/.honk-maintenance/journal ] || [ -L /etc/.honk-maintenance/journal ] || [ -d /run/honk.lock ]; then
 		write_status rollback_required recovery false maintenance_recovery_required
@@ -114,7 +91,7 @@ json_load "$(cat "$job_dir/output" 2>/dev/null)" 2>/dev/null || {
 json_get_var operation_ok ok
 json_get_var operation_message message
 if [ "$operation_rc" -eq 0 ] && [ "$operation_ok" = 1 ]; then
-	if [ "$operation" = import_preview ] || [ "$operation" = update_check ]; then
+	if [ "$operation" = update_check ]; then
 		json_add_string state succeeded
 		json_add_string phase complete
 		json_add_string job_id "$job_id"

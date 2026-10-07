@@ -57,7 +57,7 @@ status() {
 	config_get lan_network main lan_network lan
 	managed_pid=$(procd_core_pid)
 	if is_managed_core "$managed_pid"; then running=1; else running=0; fi
-	listen=$(sed -n "s/^[[:space:]]*listen:[[:space:]]*'\\([^']*\\)'.*/\\1/p" /etc/honk/system.dae | head -n 1)
+	listen=$(sed -n "s/^[[:space:]]*external_controller:[[:space:]]*'\\([^']*\\)'.*/\\1/p" /etc/honk/system.dae | head -n 1)
 	case "$listen" in
 		''|*[!0-9.:]*) listen="127.0.0.1:$listen_port" ;;
 	esac
@@ -111,7 +111,7 @@ service_ready_config() {
 start_job() {
 	job_operation=$1
 	job_request=
-	case "$job_operation" in backup|restore|reset|import_apply|import_preview|update_check|update_apply) ;; *) emit_result false invalid_operation; return 1 ;; esac
+	case "$job_operation" in backup|restore|reset|update_check|update_apply) ;; *) emit_result false invalid_operation; return 1 ;; esac
 	if [ "$job_operation" = update_apply ]; then
 		update_gate_result=$("$UPDATE" gate 2>/dev/null) || { emit_result false update_check_failed; return 1; }
 		json_load "$update_gate_result" 2>/dev/null || { emit_result false update_check_failed; return 1; }
@@ -122,39 +122,7 @@ start_job() {
 			return 1
 		fi
 	fi
-	if [ "$job_operation" = import_apply ]; then
-		job_request=$(cat)
-		job_request=$(printf '%s' "$job_request" | sed -E 's/"ubus_rpc_session":"[^"]*",?//; s/,\}/}/')
-		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
-		json_get_keys request_keys
-		case " $request_keys " in *' preview_id '*) ;; *) emit_result false invalid_request; return 1 ;; esac
-		case " $request_keys " in *' source_sha256 '*) ;; *) emit_result false invalid_request; return 1 ;; esac
-		[ "$(printf '%s\n' "$request_keys" | wc -w | tr -d ' ')" = 2 ] || { emit_result false invalid_request; return 1; }
-		json_get_type preview_id_type preview_id
-		json_get_type source_sha256_type source_sha256
-		[ "$preview_id_type" = string ] && [ "$source_sha256_type" = string ] || { emit_result false invalid_request; return 1; }
-		json_get_var preview_id preview_id
-		json_get_var source_sha256 source_sha256
-		case "$preview_id" in ''|*[!0-9a-f]*) emit_result false invalid_request; return 1 ;; esac
-		case "$source_sha256" in ''|*[!0-9a-f]*) emit_result false invalid_request; return 1 ;; esac
-		[ "${#preview_id}" = 32 ] && [ "${#source_sha256}" = 64 ] || { emit_result false invalid_request; return 1; }
-	elif [ "$job_operation" = import_preview ]; then
-		job_request=$(cat) || { emit_result false invalid_request; return 1; }
-		job_request=$(printf '%s' "$job_request" | sed -E 's/"ubus_rpc_session":"[^"]*",?//; s/,\}/}/')
-		[ "$(printf '%s' "$job_request" | wc -c | tr -d ' ')" -le 2097152 ] || { emit_result false invalid_request; return 1; }
-		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
-		json_get_keys request_keys
-		for request_key in $request_keys; do
-			case "$request_key" in action|kind|mode|name|url|share_links|content|upload_sha256|preview_id|source_sha256) ;; *) emit_result false invalid_request; return 1 ;; esac
-		done
-		json_get_type action_type action
-		json_get_var action action
-		[ "$action_type" = string ] && [ "$action" = preview ] || { emit_result false invalid_request; return 1; }
-		json_get_type kind_type kind
-		json_get_var kind kind
-		[ "$kind_type" = string ] || { emit_result false invalid_request; return 1; }
-		case "$kind" in share_links|subscription|dae) ;; *) emit_result false invalid_request; return 1 ;; esac
-	fi
+
 	if [ ! -e "$JOBS" ] && [ ! -L "$JOBS" ]; then
 		(umask 077; mkdir "$JOBS") || { emit_result false job_storage_unavailable; return 1; }
 	fi
@@ -164,13 +132,7 @@ start_job() {
 	job_dir=$JOBS/$job_id
 	mkdir "$job_dir" || { emit_result false job_storage_unavailable; return 1; }
 	chmod 0700 "$job_dir" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
-	if [ "$job_operation" = import_apply ]; then
-		printf '{"preview_id":"%s","source_sha256":"%s"}\n' "$preview_id" "$source_sha256" > "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
-		chmod 0600 "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
-	elif [ "$job_operation" = import_preview ]; then
-		printf '%s\n' "$job_request" > "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
-		chmod 0600 "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
-	fi
+
 	json_init
 	json_add_string state running
 	json_add_string phase queued
@@ -274,64 +236,6 @@ logs() {
 	rm -f "$log_file"
 }
 
-core_import_capabilities() {
-	capabilities=$($CORE --config /etc/honk/config.dae --data-dir /etc/honk admin capabilities 2>/dev/null) || return 1
-	json_load "$capabilities" 2>/dev/null || return 1
-	json_get_var capabilities_version capabilities_version
-	json_get_var import_preview_enabled import_preview
-	json_get_var import_apply_enabled import_apply
-	json_get_var dae_upload_prepare dae_upload_prepare
-	json_get_var reset_business_enabled reset_business
-	json_get_var offline_subscription_validation offline_subscription_validation
-	[ "$capabilities_version" = 1 ] || return 1
-}
-
-import_capabilities() {
-	core_import_capabilities || { emit_result false unsupported_core; return 1; }
-	json_init
-	json_add_boolean ok 1
-	json_add_int capabilities_version "$capabilities_version"
-	json_add_boolean import_preview "$import_preview_enabled"
-	json_add_boolean import_apply "$import_apply_enabled"
-	json_add_boolean reset_business "$reset_business_enabled"
-	json_add_boolean offline_subscription_validation "$offline_subscription_validation"
-	json_dump
-}
-
-import_preview() {
-	core_import_capabilities || { emit_result false unsupported_core; return 1; }
-	[ "$import_preview_enabled" = 1 ] || { emit_result false unsupported_core; return 1; }
-	start_job import_preview
-}
-
-prepare_upload_directory() {
-	[ ! -e "$RESTORE_ROOT" ] && [ ! -L "$RESTORE_ROOT" ] && { (umask 077; mkdir "$RESTORE_ROOT") || return 1; }
-	[ -d "$RESTORE_ROOT" ] && [ ! -L "$RESTORE_ROOT" ] && [ "$(stat -c '%u:%a' "$RESTORE_ROOT" 2>/dev/null)" = 0:700 ] || return 1
-	if [ -e "$RESTORE_PATH" ] || [ -L "$RESTORE_PATH" ]; then
-		[ -f "$RESTORE_PATH" ] && [ ! -L "$RESTORE_PATH" ] && [ "$(stat -c '%u:%a' "$RESTORE_PATH" 2>/dev/null)" = 0:600 ] || return 1
-		rm -f "$RESTORE_PATH" || return 1
-	fi
-}
-
-restore_prepare() {
-	prepare_upload_directory || { emit_result false upload_unavailable; return 1; }
-	emit_result true upload_ready
-}
-
-import_upload_prepare() {
-	core_import_capabilities || { emit_result false unsupported_core; return 1; }
-	[ "$dae_upload_prepare" = 1 ] || { emit_result false unsupported_core; return 1; }
-	result=$(printf '%s' '{"action":"upload_prepare"}' | "$CORE" --config /etc/honk/config.dae --data-dir /etc/honk admin import 2>/dev/null) || { emit_result false upload_unavailable; return 1; }
-	json_load "$result" 2>/dev/null || { emit_result false upload_unavailable; return 1; }
-	json_dump
-}
-
-import_apply_job() {
-	core_import_capabilities || { emit_result false unsupported_core; return 1; }
-	[ "$import_apply_enabled" = 1 ] || { emit_result false unsupported_core; return 1; }
-	start_job import_apply
-}
-
 set_enabled() {
 	uci set "honk.main.enabled=$1" && uci commit honk
 }
@@ -352,7 +256,7 @@ begin_mutation() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean"},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"import_capabilities":{},"import_upload_prepare":{},"import_preview":{},"import_apply":{"preview_id":"String","source_sha256":"String"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean"},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -388,18 +292,6 @@ list)
 				;;
 			logs)
 				logs
-				;;
-			import_capabilities)
-				import_capabilities
-				;;
-			import_preview)
-				import_preview
-				;;
-			import_upload_prepare)
-				import_upload_prepare
-				;;
-			import_apply)
-				import_apply_job
 				;;
 			update_check)
 				start_job update_check
