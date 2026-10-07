@@ -109,6 +109,7 @@ return view.extend({
 				E('span', { 'class': 'honk-pkg-icon ' + iconCls }, icon),
 				E('span', { 'class': 'honk-pkg-name' }, name),
 				E('span', { 'class': 'honk-pkg-meta', 'title': meta }, meta),
+				E('span', {}, ''),
 				btn || E('span', {}, '')
 			]);
 		}
@@ -201,8 +202,8 @@ return view.extend({
 			gsInput.value = preset0 === 'custom' ? gs0 : '';
 
 			const customRows = E('div', {}, [
-				geoField('GeoIP URL', giInput),
-				geoField('GeoSite URL', gsInput)
+				geoField(_('GeoIP URL'), giInput),
+				geoField(_('GeoSite URL'), gsInput)
 			]);
 			const syncCustom = function() { customRows.style.display = presetSel.value === 'custom' ? '' : 'none'; };
 			presetSel.addEventListener('change', syncCustom);
@@ -248,11 +249,14 @@ return view.extend({
 				});
 			});
 
-			return E('div', {}, [
-				geoField(_('Source'), presetSel),
-				customRows,
-				geoField(_('Auto-update'), autoSel),
-				E('div', { 'class': 'honk-actions' }, [ saveBtn ])
+			return E('details', {}, [
+				E('summary', {}, _('Data source and auto-update')),
+				E('div', {}, [
+					geoField(_('Source'), presetSel),
+					customRows,
+					geoField(_('Auto-update'), autoSel),
+					E('div', { 'class': 'honk-actions' }, [ saveBtn ])
+				])
 			]);
 		})();
 

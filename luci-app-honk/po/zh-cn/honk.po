@@ -1080,6 +1080,15 @@ msgstr "数据源"
 msgid "Auto-update"
 msgstr "自动更新"
 
+msgid "GeoIP URL"
+msgstr "GeoIP 地址"
+
+msgid "GeoSite URL"
+msgstr "GeoSite 地址"
+
+msgid "Data source and auto-update"
+msgstr "数据源与自动更新"
+
 msgid "Geo data source saved."
 msgstr "Geo 数据源已保存。"
 
@@ -1092,8 +1101,23 @@ msgstr "导入"
 msgid "Update"
 msgstr "更新"
 
-msgid "Preview nodes"
-msgstr "预览节点"
+msgid "Import nodes"
+msgstr "导入节点"
+
+msgid "Import the pasted nodes? Any running Honk service will be stopped during the change and its previous running state will be restored afterward."
+msgstr "导入粘贴的节点？导入过程中会停止正在运行的 Honk 服务，完成后恢复之前的状态。"
+
+msgid "Preparing import…"
+msgstr "正在准备导入…"
+
+msgid "Applying %d imported nodes…"
+msgstr "正在应用 %d 个导入节点…"
+
+msgid "Imported %d nodes."
+msgstr "已导入 %d 个节点。"
+
+msgid "Import failed."
+msgstr "导入失败。"
 
 msgid "Paste nodes"
 msgstr "粘贴节点"
@@ -1101,8 +1125,8 @@ msgstr "粘贴节点"
 msgid "Clash YAML, Surge INI, Base64 or share links"
 msgstr "Clash YAML、Surge INI、Base64 或分享链接"
 
-msgid "Paste subscription content or share links; they are parsed locally into nodes. A parsed request is limited to 16 KiB, so paste larger lists in batches."
-msgstr "粘贴订阅内容或分享链接，本地解析为节点。解析后的请求限制为 16 KiB，请分批粘贴较大的列表。"
+msgid "Paste subscription content or share links; they are parsed locally into nodes. A parsed request is limited to 1 MiB."
+msgstr "粘贴订阅内容或分享链接，本地解析为节点。解析后的请求限制为 1 MiB。"
 
 msgid "Paste subscription content or share links."
 msgstr "请粘贴订阅内容或分享链接。"
@@ -1116,8 +1140,8 @@ msgstr "正在解析粘贴内容…"
 msgid "No importable nodes were found in the pasted content."
 msgstr "未在粘贴内容中找到可导入的节点。"
 
-msgid "Parsed nodes exceed the 16 KiB per request limit. Paste them in smaller batches."
-msgstr "解析出的节点超过每请求 16 KiB 限制，请分批粘贴。"
+msgid "Parsed nodes exceed the 1 MiB per request limit. Paste them in smaller batches."
+msgstr "解析出的节点超过每请求 1 MiB 限制，请分批粘贴。"
 
 msgid "Failed to parse the pasted content."
 msgstr "解析粘贴内容失败。"

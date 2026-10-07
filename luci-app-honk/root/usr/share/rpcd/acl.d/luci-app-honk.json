@@ -5,8 +5,7 @@
 			"ubus": {
 				"honk": [ "status", "check", "job_status", "logs", "import_capabilities", "update_check" ],
 				"network": [ "get_proto_handlers" ],
-				"network.interface": [ "dump" ],
-				"uci": [ "get" ]
+				"network.interface": [ "dump" ]
 			},
 			"file": {
 				"/tmp/honk-backup.tar.gz": [ "read" ],

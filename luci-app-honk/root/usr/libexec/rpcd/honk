@@ -141,7 +141,7 @@ start_job() {
 	elif [ "$job_operation" = import_preview ]; then
 		job_request=$(cat) || { emit_result false invalid_request; return 1; }
 		job_request=$(printf '%s' "$job_request" | sed -E 's/"ubus_rpc_session":"[^"]*",?//; s/,\}/}/')
-		[ "$(printf '%s' "$job_request" | wc -c | tr -d ' ')" -le 32768 ] || { emit_result false invalid_request; return 1; }
+		[ "$(printf '%s' "$job_request" | wc -c | tr -d ' ')" -le 2097152 ] || { emit_result false invalid_request; return 1; }
 		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
 		json_get_keys request_keys
 		for request_key in $request_keys; do
@@ -239,7 +239,7 @@ logs() {
 	log_file=$(mktemp /tmp/honk-log.XXXXXX) || { rm -f "$log_raw_file"; emit_result false logs_unavailable; return 1; }
 	chmod 0600 "$log_raw_file" "$log_file" || { rm -f "$log_raw_file" "$log_file"; emit_result false logs_unavailable; return 1; }
 	log_capped=0
-	logread -l 200 -e 'honk|honk-core|honk-maintenance' 2>/dev/null | head -c 262144 > "$log_raw_file"
+	logread -l 200 -e 'honk' 2>/dev/null | head -c 262144 > "$log_raw_file"
 	log_raw_bytes=$(wc -c < "$log_raw_file" | tr -d ' ')
 	if [ "$log_raw_bytes" -ge 262144 ]; then
 		log_capped=1

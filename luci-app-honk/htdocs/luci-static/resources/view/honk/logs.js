@@ -4,6 +4,72 @@
 'require view';
 'require view.honk.rpc as honk';
 
+function detectLogLevel(line) {
+	// honk-core tracing output (e.g. "  ERROR honk_core::...")
+	if (/\s(?:ERROR|FATAL|PANIC)\s/.test(line)) return 'error';
+	if (/\sWARN(?:ING)?\s/.test(line)) return 'warn';
+	if (/\sDEBUG\s/.test(line)) return 'debug';
+	if (/\sTRACE\s/.test(line)) return 'trace';
+	if (/\sINFO\s/.test(line)) return 'info';
+	// syslog facility.level (e.g. "daemon.err")
+	if (/daemon\.(?:err|crit|alert|emerg)\b/.test(line)) return 'error';
+	if (/daemon\.(?:warning|warn|notice)\b/.test(line)) return 'warn';
+	if (/daemon\.debug\b/.test(line)) return 'debug';
+	if (/daemon\.info\b/.test(line)) return 'info';
+	return '';
+}
+
+function formatLogTs(raw) {
+	// logread timestamp: "Wed Oct  7 18:58:09 2026" -> "2026-10-07 18:58:09"
+	const m = String(raw || '').match(/^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}:\d{2}:\d{2})\s+(\d{4})$/);
+	if (!m) return raw;
+	const months = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+	const month = months[m[1]];
+	if (!month) return raw;
+	return m[4] + '-' + String(month).padStart(2, '0') + '-' + String(Number(m[2])).padStart(2, '0') + ' ' + m[3];
+}
+
+function lvlShort(level) {
+	const u = (level || '').toUpperCase();
+	if (u === 'WARNING') return 'WARN';
+	return u || '-';
+}
+
+function lvlClass(level) {
+	const u = (level || '').toUpperCase();
+	if (u === 'TRACE') return 'honk-log-lvl-trace';
+	if (u === 'DEBUG') return 'honk-log-lvl-debug';
+	if (u === 'INFO') return 'honk-log-lvl-info';
+	if (u === 'WARN' || u === 'WARNING') return 'honk-log-lvl-warn';
+	return 'honk-log-lvl-error';
+}
+
+function parseLogLine(line) {
+	// "Wed Oct  7 18:58:09 2026 daemon.info honk-core[31377]:  INFO honk_core::..."
+	const m = line.match(/^([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+\S+\s+[^:]+:\s*(.*)$/);
+	if (!m) return { ts: '', lvl: '', msg: line };
+	let body = m[2] || '';
+	const lvlMatch = body.match(/^\s*(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|PANIC)\s+(.*)$/i);
+	let lvl = '';
+	if (lvlMatch) {
+		lvl = lvlMatch[1].toUpperCase();
+		body = lvlMatch[2];
+	}
+	return { ts: formatLogTs(m[1]), lvl: lvl, msg: body };
+}
+
+function buildLogLine(line) {
+	const level = detectLogLevel(line);
+	const parsed = parseLogLine(line);
+	const parts = [];
+	if (parsed.ts)
+		parts.push(E('span', { 'class': 'honk-log-ts' }, parsed.ts));
+	if (parsed.lvl)
+		parts.push(E('span', { 'class': 'honk-log-lvl ' + lvlClass(parsed.lvl) }, lvlShort(parsed.lvl)));
+	parts.push(E('span', { 'class': 'honk-log-msg' }, parsed.msg));
+	return E('span', { 'class': 'honk-log-line' + (level ? ' honk-log-' + level : '') }, parts);
+}
+
 return view.extend({
 	handleSave: null,
 	handleSaveApply: null,
@@ -19,8 +85,8 @@ return view.extend({
 	render: function() {
 		honk.installStyles();
 		const source = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'service' }, _('Service')),
 			E('option', { 'value': 'core' }, _('Core')),
+			E('option', { 'value': 'service' }, _('Service')),
 			E('option', { 'value': 'maintenance' }, _('Maintenance'))
 		]);
 		const level = E('select', { 'class': 'cbi-input-select' }, [
@@ -57,7 +123,15 @@ return view.extend({
 				if (requestId !== requestSequence)
 					return;
 				latest = Array.isArray(result.lines) ? result.lines.map(String) : [];
-				output.textContent = latest.length ? latest.join('\n') : _('No matching Honk log entries.');
+				output.replaceChildren();
+				if (latest.length) {
+					latest.forEach(function(line) {
+						output.appendChild(buildLogLine(line));
+					});
+				}
+				else {
+					output.textContent = _('No matching Honk log entries.');
+				}
 				status.textContent = result.capped ? _('Output was capped; showing the latest %d entries.').format(latest.length) : _('Showing the latest %d matching entries.').format(latest.length);
 			}).catch(function(error) {
 				if (requestId === requestSequence)

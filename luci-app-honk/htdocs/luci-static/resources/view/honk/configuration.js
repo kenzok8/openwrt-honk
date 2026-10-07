@@ -9,8 +9,8 @@
 
 const DAE_UPLOAD_PATH = '/tmp/honk-v2-upload/import.dae';
 const DAE_LIMIT = 2 * 1024 * 1024;
-const SHARE_LINK_LIMIT = 16 * 1024;
-const PASTE_LIMIT = 256 * 1024;
+const SHARE_LINK_LIMIT = 1 * 1024 * 1024;
+const PASTE_LIMIT = 2 * 1024 * 1024;
 
 function utf8Length(value) {
 	return new TextEncoder().encode(value).length;
@@ -307,13 +307,13 @@ return view.extend({
 			'class': 'cbi-input-textarea', 'id': 'honk-share-links', 'name': 'share_links',
 			'rows': '10', 'maxlength': String(PASTE_LIMIT), 'spellcheck': 'false', 'required': true
 		});
-		const linksButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Preview nodes'));
+		const linksButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'submit' }, _('Import nodes'));
 		inputs.push(linksInput);
 		actionButtons.push(linksButton);
 		linksPanel.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Paste nodes')));
 		linksPanel.appendChild(E('label', { 'class': 'cbi-value-title', 'for': linksInput.id }, _('Clash YAML, Surge INI, Base64 or share links')));
 		linksPanel.appendChild(linksInput);
-		linksPanel.appendChild(E('p', { 'class': 'honk-note' }, _('Paste subscription content or share links; they are parsed locally into nodes. A parsed request is limited to 16 KiB, so paste larger lists in batches.')));
+		linksPanel.appendChild(E('p', { 'class': 'honk-note' }, _('Paste subscription content or share links; they are parsed locally into nodes. A parsed request is limited to 1 MiB.')));
 		linksPanel.appendChild(E('div', { 'class': 'honk-actions' }, linksButton));
 		linksPanel.addEventListener('submit', function(ev) {
 			ev.preventDefault();
@@ -330,25 +330,48 @@ return view.extend({
 				previewMessage.textContent = _('The pasted content is too large. Paste a smaller selection.');
 				return;
 			}
+			if (!applySupported) {
+				previewMessage.textContent = _('Applying a preview is not available in this installed core.');
+				return;
+			}
+			if (!window.confirm(_('Import the pasted nodes? Any running Honk service will be stopped during the change and its previous running state will be restored afterward.')))
+				return;
+
 			setBusy(true);
 			previewMessage.textContent = _('Parsing pasted content…');
 			parsePasted(linksInput.value).then(function(parsed) {
 				if (!parsed.links.length) {
-					setBusy(false);
 					previewMessage.textContent = _('No importable nodes were found in the pasted content.');
 					return;
 				}
 				const uris = parsed.links.join('\n');
 				if (utf8Length(uris) > SHARE_LINK_LIMIT) {
-					setBusy(false);
-					previewMessage.textContent = _('Parsed nodes exceed the 16 KiB per request limit. Paste them in smaller batches.');
+					previewMessage.textContent = _('Parsed nodes exceed the 1 MiB per request limit. Paste them in smaller batches.');
 					return;
 				}
+				previewMessage.textContent = _('Preparing import…');
+				return honk.importPreview({ action: 'preview', kind: 'share_links', share_links: uris }).then(honk.ensureOk).then(function(job) {
+					return honk.waitJob(job.job_id, function(status) {
+						previewMessage.textContent = honk.jobPhaseMessage(status.phase);
+					}).then(honk.ensureOk);
+				}).then(function(preview) {
+					const count = Number(preview.node_count) || parsed.links.length;
+					previewMessage.textContent = _('Applying %d imported nodes…').format(count);
+					return honk.importApply(preview).then(honk.ensureOk).then(function(job) {
+						return honk.waitJob(job.job_id, function(status) {
+							previewMessage.textContent = honk.jobPhaseMessage(status.phase);
+						}).then(honk.ensureOk);
+					}).then(function() { return count; });
+				}).then(function(count) {
+					previewDetails.replaceChildren();
+					previewMessage.textContent = _('Imported %d nodes.').format(count);
+				});
+			}).catch(function(error) {
+				if (error && error.recoveryRequired)
+					recoveryBlocked = true;
+				previewMessage.textContent = honk.errorMessage(error, _('Import failed.'));
+			}).finally(function() {
 				setBusy(false);
-				preview({ action: 'preview', kind: 'share_links', share_links: uris });
-			}).catch(function() {
-				setBusy(false);
-				previewMessage.textContent = _('Failed to parse the pasted content.');
 			});
 		});
 		linksInput.addEventListener('input', function() { linksInput.setCustomValidity(''); invalidatePreview(); });
