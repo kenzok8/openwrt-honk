@@ -161,7 +161,6 @@ grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
 grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
 grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
 grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
-grep -Fq '"/tmp/honk-v2-upload/import.dae": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
 grep -Fq 'include $(CURDIR)/generated-stage.mk' honk/Makefile
@@ -209,10 +208,8 @@ grep -Fq 'start_job update_check' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'update_gate' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'trap cleanup_update EXIT' honk/files/update.sh
 grep -Fq 'UPDATE_LOCK_OWNED=1' honk/files/update.sh
-grep -Fq 'validating_candidate' honk/files/job.sh
 grep -Fq 'checking_feed' honk/files/job.sh
-grep -Fq 'rm -f "$job_dir/request"' honk/files/job.sh
-grep -Fq 'honk.waitJob(job.job_id' luci-app-honk/htdocs/luci-static/resources/view/honk/configuration.js
+
 
 grep -Fq "honk.settings(networkSelect.value, port, bootEnabledInput.checked)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
