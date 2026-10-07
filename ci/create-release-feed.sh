@@ -29,7 +29,6 @@ test -s "$ROOT/artifacts/cache/$DOONA_ARCHIVE" || { echo 'The pinned Doona archi
 test -s "$ROOT/honk/generated-provenance.json" || { echo 'The generated core provenance is missing.' >&2; exit 1; }
 test -s "$ROOT/honk/generated-stage.mk" || { echo 'The generated core stage is missing.' >&2; exit 1; }
 test -s "$ROOT/luci-app-honk/generated-doona-stage.mk" || { echo 'The generated Doona stage is missing.' >&2; exit 1; }
-test "$(sha256sum "$ROOT/ci/patches/honk-openwrt.patch" | cut -d' ' -f1)" = "$CORE_PATCH_SHA256" || { echo 'The core patch does not match its pinned checksum.' >&2; exit 1; }
 test "$(sha256sum "$ROOT/ci/patches/doona-openwrt.patch" | cut -d' ' -f1)" = "$DOONA_PATCH_SHA256" || { echo 'The Doona patch does not match its pinned checksum.' >&2; exit 1; }
 test ! -e "$FEED_DIR" && test ! -L "$FEED_DIR" || { echo 'The output directory must not already exist.' >&2; exit 1; }
 
@@ -63,7 +62,7 @@ const [root, stage, baseUrl, apkTool, ...files] = process.argv.slice(2);
 const pins = Object.fromEntries(fs.readFileSync(path.join(root, 'ci/pins.env'), 'utf8')
 	.split(/\r?\n/).filter(line => /^[A-Z0-9_]+=/.test(line))
 	.map(line => line.split(/=(.*)/s).slice(0, 2)));
-const required = ['CORE_COMMIT', 'CORE_PATCH_SHA256', 'DOONA_COMMIT', 'DOONA_PATCH_SHA256', 'OPENWRT_SDK_SHA256'];
+const required = ['CORE_COMMIT', 'DOONA_COMMIT', 'DOONA_PATCH_SHA256', 'OPENWRT_SDK_SHA256'];
 for (const key of required) {
 	if (!pins[key]) throw new Error(`Missing pinned value: ${key}`);
 }
@@ -78,8 +77,8 @@ const makeValue = (filename, key) => {
 const generated = readJson(path.join(root, 'honk/generated-provenance.json'));
 const coreArchive = path.join(root, 'artifacts/cache', pins.CORE_ARCHIVE);
 const doonaArchive = path.join(root, 'artifacts/cache', pins.DOONA_ARCHIVE);
-if (generated.core?.commit !== pins.CORE_COMMIT || generated.core?.patch_sha256 !== pins.CORE_PATCH_SHA256)
-	throw new Error('Generated core provenance does not match the pinned source and patch.');
+if (generated.core?.commit !== pins.CORE_COMMIT)
+	throw new Error('Generated core provenance does not match the pinned source.');
 if (generated.doona?.source_commit !== pins.DOONA_COMMIT || generated.doona?.version !== pins.DOONA_VERSION ||
 	generated.doona?.patch_sha256 !== pins.DOONA_PATCH_SHA256)
 	throw new Error('Generated Doona provenance does not match the pinned source and patch.');
@@ -201,7 +200,6 @@ const manifest = {
 	state_schema: 2,
 	core: {
 		commit: pins.CORE_COMMIT,
-		patch_sha256: pins.CORE_PATCH_SHA256,
 		artifact_sha256: sha256(coreArchive)
 	},
 	doona: {

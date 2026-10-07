@@ -10,8 +10,6 @@ PKG_RELEASE:=3
 
 include $(CURDIR)/generated-stage.mk
 
-CORE_PATCH_SHA256:=$(shell sed -n 's/^CORE_PATCH_SHA256=//p' $(CURDIR)/../ci/pins.env)
-
 ifeq ($(HONK_SDK_PACKAGE),1)
 ifeq ($(wildcard $(CURDIR)/generated-stage.mk),)
 $(error HONK_SDK_PACKAGE requires the verified generated core stage)
@@ -53,8 +51,6 @@ endef
 
 define Build/Prepare
 	test -s $(CURDIR)/generated-provenance.json
-	test "$(HONK_CORE_PATCH_SHA256)" = "$(CORE_PATCH_SHA256)"
-	grep -Fq '"patch_sha256": "$(CORE_PATCH_SHA256)"' $(CURDIR)/generated-provenance.json
 	grep -Fq '"filename": "$(PKG_SOURCE)"' $(CURDIR)/generated-provenance.json
 	grep -Fq '"sha256": "$(PKG_HASH)"' $(CURDIR)/generated-provenance.json
 	mkdir -p $(PKG_BUILD_DIR)

@@ -25,11 +25,9 @@ node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-a
 grep -q '^CORE_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_PATCH_SHA256=[0-9a-f]\{64\}$' ci/pins.env
-grep -q '^CORE_PATCH_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 grep -q '^OPENWRT_SDK_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 grep -q '^BPF_LINKER_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 test "$(sha256sum ci/patches/doona-openwrt.patch | cut -d' ' -f1)" = "$(sed -n 's/^DOONA_PATCH_SHA256=//p' ci/pins.env)"
-test "$(sha256sum ci/patches/honk-openwrt.patch | cut -d' ' -f1)" = "$(sed -n 's/^CORE_PATCH_SHA256=//p' ci/pins.env)"
 source ci/pins.env
 
 node <<'NODE'
@@ -165,7 +163,7 @@ grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefil
 grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
 grep -Fq '"/tmp/honk-v2-upload/import.dae": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
-grep -Fq 'CORE_PATCH_SHA256:=$(shell sed -n' honk/Makefile
+
 grep -Fq 'include $(CURDIR)/generated-stage.mk' honk/Makefile
 grep -Fq 'test -s $(CURDIR)/generated-provenance.json' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
@@ -194,7 +192,7 @@ grep -Fq 'package/feeds/luci/lucihttp/compile V=s' ci/build-sdk.sh
 grep -Fq "'adbdump'" ci/create-release-feed.sh
 grep -Fq ' -V -m "$STAGE/manifest.json" -p "$MANIFEST_PUBLIC_KEY"' ci/create-release-feed.sh
 grep -Fq "extract', '--destination'" ci/create-release-feed.sh
-grep -Fq 'Generated core provenance does not match the pinned source and patch.' ci/create-release-feed.sh
+grep -Fq 'Generated core provenance does not match the pinned source.' ci/create-release-feed.sh
 grep -Fq "'usr/share/honk/provenance.json'" ci/create-release-feed.sh
 grep -Fq "'usr/bin/honk-core'" ci/create-release-feed.sh
 grep -Fq 'packages/Packages.adb' ci/create-release-feed.sh
@@ -222,7 +220,7 @@ grep -Fq 'validating_candidate' honk/files/job.sh
 grep -Fq 'checking_feed' honk/files/job.sh
 grep -Fq 'rm -f "$job_dir/request"' honk/files/job.sh
 grep -Fq 'honk.waitJob(job.job_id' luci-app-honk/htdocs/luci-static/resources/view/honk/configuration.js
-grep -Fq 'HONK_CORE_PATCH_SHA256:=$CORE_PATCH_SHA256' ci/build-core.sh
+
 grep -Fq "honk.settings(networkSelect.value, port, bootEnabledInput.checked)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
 git diff --check

@@ -122,7 +122,6 @@ validate_manifest() {
 	case "$validate_commit" in *[!0-9a-f]*|'') return 1 ;; esac
 	[ "${#validate_commit}" -eq 40 ] || return 1
 	for validate_sha in \
-		"$(manifest_field '@.core.patch_sha256')" \
 		"$(manifest_field '@.core.artifact_sha256')" \
 		"$(manifest_field '@.doona.patch_sha256')" \
 		"$(manifest_field '@.doona.artifact_sha256')" \

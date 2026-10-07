@@ -28,16 +28,12 @@ git clone --quiet "$CORE_REPOSITORY" "$WORK_DIR/source"
 git -C "$WORK_DIR/source" checkout --quiet "$CORE_COMMIT"
 test "$(git -C "$WORK_DIR/source" rev-parse HEAD)" = "$CORE_COMMIT"
 test -f "$WORK_DIR/source/Cargo.lock"
-test "$(sha256sum "$ROOT/$CORE_PATCH" | cut -d' ' -f1)" = "$CORE_PATCH_SHA256"
-git -C "$WORK_DIR/source" apply --check "$ROOT/$CORE_PATCH"
-git -C "$WORK_DIR/source" apply "$ROOT/$CORE_PATCH"
 
 TOOLCHAIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$WORK_DIR/source/rust-toolchain.toml")
 test -n "$TOOLCHAIN"
 rustup toolchain install "$TOOLCHAIN" --profile minimal --component rust-src
 rustup toolchain install nightly-2026-07-20 --profile minimal --component rust-src --component llvm-tools
 rustup target add --toolchain "$TOOLCHAIN" x86_64-unknown-linux-musl
-rg -q '^native-api\s*=' "$WORK_DIR/source/crates/honk-core/Cargo.toml"
 rg -q '^clash-api\s*=' "$WORK_DIR/source/crates/honk-core/Cargo.toml"
 rg -q '^ebpf\s*=' "$WORK_DIR/source/crates/honk-core/Cargo.toml"
 test -x "$WORK_DIR/source/ci/zigcc"
@@ -69,7 +65,7 @@ export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C link-self-contained=
 BINDGEN_EXTRA_CLANG_ARGS=$("$WORK_DIR/source/ci/zig-bindgen-env" x86_64-linux-musl)
 export BINDGEN_EXTRA_CLANG_ARGS
 cd "$WORK_DIR/source"
-cargo +"$TOOLCHAIN" build --locked --release -p honk-core --no-default-features --features 'clash-api,ebpf,rprx,native-api' --target x86_64-unknown-linux-musl
+cargo +"$TOOLCHAIN" build --locked --release -p honk-core --no-default-features --features 'clash-api,ebpf,rprx' --target x86_64-unknown-linux-musl
 
 BIN=target/x86_64-unknown-linux-musl/release/honk-core
 test -x "$BIN"
@@ -99,14 +95,12 @@ PKG_SOURCE:=$CORE_ARCHIVE
 PKG_SOURCE_URL:=https://github.com/kenzok8/openwrt-honk/releases/download/staging
 PKG_SOURCE_SUBDIR:=honk-core-$CORE_COMMIT
 PKG_HASH:=$CORE_SHA256
-HONK_CORE_PATCH_SHA256:=$CORE_PATCH_SHA256
 EOF
 cat > "$ROOT/honk/generated-provenance.json" <<EOF
 {
   "core": {
     "repository": "$CORE_REPOSITORY",
     "commit": "$CORE_COMMIT",
-    "patch_sha256": "$CORE_PATCH_SHA256",
     "version": "$CORE_VERSION"
   },
   "doona": {
