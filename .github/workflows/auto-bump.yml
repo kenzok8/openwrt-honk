@@ -121,21 +121,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Pushing the staging branch already triggered build.yml's
-          # source-build via `on: push`; find and watch that run. It runs
-          # check.sh, ci/build-doona.sh and ci/build-core.sh, so a green run
-          # proves the new commit still patches and compiles.
+          # A push made with the workflow's GITHUB_TOKEN does not recursively
+          # trigger `on: push`, so dispatch build.yml explicitly. Its
+          # source-build job runs check.sh, ci/build-doona.sh and
+          # ci/build-core.sh, proving the new commit still patches and compiles.
+          gh workflow run build.yml --ref "$STAGING"
+          run_id=""
           for _ in $(seq 1 30); do
             run_id=$(gh run list --workflow=build.yml --branch "$STAGING" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
             [ -n "$run_id" ] && break
             sleep 5
           done
-          if [ -z "${run_id:-}" ]; then
-            echo "::error::could not find the source-build run for $STAGING"
+          if [ -z "$run_id" ]; then
+            echo "::error::could not find the build.yml run for $STAGING"
             exit 1
           fi
-          echo "watching build.yml run $run_id on $STAGING"
-          gh run watch "$run_id" --exit-status
+          echo "watching source-build job of run $run_id on $STAGING"
+          conclusion=""
+          for _ in $(seq 1 180); do
+            job=$(gh run view "$run_id" --json jobs --jq '.jobs[] | select(.name == "source-build") | {status: .status, conclusion: (.conclusion // "")} | @json' 2>/dev/null || true)
+            if [ -n "$job" ]; then
+              status=$(printf '%s' "$job" | jq -r .status)
+              conclusion=$(printf '%s' "$job" | jq -r .conclusion)
+              if [ "$status" = completed ]; then
+                break
+              fi
+            fi
+            sleep 20
+          done
+          if [ "$conclusion" != success ]; then
+            echo "::error::source-build concluded ${conclusion:-unfinished}"
+            exit 1
+          fi
 
           {
             echo "## Candidate ready for review"
