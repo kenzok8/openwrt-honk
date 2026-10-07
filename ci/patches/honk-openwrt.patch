@@ -539,7 +539,7 @@ index 0000000..3d57a48
 +        serde_json::json!({
 +            "capabilities_version": 1,
 +            "import_preview": true,
-+            "import_apply": false,
++            "import_apply": true,
 +            "dae_upload_prepare": true,
 +            "reset_business": true,
 +            "offline_subscription_validation": true
