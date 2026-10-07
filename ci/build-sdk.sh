@@ -34,9 +34,10 @@ if test -n "${APK_SIGN_KEY:-}"; then
 	export APK_SIGN_KEY
 fi
 
-mkdir -p "$SDK_DIR/package/honk" "$SDK_DIR/package/luci-app-honk"
+mkdir -p "$SDK_DIR/package/honk" "$SDK_DIR/package/luci-app-honk" "$SDK_DIR/package/v2ray-geodata"
 cp -a "$ROOT/honk/." "$SDK_DIR/package/honk/"
 cp -a "$ROOT/luci-app-honk/." "$SDK_DIR/package/luci-app-honk/"
+cp -a "$ROOT/v2ray-geodata/." "$SDK_DIR/package/v2ray-geodata/"
 mkdir -p "$SDK_DIR/package/ci"
 install -m 0644 "$ROOT/ci/pins.env" "$SDK_DIR/package/ci/pins.env"
 mkdir -p "$SDK_DIR/dl"
@@ -62,12 +63,10 @@ if test -f feeds.conf.default; then
 	sed -E '/^src-(git|svn|hg|bzr|link)[[:space:]]+([^[:space:]]+[[:space:]]+)*base([[:space:]]|$)/d' feeds.conf.default > feeds.conf
 fi
 printf '%s\n' 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' >> feeds.conf
-printf '%s\n' 'src-git wall https://github.com/kenzok8/wall.git' >> feeds.conf
-./scripts/feeds update base packages luci wall
+./scripts/feeds update base packages luci
 ./scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo
 ./scripts/feeds install -p packages luasrcdiet
 ./scripts/feeds install luci-base
-./scripts/feeds install -p wall v2ray-geodata
 cat >> .config <<'EOF'
 CONFIG_PACKAGE_honk=m
 CONFIG_PACKAGE_luci-app-honk=m
@@ -90,7 +89,7 @@ make -j1 package/utils/lua/host/compile package/utils/lua/compile \
 	package/utils/ucode/host/compile package/utils/ucode/compile \
 	package/feeds/luci/luci-base/host/compile \
 	package/feeds/luci/lucihttp/compile V=s
-make -j1 package/honk/compile package/luci-app-honk/compile package/feeds/wall/v2ray-geodata/compile V=s
+make -j1 package/honk/compile package/luci-app-honk/compile package/v2ray-geodata/compile V=s
 find bin/packages -type f \( -name 'honk-*.apk' -o -name 'luci-app-honk-*.apk' \) -exec cp -v {} "$OUT_DIR/" \;
 compgen -G "$OUT_DIR/honk-*.apk" >/dev/null || { echo 'Honk APK was not produced.' >&2; exit 1; }
 compgen -G "$OUT_DIR/luci-app-honk-*.apk" >/dev/null || { echo 'LuCI APK was not produced.' >&2; exit 1; }
