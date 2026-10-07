@@ -2,12 +2,37 @@
 
 'use strict';
 'require fs';
+'require poll';
 'require ui';
 'require view';
 'require view.honk.rpc as honk';
 
 const BACKUP_PATH = '/tmp/honk-backup.tar.gz';
 const RESTORE_PATH = '/tmp/honk-maintenance/restore.tar.gz';
+const PKG_INFO = '/usr/share/luci-app-honk/pkg-info.sh';
+const UPDATE_PKG = '/usr/share/luci-app-honk/update-pkg.sh';
+const REFRESH_INDEX = '/usr/share/luci-app-honk/refresh-index.sh';
+const PKGS = [ 'honk', 'luci-app-honk', 'luci-i18n-honk-zh-cn' ];
+const PKG_NAMES = { honk: 'Honk', 'luci-app-honk': 'luci-app-honk', 'luci-i18n-honk-zh-cn': 'luci-i18n-honk-zh-cn' };
+
+// Compare two version strings like `sort -V`. Returns <0 / 0 / >0.
+function cmpVer(a, b) {
+	const ax = String(a).match(/(\d+|\D+)/g) || [];
+	const bx = String(b).match(/(\d+|\D+)/g) || [];
+	const n = Math.max(ax.length, bx.length);
+	for (let i = 0; i < n; i++) {
+		const as = ax[i], bs = bx[i];
+		if (as === undefined) return -1;
+		if (bs === undefined) return 1;
+		if (/^\d+$/.test(as) && /^\d+$/.test(bs)) {
+			const d = parseInt(as, 10) - parseInt(bs, 10);
+			if (d !== 0) return d < 0 ? -1 : 1;
+		} else if (as !== bs) {
+			return as < bs ? -1 : 1;
+		}
+	}
+	return 0;
+}
 
 return view.extend({
 	handleSave: null,
@@ -24,8 +49,6 @@ return view.extend({
 
 		function phaseMessage(job, fallback) {
 			const messages = {
-				checking_feed: _('Checking the signed update source…'),
-				downloading: _('Downloading the signed package set…'),
 				preparing: _('Preparing maintenance…'),
 				stopping: _('Stopping Honk…'),
 				applying: _('Applying the staged data…'),
@@ -43,83 +66,115 @@ return view.extend({
 			writeControls.forEach(function(button) { button.disabled = true; });
 		}
 
-		/* --- Honk updates card --- */
+		/* --- Software package updates card --- */
 		const updateSection = E('section', { 'class': 'honk-card' });
-		const updateMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, _('Check for updates first. Installation requires signature and rollback validation.'));
-		const updateCheck = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('Check for updates'));
-		const updateApply = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, _('Install update'));
-		let updateApplyAvailable = false;
-		updateApply.disabled = true;
-		writeControls.push(updateApply);
+		const pkgBody = E('div', { 'id': 'honk-pkg' }, E('em', {}, _('Probing…')));
+		const updateLog = E('pre', { 'class': 'honk-up-log', 'hidden': true }, '');
 
-		updateCheck.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			updateCheck.disabled = true;
-			updateApplyAvailable = false;
-			updateApply.disabled = true;
-			updateMessage.textContent = _('Checking update source…');
-			honk.updateCheck().then(honk.ensureOk).then(function(job) {
-				return honk.waitJob(job.job_id, function(progress) {
-					updateMessage.textContent = phaseMessage(progress, _('Checking the signed update source…'));
-				});
-			}).then(function(result) {
-				if (result.available) {
-					updateMessage.textContent = result.apply_enabled === true ? _('A compatible update is available: %s').format(result.version || '') : honk.statusIssue(result.reason);
-					updateApplyAvailable = result.apply_enabled === true;
-				} else {
-					updateApplyAvailable = false;
-					updateMessage.textContent = result.reason === 'trusted_feed_unavailable' ? _('No trusted update source is configured.') : _('No compatible update is available.');
-				}
-			}).catch(function(error) {
-				updateApplyAvailable = false;
-				updateMessage.textContent = honk.errorMessage(error, _('Update check failed.'));
-			}).finally(function() {
-				updateCheck.disabled = recoveryRequired;
-				updateApply.disabled = recoveryRequired || !updateApplyAvailable;
+		function mkPkgRow(icon, iconCls, name, meta, btn) {
+			return E('div', { 'class': 'honk-pkg-row' }, [
+				E('span', { 'class': 'honk-pkg-icon ' + iconCls }, icon),
+				E('span', { 'class': 'honk-pkg-name' }, name),
+				E('span', { 'class': 'honk-pkg-meta', 'title': meta }, meta),
+				btn || E('span', {}, '')
+			]);
+		}
+
+		function probePkg(pkg) {
+			return fs.exec(PKG_INFO, [ pkg ]).then(function(res) {
+				const out = (res.stdout || '').trim().split('\t');
+				return { installed: out[0] || '', latest: out[1] || '' };
+			}).catch(function() {
+				return { installed: '', latest: '' };
 			});
-		});
-		updateApply.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			if (!confirm(_('Install the verified Honk, LuCI, Doona, and Chinese translation package set? If installation or startup fails, Honk will remain stopped and show recovery instructions.')))
-				return;
-			updateCheck.disabled = true;
-			updateApplyAvailable = false;
-			updateApply.disabled = true;
-			updateMessage.textContent = _('Preparing the signed update…');
-			honk.updateApply().then(honk.ensureOk).then(function(result) {
-				return honk.waitJob(result.job_id, function(job) {
-					updateMessage.textContent = phaseMessage(job, _('Installing the verified update…'));
-				});
-			}).then(function(result) {
-				updateMessage.textContent = honk.resultMessage(result, _('Update installed.'));
-			}).catch(function(error) {
-				if (error && error.recoveryRequired)
-					blockWrites();
-				updateMessage.textContent = honk.errorMessage(error, _('Update failed.'));
-			}).finally(function() {
-				updateCheck.disabled = recoveryRequired;
-				updateApply.disabled = true;
+		}
+
+		function upgradePkg(pkg, btn) {
+			const orig = btn.textContent;
+			btn.disabled = true;
+			btn.textContent = '…';
+			let tries = 0;
+			const pollLog = function() {
+				return fs.read_direct('/tmp/luci-app-honk.pkg-' + pkg + '.log', 'text').then(function(c) {
+					if (c) {
+						updateLog.textContent = c;
+						updateLog.hidden = false;
+					}
+					if (/[✓✗]/.test(c)) { refreshPkgs(); return; }
+					if (tries++ > 90) return;
+					return new Promise(function(r) { setTimeout(r, 2000); }).then(pollLog);
+				}).catch(function() {});
+			};
+			return fs.exec(UPDATE_PKG, [ pkg ]).then(function(res) {
+				if (res.code === 0) return pollLog();
+			}).catch(function() {}).finally(function() {
+				btn.disabled = false;
+				btn.textContent = orig;
 			});
-		});
+		}
 
-		updateSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Honk updates')));
-		updateSection.appendChild(E('p', { 'class': 'honk-note' }, _('Updates install the matching Honk core, LuCI, Doona assets, and Chinese translation as one package set.')));
-		updateSection.appendChild(E('p', { 'class': 'honk-note' }, _('This target supports x86_64 on OpenWrt 25.12 using APK packages.')));
-		updateSection.appendChild(E('div', { 'class': 'honk-actions' }, [ updateCheck, updateApply ]));
-		updateSection.appendChild(updateMessage);
-		updateSection.appendChild(E('details', {}, [
-			E('summary', {}, _('Update requirements')),
-			E('p', { 'class': 'honk-note' }, _('The updater verifies a signed compatibility manifest. Installation remains unavailable until a complete verified rollback package set is available and the device transaction path has passed validation.'))
-		]));
+		function refreshPkgs() {
+			const probes = PKGS.map(probePkg);
+			return Promise.all(probes).then(function(infos) {
+				while (pkgBody.firstChild)
+					pkgBody.removeChild(pkgBody.firstChild);
+				PKGS.forEach(function(pkg, i) {
+					const r = infos[i];
+					const btn = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('Upgrade'));
+					btn.addEventListener('click', function(ev) { ev.preventDefault(); upgradePkg(pkg, btn); });
+					const cmp = (r.installed && r.latest) ? cmpVer(r.latest, r.installed) : null;
+					const updatable = cmp !== null && cmp > 0;
+					let meta;
+					if (!r.installed) {
+						meta = _('not installed via package manager');
+						btn.disabled = true;
+						btn.textContent = _('Unavailable');
+					} else if (!r.latest) {
+						meta = _('installed') + ': ' + r.installed + ' · ' + _('latest version unknown');
+						btn.disabled = true;
+					} else if (updatable) {
+						meta = _('installed') + ': ' + r.installed + ' → ' + _('latest') + ': ' + r.latest;
+					} else {
+						meta = _('installed') + ': ' + r.installed + ' · ' + _('up to date');
+						btn.disabled = true;
+					}
+					pkgBody.appendChild(mkPkgRow(
+						updatable ? '↑' : (r.installed ? '✓' : '✗'),
+						updatable ? 'honk-pkg-new' : (r.installed ? 'honk-pkg-ok' : 'honk-pkg-err'),
+						PKG_NAMES[pkg],
+						meta,
+						btn
+					));
+				});
+			});
+		}
 
-		/* --- Backup and restore card --- */
+		updateSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Package updates')));
+		updateSection.appendChild(E('p', { 'class': 'honk-note' }, _('Honk core and LuCI can be upgraded here without leaving the management page. The package index refreshes in the background.')));
+		updateSection.appendChild(pkgBody);
+		updateSection.appendChild(updateLog);
+
+		/* --- Config backup card --- */
 		const backupSection = E('section', { 'class': 'honk-card' });
 		const backupMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
-		const backup = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Download backup'));
-		writeControls.push(backup);
-		backup.addEventListener('click', function(ev) {
+		const exportBtn = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('Export'));
+		const importBtn = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('Import'));
+		const restoreCfgBtn = E('button', { 'class': 'cbi-button cbi-button-negative', 'type': 'button' }, _('Restore config'));
+		const fileInput = E('input', { 'type': 'file', 'accept': '.tar.gz,.gz,application/gzip', 'style': 'display:none' });
+		let backupBusy = false;
+		writeControls.push(exportBtn, importBtn, restoreCfgBtn);
+
+		function setBackupBusy(busy) {
+			backupBusy = busy;
+			[exportBtn, importBtn, restoreCfgBtn].forEach(function(b) {
+				b.disabled = busy || recoveryRequired;
+			});
+		}
+
+		exportBtn.addEventListener('click', function(ev) {
 			ev.preventDefault();
-			backup.disabled = true;
+			if (backupBusy) return;
+			setBackupBusy(true);
 			backupMessage.textContent = _('Preparing backup…');
 			honk.backup().then(honk.ensureOk).then(function(result) {
 				return honk.waitJob(result.job_id, function(job) {
@@ -139,21 +194,26 @@ return view.extend({
 				if (error && error.recoveryRequired)
 					blockWrites();
 				backupMessage.textContent = honk.errorMessage(error, _('Backup failed.'));
-			}).finally(function() { backup.disabled = recoveryRequired; });
+			}).finally(function() { setBackupBusy(false); });
 		});
-		const restore = E('button', { 'class': 'cbi-button cbi-button-negative' }, _('Restore backup'));
-		writeControls.push(restore);
-		restore.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			if (!confirm(_('Stop Honk before restoring. Restoring replaces Honk user data. Continue?')))
-				return;
 
-			restore.disabled = true;
-			backupMessage.textContent = _('Choose a backup archive to upload…');
+		importBtn.addEventListener('click', function(ev) {
+			ev.preventDefault();
+			if (backupBusy) return;
+			fileInput.click();
+		});
+		fileInput.addEventListener('change', function(ev) {
+			const file = ev.target.files && ev.target.files[0];
+			if (!file) return;
+			if (!confirm(_('Stop Honk before restoring. Restoring replaces Honk user data. Continue?'))) {
+				fileInput.value = '';
+				return;
+			}
+			setBackupBusy(true);
+			backupMessage.textContent = _('Restoring…');
 			honk.restorePrepare().then(honk.ensureOk).then(function() {
 				return ui.uploadFile(RESTORE_PATH);
 			}).then(function() {
-				backupMessage.textContent = _('Restoring…');
 				return honk.restore();
 			}).then(honk.ensureOk).then(function(result) {
 				return honk.waitJob(result.job_id, function(job) {
@@ -165,11 +225,35 @@ return view.extend({
 				if (error && error.recoveryRequired)
 					blockWrites();
 				backupMessage.textContent = honk.errorMessage(error, _('Restore failed.'));
-			}).finally(function() { restore.disabled = recoveryRequired; });
+			}).finally(function() {
+				setBackupBusy(false);
+				fileInput.value = '';
+			});
 		});
-		backupSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Backup and restore')));
-		backupSection.appendChild(E('p', { 'class': 'honk-note' }, _('Create a backup archive or restore one from your computer.')));
-		backupSection.appendChild(E('div', { 'class': 'honk-actions' }, [ backup, restore ]));
+
+		restoreCfgBtn.addEventListener('click', function(ev) {
+			ev.preventDefault();
+			if (!confirm(_('This permanently clears Honk subscriptions, nodes, policies, DNS data, history, and cache, then restores the default configuration. The administrator account is kept, and Honk will be stopped. Continue?')))
+				return;
+			setBackupBusy(true);
+			backupMessage.textContent = _('Restoring default config…');
+			honk.reset().then(honk.ensureOk).then(function(result) {
+				return honk.waitJob(result.job_id, function(job) {
+					backupMessage.textContent = phaseMessage(job, _('Restoring default config…'));
+				});
+			}).then(function(result) {
+				backupMessage.textContent = honk.resultMessage(result, _('Honk data reset. The service is stopped.'));
+			}).catch(function(error) {
+				if (error && error.recoveryRequired)
+					blockWrites();
+				backupMessage.textContent = honk.errorMessage(error, _('Reset failed.'));
+			}).finally(function() { setBackupBusy(false); });
+		});
+
+		backupSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Config backup')));
+		backupSection.appendChild(E('p', { 'class': 'honk-note' }, _('Export a backup archive, import one from your computer, or restore Honk to its default configuration.')));
+		backupSection.appendChild(E('div', { 'class': 'honk-actions' }, [ exportBtn, importBtn, restoreCfgBtn ]));
+		backupSection.appendChild(fileInput);
 		backupSection.appendChild(backupMessage);
 
 		/* --- System check and repair card --- */
@@ -216,44 +300,19 @@ return view.extend({
 		health.appendChild(repairMessage);
 		health.appendChild(E('p', { 'class': 'honk-note' }, _('Repair replaces missing or damaged Honk system files and does not overwrite user configuration.')));
 
-		/* --- Reset card (danger zone) --- */
-		const resetSection = E('section', { 'class': 'honk-card' });
-		const resetMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
-		const reset = E('button', { 'class': 'cbi-button cbi-button-negative', 'type': 'button' }, _('Reset Honk data'));
-		writeControls.push(reset);
-		reset.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			if (!confirm(_('This permanently clears Honk subscriptions, nodes, policies, DNS data, history, and cache. The administrator account is kept, and Honk will be stopped. Continue?')))
-				return;
-
-			reset.disabled = true;
-			resetMessage.textContent = _('Resetting Honk data…');
-			honk.reset().then(honk.ensureOk).then(function(result) {
-				return honk.waitJob(result.job_id, function(job) {
-					resetMessage.textContent = phaseMessage(job, _('Resetting Honk data…'));
-				});
-			}).then(function(result) {
-				resetMessage.textContent = honk.resultMessage(result, _('Honk data reset. The service is stopped.'));
-			}).catch(function(error) {
-				if (error && error.recoveryRequired)
-					blockWrites();
-				resetMessage.textContent = honk.errorMessage(error, _('Reset failed.'));
-			}).finally(function() { reset.disabled = recoveryRequired; });
-		});
-		resetSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Reset Honk data')));
-		resetSection.appendChild(E('p', { 'class': 'honk-note' }, _('Reset clears Honk subscriptions, nodes, policies, DNS data, history, and cache, then restores default configuration. It keeps the administrator account and leaves Honk stopped with boot disabled.')));
-		resetSection.appendChild(E('div', { 'class': 'honk-actions' }, reset));
-		resetSection.appendChild(resetMessage);
-
 		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Maintenance')),
-			E('p', { 'class': 'honk-header-sub' }, _('Updates, backups and system recovery for the Honk installation.'))
+			E('p', { 'class': 'honk-header-sub' }, _('Package updates, config backup and system recovery for the Honk installation.'))
 		]));
 		page.appendChild(recoveryMessage);
 		page.appendChild(updateSection);
 		page.appendChild(backupSection);
 		page.appendChild(health);
-		page.appendChild(resetSection);
+
+		// Background index refresh so new versions show on the next poll.
+		fs.exec(REFRESH_INDEX, []).catch(function() {});
+		refreshPkgs();
+		poll.add(refreshPkgs, 15);
 
 		honk.status().then(function(result) {
 			const errors = Array.isArray(result && result.errors) ? result.errors : [];

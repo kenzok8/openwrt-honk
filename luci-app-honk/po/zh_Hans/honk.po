@@ -1001,3 +1001,51 @@ msgstr "Honk 安装的更新、备份与系统恢复。"
 
 msgid "Network interface, listen port and boot behaviour for the Honk service."
 msgstr "Honk 服务的网络接口、监听端口与开机启动行为。"
+
+msgid "Package updates"
+msgstr "软件包更新"
+
+msgid "Probing…"
+msgstr "检查中…"
+
+msgid "Upgrade"
+msgstr "升级"
+
+msgid "not installed via package manager"
+msgstr "未通过软件包管理器安装"
+
+msgid "Unavailable"
+msgstr "不可用"
+
+msgid "latest version unknown"
+msgstr "最新版本未知"
+
+msgid "installed"
+msgstr "已安装"
+
+msgid "latest"
+msgstr "最新"
+
+msgid "up to date"
+msgstr "已是最新"
+
+msgid "Export"
+msgstr "导出"
+
+msgid "Restore config"
+msgstr "恢复配置"
+
+msgid "Config backup"
+msgstr "配置备份"
+
+msgid "Restoring default config…"
+msgstr "正在恢复默认配置…"
+
+msgid "Honk core and LuCI can be upgraded here without leaving the management page. The package index refreshes in the background."
+msgstr "无需离开管理页面即可升级 Honk 核心与 LuCI。软件包索引会在后台刷新。"
+
+msgid "Export a backup archive, import one from your computer, or restore Honk to its default configuration."
+msgstr "导出备份归档、从电脑导入，或将 Honk 恢复为默认配置。"
+
+msgid "Package updates, config backup and system recovery for the Honk installation."
+msgstr "Honk 安装的软件包更新、配置备份与系统恢复。"

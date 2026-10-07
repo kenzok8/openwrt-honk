@@ -607,6 +607,83 @@
 	line-height: 1.6;
 }
 
+/* ---------- Package update rows ---------- */
+
+.honk-pkg-row {
+	display: grid;
+	grid-template-columns: 24px minmax(0, 1fr) auto;
+	gap: 10px;
+	align-items: center;
+	font-size: 12.5px;
+	padding: 9px 0;
+	border-top: 1px dashed rgba(128, 128, 128, 0.18);
+}
+
+.honk-pkg-row:first-child {
+	border-top: 0;
+}
+
+.honk-pkg-icon {
+	text-align: center;
+	font-size: 14px;
+}
+
+.honk-pkg-ok {
+	color: var(--hk-green);
+}
+
+.honk-pkg-err {
+	color: var(--hk-red);
+}
+
+.honk-pkg-new {
+	color: var(--hk-accent);
+}
+
+.honk-pkg-name {
+	font-weight: 600;
+	opacity: 0.85;
+}
+
+.honk-pkg-meta {
+	opacity: 0.7;
+	font-family: var(--hk-mono);
+	font-size: 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.honk-up-log {
+	margin-top: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--hk-field-border);
+	border-radius: var(--hk-radius-sm);
+	max-height: 220px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-all;
+	font-family: var(--hk-mono);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+	.honk-pkg-row {
+		grid-template-columns: 24px minmax(0, 1fr);
+	}
+
+	.honk-pkg-row .honk-pkg-meta {
+		grid-column: 2;
+		white-space: normal;
+	}
+
+	.honk-pkg-row > button,
+	.honk-pkg-row > span:last-child {
+		grid-column: 2;
+	}
+}
+
 /* ---------- Page actions footer ---------- */
 
 .honk-page .cbi-page-actions {
