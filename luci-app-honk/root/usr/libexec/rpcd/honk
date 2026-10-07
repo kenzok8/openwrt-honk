@@ -124,6 +124,7 @@ start_job() {
 	fi
 	if [ "$job_operation" = import_apply ]; then
 		job_request=$(cat)
+		job_request=$(printf '%s' "$job_request" | sed -E 's/"ubus_rpc_session":"[^"]*",?//; s/,\}/}/')
 		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
 		json_get_keys request_keys
 		case " $request_keys " in *' preview_id '*) ;; *) emit_result false invalid_request; return 1 ;; esac
@@ -139,11 +140,12 @@ start_job() {
 		[ "${#preview_id}" = 32 ] && [ "${#source_sha256}" = 64 ] || { emit_result false invalid_request; return 1; }
 	elif [ "$job_operation" = import_preview ]; then
 		job_request=$(cat) || { emit_result false invalid_request; return 1; }
+		job_request=$(printf '%s' "$job_request" | sed -E 's/"ubus_rpc_session":"[^"]*",?//; s/,\}/}/')
 		[ "$(printf '%s' "$job_request" | wc -c | tr -d ' ')" -le 32768 ] || { emit_result false invalid_request; return 1; }
 		json_load "$job_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
 		json_get_keys request_keys
 		for request_key in $request_keys; do
-			case "$request_key" in action|kind|mode|name|url|share_links|upload_sha256) ;; *) emit_result false invalid_request; return 1 ;; esac
+			case "$request_key" in action|kind|mode|name|url|share_links|content|upload_sha256|preview_id|source_sha256) ;; *) emit_result false invalid_request; return 1 ;; esac
 		done
 		json_get_type action_type action
 		json_get_var action action
