@@ -45,7 +45,7 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
   URL:=https://github.com/Glassyiris/honk
-  DEPENDS:=@(x86_64||aarch64) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +curl +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
+  DEPENDS:=@(x86_64||aarch64) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
 endef
 
 define Package/honk/description
