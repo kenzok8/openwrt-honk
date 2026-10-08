@@ -8,7 +8,7 @@ for tool in bash sh node sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
-for script in ci/build-doona.sh ci/build-sdk.sh ci/create-release-feed.sh scripts/check.sh; do
+for script in ci/build-doona.sh ci/create-release-feed.sh scripts/check.sh; do
 	bash -n "$script"
 done
 for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
@@ -162,22 +162,7 @@ grep -Fq 'HONK_HASH_X86_64:=' honk/Makefile
 grep -Fq 'HONK_HASH_AARCH64:=' honk/Makefile
 grep -Fq '@(x86_64||aarch64)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
-grep -Fq 'install -m 0644 "$ROOT/ci/pins.env" "$SDK_DIR/package/ci/pins.env"' ci/build-sdk.sh
-grep -Fq 'CONFIG_PACKAGE_honk=m' ci/build-sdk.sh
-grep -Fq 'CONFIG_PACKAGE_luci-app-honk=m' ci/build-sdk.sh
-! grep -Fq 'CONFIG_PACKAGE_luci-i18n-honk-zh-cn=m' ci/build-sdk.sh
-grep -Fq 'CONFIG_PACKAGE_v2ray-geoip=m' ci/build-sdk.sh
-grep -Fq 'CONFIG_PACKAGE_v2ray-geosite=m' ci/build-sdk.sh
-! grep -Fq './scripts/config' ci/build-sdk.sh
-grep -Fq 'export HONK_SDK_PACKAGE' ci/build-sdk.sh
 
-grep -Fq 'src-git --root=package base https://git.openwrt.org/openwrt/openwrt.git^ba915c2ee711d047d5be8575c1e98699119429ab' ci/build-sdk.sh
-grep -Fq './scripts/feeds update base packages luci' ci/build-sdk.sh
-grep -Fq './scripts/feeds install -f -p base zlib libubox ubus uci libnl-tiny iwinfo lua ucode libjson-c libmd' ci/build-sdk.sh
-grep -Fq './scripts/feeds install -p packages luasrcdiet' ci/build-sdk.sh
-grep -Fq 'package/feeds/luci/luci-base/host/compile' ci/build-sdk.sh
-grep -Fq 'package/v2ray-geodata/compile' ci/build-sdk.sh
-grep -Fq 'package/feeds/luci/lucihttp/compile V=s' ci/build-sdk.sh
 grep -Fq "'adbdump'" ci/create-release-feed.sh
 grep -Fq ' -V -m "$STAGE/manifest.json" -p "$MANIFEST_PUBLIC_KEY"' ci/create-release-feed.sh
 grep -Fq "extract', '--destination'" ci/create-release-feed.sh

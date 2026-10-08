@@ -1,0 +1,259 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: '标记为预发布版本'
+        type: boolean
+        default: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: ${{ matrix.arch }} · SDK ${{ matrix.sdk }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - x86_64
+        sdk:
+          - "24.10"
+          - "25.12"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare SDK action
+        uses: actions/checkout@v6
+        with:
+          repository: kenzok8/gh-action-sdk
+          ref: 44f98c51d04aebd1aa79fe4f603559c1ec2085da
+          path: .github/actions/gh-action-sdk
+          persist-credentials: false
+
+      - name: Build packages
+        continue-on-error: true
+        uses: ./.github/actions/gh-action-sdk
+        env:
+          CONTAINER: immortalwrt/sdk
+          ARCH: ${{ matrix.arch }}-openwrt-${{ matrix.sdk }}
+          FEEDNAME: honk
+          PACKAGES: honk luci-app-honk
+          # wall supplies v2ray-geoip / v2ray-geosite (subpackages of v2ray-geodata)
+          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
+          NO_REFRESH_CHECK: true
+          IGNORE_ERRORS: true
+          INDEX: 1
+          KEY_BUILD: ${{ secrets.OPKG_KEY_BUILD }}
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+
+      - name: Require all release packages
+        run: |
+          set -euo pipefail
+          output_dir="bin/packages/${{ matrix.arch }}/honk"
+          for package in honk luci-app-honk v2ray-geoip v2ray-geosite; do
+            found=0
+            while IFS= read -r -d '' file; do
+              name=${file##*/}
+              case "$name" in
+                "$package"-*.apk|"$package"_*.apk|"$package"-*.ipk|"$package"_*.ipk)
+                  found=1
+                  break
+                  ;;
+              esac
+            done < <(find "$output_dir" -maxdepth 1 -type f \( -name '*.apk' -o -name '*.ipk' \) -print0 2>/dev/null || true)
+            [ "$found" -eq 1 ] || {
+              echo "::error::$package has no package for ${{ matrix.arch }} SDK ${{ matrix.sdk }}"
+              exit 1
+            }
+          done
+
+      - name: Collect packages
+        run: |
+          ARCH="${{ matrix.arch }}"
+          mkdir -p dist/release dist/feed
+          FEED_DIR="bin/packages/${ARCH}/honk"
+
+          for f in "$FEED_DIR"/*.ipk; do
+            [ -f "$f" ] || continue
+            case "$(basename "$f")" in Packages*) continue ;; esac
+            base=$(basename "$f" .ipk)
+            safe="${base//\~/.}"
+            cp -v "$f" "dist/release/${safe}.ipk"
+            cp -v "$f" dist/feed/
+          done
+
+          for f in "$FEED_DIR"/*.apk; do
+            [ -f "$f" ] || continue
+            case "$(basename "$f")" in Packages*|APKINDEX*|packages.adb*) continue ;; esac
+            base=$(basename "$f" .apk)
+            safe="${base//\~/.}"
+            if echo "$safe" | grep -q "_${ARCH}\$"; then
+              cp -v "$f" "dist/release/${safe}.apk"
+            else
+              cp -v "$f" "dist/release/${safe}-${ARCH}.apk"
+            fi
+            cp -v "$f" dist/feed/
+          done
+
+          for f in "$FEED_DIR"/Packages* "$FEED_DIR"/APKINDEX* "$FEED_DIR"/packages.adb*; do
+            [ -f "$f" ] || continue
+            cp -v "$f" dist/feed/
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: packages-sdk${{ matrix.sdk }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: ignore
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: all-artifacts
+          pattern: packages-*
+
+      - name: Flatten release files
+        run: |
+          mkdir -p dist
+          find all-artifacts -path "*/release/*" -type f -exec cp -v {} dist/ \;
+
+      - name: Determine tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(TZ=Asia/Shanghai date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+            echo "prerelease=${{ github.event.inputs.prerelease }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate Release Notes
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+          ARCHS="aarch64_cortex-a53 aarch64_cortex-a72 aarch64_generic x86_64"
+          PREVIOUS_TAG="$(git tag --sort=-creatordate | grep '^v' | grep -v "^${TAG}$" | head -1 || true)"
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            RANGE="${PREVIOUS_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          git log --format='%s%x1f%b%x1e' "$RANGE" > commits.raw
+
+          write_section() {
+            title="$1"
+            pattern="$2"
+            awk -v title="$title" -v pattern="$pattern" '
+              BEGIN { RS = "\036"; FS = "\037"; count = 0 }
+              {
+                subject = $1; body = $2
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", subject)
+                if (subject == "" || subject ~ /^Merge /) next
+                if (subject ~ pattern) {
+                  item = subject
+                  sub(/^[a-z]+([(][^)]+[)])?!?:[[:space:]]*/, "", item)
+                  lines[++count] = "- " item
+                }
+              }
+              END {
+                if (count > 0) { print "## " title; print ""; for (i = 1; i <= count; i++) print lines[i]; print "" }
+              }
+            ' commits.raw
+          }
+
+          {
+            echo "# openwrt-honk ${TAG}"
+            echo ""
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "_Changes since ${PREVIOUS_TAG} / 自 ${PREVIOUS_TAG} 以来的更新。_"
+            else
+              echo "_Initial release notes / 初始发布说明。_"
+            fi
+            echo ""
+            write_section "New Features / 新功能" '^feat([(][^)]+[)])?!?:'
+            write_section "Improvements / 改进" '^(perf|refactor)([(][^)]+[)])?!?:'
+            write_section "Bug Fixes / 问题修复" '^fix([(][^)]+[)])?!?:'
+            write_section "Build & Release / 构建与发布" '^(ci|build)([(][^)]+[)])?!?:'
+            write_section "Documentation / 文档" '^docs([(][^)]+[)])?!?:'
+            write_section "Maintenance / 维护" '^(chore|test)([(][^)]+[)])?!?:'
+
+            echo "## Packages / 安装包"
+            echo ""
+            cell_ipk() {
+              pkg="$1"; arch="$2"; fallback="$3"
+              f=$(ls dist/${pkg}_*_${arch}.ipk 2>/dev/null | head -1)
+              [ -n "$f" ] && echo "[$(basename $f)](${BASE}/$(basename $f))" || echo "$fallback"
+            }
+            cell_apk() {
+              pkg="$1"; arch="$2"
+              f=$(ls dist/${pkg}-*-${arch}.apk 2>/dev/null | head -1)
+              [ -n "$f" ] && echo "[$(basename $f)](${BASE}/$(basename $f))" || echo "—"
+            }
+            noarch_ipk() {
+              pkg="$1"
+              f=$(ls dist/${pkg}_*_all.ipk 2>/dev/null | head -1)
+              [ -n "$f" ] && echo "[$(basename $f)](${BASE}/$(basename $f))" || echo "—"
+            }
+
+            echo "## 📦 SDK 24.10 · 稳定版 (IPK)"
+            echo ""
+            echo "| 架构 | honk | luci-app-honk |"
+            echo "| :--- | :--- | :--- |"
+            luci_fallback=$(noarch_ipk luci-app-honk)
+            for arch in $ARCHS; do
+              echo "| \`${arch}\` | $(cell_ipk honk $arch —) | $(cell_ipk luci-app-honk $arch "$luci_fallback") |"
+            done
+
+            echo ""
+            echo "## 📦 SDK 25.12 · 稳定版 (APK)"
+            echo ""
+            echo "| 架构 | honk | luci-app-honk |"
+            echo "| :--- | :--- | :--- |"
+            for arch in $ARCHS; do
+              echo "| \`${arch}\` | $(cell_apk honk $arch) | $(cell_apk luci-app-honk $arch) |"
+            done
+          } > release_notes.md
+
+          cat release_notes.md
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Release ${{ steps.meta.outputs.tag }}
+          body_path: release_notes.md
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          make_latest: ${{ steps.meta.outputs.prerelease == 'false' }}
+          files: dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
