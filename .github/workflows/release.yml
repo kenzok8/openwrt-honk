@@ -86,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           output_dir="bin/packages/${{ matrix.arch }}/honk"
-          for package in honk luci-app-honk v2ray-geoip v2ray-geosite; do
+          for package in honk luci-app-honk; do
             found=0
             while IFS= read -r -d '' file; do
               name=${file##*/}
