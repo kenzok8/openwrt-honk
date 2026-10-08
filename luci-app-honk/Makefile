@@ -9,10 +9,10 @@ PKG_VERSION:=2026.10.05
 PKG_RELEASE:=7
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
 
-PKG_SOURCE:=doona-f8fd5228.tar.gz
+PKG_SOURCE:=doona-696f4f59.tar.gz
 PKG_SOURCE_URL:=https://github.com/kenzok8/openwrt-honk/releases/download/staging
 PKG_SOURCE_SUBDIR:=doona
-PKG_HASH:=d5725cad5b30df11c5886480dfcd3860e9ab61935583ef3a8465c15b4df97481
+PKG_HASH:=5cceb43359e17bf7f6fa6029cab598eb56addfcf7a67f563dfa4dbda07646c57
 
 -include $(CURDIR)/generated-doona-stage.mk
 

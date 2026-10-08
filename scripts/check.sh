@@ -173,7 +173,7 @@ grep -Fq "! rg -n 'MockBackend|mockBackend|mock-backend' dist" ci/build-doona.sh
 ! grep -Fq "! rg -n 'mock backend|MockBackend|mockBackend' dist" ci/build-doona.sh
 grep -Fq 'node tools/notices.mjs "$STAGE"' ci/build-doona.sh
 grep -Fq 'for file in LICENSE NOTICE CHANGELOG.md README.md; do' ci/build-doona.sh
-grep -Fq 'PKG_HASH:=d5725cad5b30df11c5886480dfcd3860e9ab61935583ef3a8465c15b4df97481' luci-app-honk/Makefile
+grep -Fq 'PKG_HASH:=5cceb43359e17bf7f6fa6029cab598eb56addfcf7a67f563dfa4dbda07646c57' luci-app-honk/Makefile
 
 grep -Fq 'start_job update_check' luci-app-honk/root/usr/libexec/rpcd/honk
 grep -Fq 'update_gate' luci-app-honk/root/usr/libexec/rpcd/honk
