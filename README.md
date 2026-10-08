@@ -27,15 +27,31 @@
 - `luci-app-honk` —— LuCI 界面 + 中文翻译（直接编译进主包）+ Doona 资产
 - Geo 数据由 `v2ray-geoip` / `v2ray-geosite`（`kenzok8/wall` 源）提供，可在维护页手动更新或定时更新
 
+## 一键安装
+
+```bash
+wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash
+```
+
+大陆网络加速：
+
+```bash
+wget --no-check-certificate -O - https://ghfast.top/https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash
+```
+
+卸载：
+
+```bash
+wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/uninstall.sh | ash
+```
+
+> `v2ray-geoip` / `v2ray-geosite` 由 [kenzok8/wall](https://github.com/kenzok8/wall) 源提供，请确保已添加该源（脚本会检测并提示）。
+
 ## 使用
 
-安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。核心 Web 界面仅在已初始化、正在运行且 API 就绪时开放。
+安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。核心 Web 界面（Doona）仅在已初始化、正在运行且 API 就绪时开放。
 
-配置页支持三种导入方式：
-
-- **添加订阅**：填写名称与订阅地址，直连下载（`route: direct`）
-- **粘贴节点**：粘贴 Clash YAML / Surge INI / Base64 / 分享链接，本地解析成节点后一键导入
-- **导入配置**：上传 `.dae` 业务配置，替换业务段
+节点与订阅直接写入 `/etc/honk/config.dae`（`node { label: 'share-link' }` 或 `subscription { tag: 'url' }`），重载 Honk 后生效；路由、DNS 与订阅也可在 Doona 面板中管理。
 
 管理入口和 API 只应在可信 LAN 内使用。若 LuCI 通过未加密的 HTTP 提供，浏览器到路由器间的登录信息和 API 流量没有传输加密保护；请勿将管理页面暴露到互联网。
 
