@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Check package metadata and scripts
         run: bash scripts/check.sh
       - name: Build pinned Doona interface
