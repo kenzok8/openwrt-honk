@@ -1148,39 +1148,3 @@ msgstr "解析粘贴内容失败。"
 
 msgid "YAML parser failed to load"
 msgstr "YAML 解析器加载失败"
-
-msgid "Honk reads its nodes, subscriptions and routing from /etc/honk/config.dae."
-msgstr "Honk 从 /etc/honk/config.dae 读取节点、订阅和路由。"
-
-msgid "Direct configuration"
-msgstr "直接配置"
-
-msgid "This core manages configuration directly from /etc/honk/config.dae. Add nodes as %s or subscriptions as %s, then reload Honk."
-msgstr "此核心直接从 /etc/honk/config.dae 管理配置。以 %s 添加节点，或以 %s 添加订阅，然后重载 Honk。"
-
-msgid "The Clash-compatible dashboard (zashboard) also lets you manage routing, DNS and subscriptions after Honk is started."
-msgstr "Honk 启动后，也可通过 Clash 兼容面板（zashboard）管理路由、DNS 和订阅。"
-
-msgid "Open Dashboard"
-msgstr "打开面板"
-
-msgid "Honk is stopped. Start it from the overview to open the dashboard."
-msgstr "Honk 已停止。请从概览页启动以打开面板。"
-
-msgid "The dashboard is not ready yet. Check the overview for status."
-msgstr "面板尚未就绪，请查看概览页状态。"
-
-msgid "Initialize Honk to write its default configuration and prepare the management dashboard."
-msgstr "初始化 Honk 以写入默认配置并准备管理面板。"
-
-msgid "Dashboard version"
-msgstr "面板版本"
-
-msgid "Complete initial setup before opening the dashboard."
-msgstr "请先完成首次设置再打开面板。"
-
-msgid "Start Honk to open the dashboard."
-msgstr "启动 Honk 以打开面板。"
-
-msgid "The dashboard is not ready yet. Check the service status."
-msgstr "面板尚未就绪，请检查服务状态。"

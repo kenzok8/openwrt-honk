@@ -10,36 +10,23 @@ permissions:
 
 jobs:
   source-build:
-    name: Check and build pinned sources
+    name: Build pinned Doona interface
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.14.1
-      - name: Install core build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang llvm libbpf-dev libelf-dev pkg-config cmake libclang-dev zstd ripgrep gettext
       - name: Check package metadata and scripts
         run: bash scripts/check.sh
       - name: Build pinned Doona interface
         run: ci/build-doona.sh
-      - name: Build pinned Honk core for OpenWrt x86_64
-        run: ci/build-core.sh
-      - name: Verify generated stage hashes and package wiring
-        run: bash scripts/check.sh
       - uses: actions/upload-artifact@v4
         with:
           name: honk-source-build
           path: |
             artifacts/cache/*.tar.gz
-            honk/generated-stage.mk
-            honk/generated-provenance.json
             luci-app-honk/generated-doona-stage.mk
           if-no-files-found: error
           retention-days: 7

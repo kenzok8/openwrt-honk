@@ -127,7 +127,7 @@ return view.extend({
 				'rel': webUi ? 'noopener noreferrer' : null,
 				'type': webUi ? null : 'button',
 				'disabled': webUi ? null : true
-			}, _('Open Dashboard'));
+			}, _('Open Doona'));
 
 			const toggle = E('button', {
 				'class': 'cbi-button cbi-button-action',
@@ -161,14 +161,14 @@ return view.extend({
 				]),
 				E('div', { 'class': 'honk-meta' }, [
 					metaItem(_('Core version'), status.core_version),
-					metaItem(_('Dashboard version'), status.doona_version),
+					metaItem(_('Doona version'), status.doona_version),
 					metaItem(_('Kernel'), status.kernel)
 				])
 			]);
 
 			if (!webUi) {
-				const reason = !status.initialized ? _('Complete initial setup before opening the dashboard.') :
-					!running ? _('Start Honk to open the dashboard.') : _('The dashboard is not ready yet. Check the service status.');
+				const reason = !status.initialized ? _('Complete initial setup before opening Doona.') :
+					!running ? _('Start Honk to open Doona.') : _('Doona is not ready yet. Check the service status.');
 				statusCard.appendChild(E('p', { 'class': 'honk-note', 'role': 'status' }, reason));
 			}
 
@@ -260,18 +260,31 @@ return view.extend({
 				return;
 
 			const form = E('form', { 'class': 'honk-card' });
+			const username = E('input', { 'type': 'text', 'name': 'username', 'id': 'honk-init-username', 'autocomplete': 'username', 'required': true, 'class': 'cbi-input-text' });
+			const password = E('input', { 'type': 'password', 'name': 'password', 'id': 'honk-init-password', 'autocomplete': 'new-password', 'required': true, 'class': 'cbi-input-password' });
 			const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 			const submit = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Initialize Honk'));
 			form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Initial setup')));
-			form.appendChild(E('p', { 'class': 'honk-note' }, _('Initialize Honk to write its default configuration and prepare the management dashboard.')));
+			form.appendChild(E('p', { 'class': 'honk-note' }, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
+			form.appendChild(field(_('Username'), username));
+			form.appendChild(field(_('Password'), password));
 			form.appendChild(E('div', { 'class': 'cbi-page-actions' }, submit));
 			form.appendChild(message);
 			form.addEventListener('submit', function(ev) {
 				ev.preventDefault();
+				const user = username.value.trim();
+				const secret = password.value;
+				if (!user || !secret) {
+					message.textContent = _('Enter both a username and password.');
+					return;
+				}
+
 				submit.disabled = true;
 				setupBusy = true;
 				message.textContent = _('Initializing…');
-				honk.initialize().then(honk.ensureOk).then(function(result) {
+				honk.initialize(user, secret).then(honk.ensureOk).then(function(result) {
+					username.value = '';
+					password.value = '';
 					message.textContent = honk.resultMessage(result, _('Honk initialized.'));
 					return honk.status();
 				}).then(function(updatedStatus) {
@@ -280,6 +293,7 @@ return view.extend({
 					renderSetup(updatedStatus);
 					renderStatus(updatedStatus, null);
 				}).catch(function() {
+					password.value = '';
 					message.textContent = _('Initialization failed. Check the system status.');
 				}).finally(function() {
 					setupBusy = false;

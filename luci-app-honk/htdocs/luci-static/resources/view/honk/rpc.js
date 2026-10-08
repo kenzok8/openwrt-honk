@@ -19,6 +19,7 @@ const callCheck = rpc.declare({
 const callInitialize = rpc.declare({
 	object: 'honk',
 	method: 'initialize',
+	params: [ 'username', 'password' ],
 	expect: { '': {} }
 });
 

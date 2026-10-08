@@ -20,11 +20,10 @@ return view.extend({
 
 		const note = E('section', { 'class': 'honk-card' }, [
 			E('h3', { 'class': 'honk-card-title' }, _('Direct configuration')),
-			E('p', { 'class': 'honk-note' }, _('This core manages configuration directly from /etc/honk/config.dae. Add nodes as %s or subscriptions as %s, then reload Honk.').format(
+			E('p', { 'class': 'honk-note' }, _('Add nodes as %s or subscriptions as %s in /etc/honk/config.dae, then reload Honk. The Doona dashboard also manages routing, DNS and subscriptions once Honk is started.').format(
 				E('code', {}, "node { label: 'share-link' }"),
 				E('code', {}, "subscription { tag: 'url' }")
-			)),
-			E('p', { 'class': 'honk-note' }, _('The Clash-compatible dashboard (zashboard) also lets you manage routing, DNS and subscriptions after Honk is started.'))
+			))
 		]);
 
 		page.appendChild(note);

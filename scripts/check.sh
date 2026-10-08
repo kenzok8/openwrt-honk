@@ -8,7 +8,7 @@ for tool in bash sh node sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
-for script in ci/build-core.sh ci/build-doona.sh ci/build-sdk.sh ci/create-release-feed.sh scripts/check.sh; do
+for script in ci/build-doona.sh ci/build-sdk.sh ci/create-release-feed.sh scripts/check.sh; do
 	bash -n "$script"
 done
 for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
@@ -22,11 +22,9 @@ done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
-grep -q '^CORE_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_PATCH_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 grep -q '^OPENWRT_SDK_SHA256=[0-9a-f]\{64\}$' ci/pins.env
-grep -q '^BPF_LINKER_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 test "$(sha256sum ci/patches/doona-openwrt.patch | cut -d' ' -f1)" = "$(sed -n 's/^DOONA_PATCH_SHA256=//p' ci/pins.env)"
 source ci/pins.env
 
@@ -52,10 +50,6 @@ verify_stage() {
 	fi
 }
 verify_stage luci-app-honk/generated-doona-stage.mk "$DOONA_ARCHIVE"
-verify_stage honk/generated-stage.mk "$CORE_ARCHIVE"
-if test -f honk/generated-provenance.json; then
-	node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' honk/generated-provenance.json
-fi
 
 node <<'NODE'
 const fs = require('fs');
@@ -163,8 +157,10 @@ grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefil
 grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
-grep -Fq 'include $(CURDIR)/generated-stage.mk' honk/Makefile
-grep -Fq 'test -s $(CURDIR)/generated-provenance.json' honk/Makefile
+grep -Fq 'HONK_RELEASE_TAG:=' honk/Makefile
+grep -Fq 'HONK_HASH_X86_64:=' honk/Makefile
+grep -Fq 'HONK_HASH_AARCH64:=' honk/Makefile
+grep -Fq '@(x86_64||aarch64)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 grep -Fq 'install -m 0644 "$ROOT/ci/pins.env" "$SDK_DIR/package/ci/pins.env"' ci/build-sdk.sh
 grep -Fq 'CONFIG_PACKAGE_honk=m' ci/build-sdk.sh
@@ -185,13 +181,9 @@ grep -Fq 'package/feeds/luci/lucihttp/compile V=s' ci/build-sdk.sh
 grep -Fq "'adbdump'" ci/create-release-feed.sh
 grep -Fq ' -V -m "$STAGE/manifest.json" -p "$MANIFEST_PUBLIC_KEY"' ci/create-release-feed.sh
 grep -Fq "extract', '--destination'" ci/create-release-feed.sh
-grep -Fq 'Generated core provenance does not match the pinned source.' ci/create-release-feed.sh
-grep -Fq "'usr/share/honk/provenance.json'" ci/create-release-feed.sh
-grep -Fq "'usr/bin/honk-core'" ci/create-release-feed.sh
 grep -Fq 'packages/Packages.adb' ci/create-release-feed.sh
 grep -Fq 'apk-tool' ci/create-release-feed.sh
-grep -Fq 'HONK_BTF_BUILD_DEPENDS:=+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
-grep -Fq '"sdk_btf_verified": false' ci/build-core.sh
+grep -Fq '+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
 grep -Fq "! rg -n 'MockBackend|mockBackend|mock-backend' dist" ci/build-doona.sh
 ! grep -Fq "! rg -n 'mock backend|MockBackend|mockBackend' dist" ci/build-doona.sh
 grep -Fq 'node tools/notices.mjs "$STAGE"' ci/build-doona.sh

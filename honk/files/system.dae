@@ -11,9 +11,12 @@ global {
 }
 
 experimental {
-    clash_api {
-        external_controller: '127.0.0.1:9527'
-        external_ui: '/usr/share/honk-ui'
-        secret: ''
+    native_api {
+        enabled: true
+        listen: '127.0.0.1:9527'
+        password_auth: true
+        allow_anonymous_loopback: false
+        config_write: true
+        ui: '/usr/share/doona'
     }
 }

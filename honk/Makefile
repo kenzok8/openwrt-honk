@@ -5,26 +5,35 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
-PKG_VERSION:=2026.10.05
-PKG_RELEASE:=3
+PKG_VERSION:=2026.10.07
+PKG_RELEASE:=1
 
-include $(CURDIR)/generated-stage.mk
+# Raw upstream release tag; the asset name keeps this exact spelling.
+HONK_RELEASE_TAG:=debug.2026.10.7.native-api.1
+HONK_ASSET_TAG:=debug
 
-ifeq ($(HONK_SDK_PACKAGE),1)
-ifeq ($(wildcard $(CURDIR)/generated-stage.mk),)
-$(error HONK_SDK_PACKAGE requires the verified generated core stage)
-endif
-ifeq ($(wildcard $(CURDIR)/generated-provenance.json),)
-$(error HONK_SDK_PACKAGE requires generated core provenance)
-endif
-HONK_BTF_BUILD_DEPENDS:=
-else
-HONK_BTF_BUILD_DEPENDS:=+@KERNEL_DEBUG_INFO_BTF
-endif
+# SHA256 of each prebuilt release tarball, kept in sync by scripts/update-honk-version.sh.
+HONK_HASH_X86_64:=41114fc58c069c5dc2550dc6563755a2bc4b1f9a52eec128300bb4c3ad23fd80
+HONK_HASH_AARCH64:=2aada1c945ace03c6403cc587940b4eddf31cb0846ec31e8318efbd5317b36b7
 
-PKG_LICENSE:=GPL-3.0-only
+PKG_LICENSE:=AGPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=kenzok8
+
+ifeq ($(ARCH),x86_64)
+  HONK_TARGET:=x86_64-unknown-linux-musl
+  HONK_HASH:=$(HONK_HASH_X86_64)
+else ifeq ($(ARCH),aarch64)
+  HONK_TARGET:=aarch64-unknown-linux-musl
+  HONK_HASH:=$(HONK_HASH_AARCH64)
+endif
+
+HONK_SUFFIX:=-stock
+HONK_ASSET:=honk-core-$(HONK_ASSET_TAG)-$(HONK_TARGET)$(HONK_SUFFIX).tar.gz
+
+PKG_SOURCE:=$(HONK_ASSET)
+PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/releases/download/$(HONK_RELEASE_TAG)/
+PKG_HASH:=$(HONK_HASH)
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -36,11 +45,11 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
   URL:=https://github.com/Glassyiris/honk
-	DEPENDS:=@TARGET_x86_64 +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +curl +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite $(HONK_BTF_BUILD_DEPENDS)
+  DEPENDS:=@(x86_64||aarch64) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +curl +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
 endef
 
 define Package/honk/description
-  Honk is a transparent proxy core for OpenWrt x86_64.
+  Honk is a transparent proxy core for OpenWrt x86_64 and aarch64.
 endef
 
 define Package/honk/conffiles
@@ -50,11 +59,8 @@ define Package/honk/conffiles
 endef
 
 define Build/Prepare
-	test -s $(CURDIR)/generated-provenance.json
-	grep -Fq '"filename": "$(PKG_SOURCE)"' $(CURDIR)/generated-provenance.json
-	grep -Fq '"sha256": "$(PKG_HASH)"' $(CURDIR)/generated-provenance.json
 	mkdir -p $(PKG_BUILD_DIR)
-	$(TAR) --strip-components=1 -C $(PKG_BUILD_DIR) -xzf $(DL_DIR)/$(PKG_SOURCE)
+	$(TAR) -xzf $(DL_DIR)/$(PKG_SOURCE) -C $(PKG_BUILD_DIR) --strip-components=1
 endef
 
 define Build/Compile
@@ -66,11 +72,6 @@ define Package/honk/install
 
 	$(INSTALL_DIR) $(1)/usr/share/licenses/honk
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/LICENSE $(1)/usr/share/licenses/honk/LICENSE
-	$(INSTALL_DATA) $(PKG_BUILD_DIR)/doona/LICENSE $(1)/usr/share/licenses/honk/DOONA-LICENSE
-	$(INSTALL_DATA) $(PKG_BUILD_DIR)/doona/NOTICE $(1)/usr/share/licenses/honk/DOONA-NOTICE
-	$(INSTALL_DATA) $(PKG_BUILD_DIR)/doona/THIRD-PARTY-NOTICES.txt $(1)/usr/share/licenses/honk/DOONA-THIRD-PARTY-NOTICES.txt
-	$(INSTALL_DIR) $(1)/usr/share/licenses/honk/DOONA-LICENSES
-	$(CP) $(PKG_BUILD_DIR)/doona/LICENSES/* $(1)/usr/share/licenses/honk/DOONA-LICENSES/
 
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(CURDIR)/files/honk.config $(1)/etc/config/honk
@@ -98,7 +99,6 @@ define Package/honk/install
 	$(INSTALL_BIN) $(CURDIR)/files/redact-log.sh $(1)/usr/share/honk/redact-log.sh
 	$(INSTALL_BIN) $(CURDIR)/files/log-level-filter.sh $(1)/usr/share/honk/log-level-filter.sh
 	$(INSTALL_DATA) $(CURDIR)/files/log-lines.sh $(1)/usr/share/honk/log-lines.sh
-	$(INSTALL_DATA) $(CURDIR)/generated-provenance.json $(1)/usr/share/honk/provenance.json
 endef
 
 $(eval $(call BuildPackage,honk))

@@ -562,10 +562,13 @@ global {
 }
 
 experimental {
-    clash_api {
-        external_controller: ''
-        external_ui: '/usr/share/honk-ui'
-        secret: ''
+    native_api {
+        enabled: true
+        listen: '$listen_addr'
+        password_auth: true
+        allow_anonymous_loopback: false
+        config_write: true
+        ui: '/usr/share/doona'
     }
 }
 EOF
@@ -692,10 +695,13 @@ global {
 }
 
 experimental {
-    clash_api {
-        external_controller: '127.0.0.1:$shadow_port'
-        external_ui: '/usr/share/honk-ui'
-        secret: ''
+    native_api {
+        enabled: true
+        listen: '127.0.0.1:$shadow_port'
+        password_auth: true
+        allow_anonymous_loopback: false
+        config_write: true
+        ui: '/usr/share/doona'
     }
 }
 EOF
@@ -723,10 +729,13 @@ global {
 }
 
 experimental {
-    clash_api {
-        external_controller: '$live_host:$live_port'
-        external_ui: '/usr/share/honk-ui'
-        secret: ''
+    native_api {
+        enabled: true
+        listen: '$live_host:$live_port'
+        password_auth: true
+        allow_anonymous_loopback: false
+        config_write: true
+        ui: '/usr/share/doona'
     }
 }
 EOF

@@ -15,7 +15,6 @@ mkdir -p "$CACHE_DIR" "$(dirname "$WORK_DIR")" "$OUT_DIR"
 for tool in curl sha256sum tar zstd make find node; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
-test -f "$ROOT/honk/generated-stage.mk" || { echo 'Run ci/build-core.sh first.' >&2; exit 1; }
 test -f "$ROOT/luci-app-honk/generated-doona-stage.mk" || { echo 'Run ci/build-doona.sh first.' >&2; exit 1; }
 
 SDK_ARCHIVE_PATH="$CACHE_DIR/$OPENWRT_SDK_ARCHIVE"
@@ -41,7 +40,6 @@ cp -a "$ROOT/v2ray-geodata/." "$SDK_DIR/package/v2ray-geodata/"
 mkdir -p "$SDK_DIR/package/ci"
 install -m 0644 "$ROOT/ci/pins.env" "$SDK_DIR/package/ci/pins.env"
 mkdir -p "$SDK_DIR/dl"
-install -m 0644 "$CACHE_DIR/$CORE_ARCHIVE" "$SDK_DIR/dl/$CORE_ARCHIVE"
 install -m 0644 "$CACHE_DIR/$DOONA_ARCHIVE" "$SDK_DIR/dl/$DOONA_ARCHIVE"
 
 cd "$SDK_DIR"
