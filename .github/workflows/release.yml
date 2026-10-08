@@ -15,8 +15,33 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  doona:
+    name: Build and publish Doona
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Build Doona interface
+        run: ci/build-doona.sh
+      - name: Publish Doona to staging release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . ci/pins.env
+          gh release view staging --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create staging --repo "${{ github.repository }}" --title "staging assets" --prerelease --latest=false
+          gh release upload staging "artifacts/cache/$DOONA_ARCHIVE" --repo "${{ github.repository }}" --clobber
+
   build:
     name: ${{ matrix.arch }} · SDK ${{ matrix.sdk }}
+    needs: doona
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
