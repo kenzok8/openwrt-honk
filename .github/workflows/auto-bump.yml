@@ -105,6 +105,7 @@ jobs:
             ci/pins.env
           sed -i \
             -e "s/^CORE_COMMIT:=.*/CORE_COMMIT:=${{ steps.detect.outputs.core_new }}/" \
+            -e "s/^PKG_VERSION:=.*/PKG_VERSION:$(TZ=Asia/Shanghai date +%Y.%m.%d)/" \
             honk/Makefile
 
           git config user.name "github-actions[bot]"
