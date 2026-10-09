@@ -71,7 +71,7 @@ jobs:
           . ci/pins.env
           # Staging release is created by the doona job; just upload here.
           gh release upload staging artifacts/cache/honk-core-"$CORE_COMMIT"-*.tar.gz --repo "${{ github.repository }}" --clobber
-          gh release upload staging honk/generated-stage.mk --repo "${{ github.repository }}" --clobber
+          gh release upload staging honk/generated-stage.mk honk/generated-provenance.json --repo "${{ github.repository }}" --clobber
 
   build:
     name: ${{ matrix.arch }} · SDK ${{ matrix.sdk }}
