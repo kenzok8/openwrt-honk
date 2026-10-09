@@ -32,3 +32,26 @@ jobs:
             luci-app-honk/generated-doona-stage.mk
           if-no-files-found: error
           retention-days: 7
+
+  core-build:
+    name: Build honk-core (x86_64 smoke)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.14.1
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep zstd
+      - name: Build honk-core (x86_64)
+        run: CORE_ARCHS=x86_64 ci/build-core.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: honk-core-x86_64
+          path: artifacts/cache/honk-core-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7

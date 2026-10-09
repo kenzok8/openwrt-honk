@@ -5,34 +5,51 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
-PKG_VERSION:=2026.10.07
+PKG_VERSION:=2026.10.09
 PKG_RELEASE:=1
 
-# Raw upstream release tag; the asset name keeps this exact spelling.
-HONK_RELEASE_TAG:=debug.2026.10.7.native-api.1
-HONK_ASSET_TAG:=debug
+# Pinned honk-core revision (Glassyiris/honk feat/native-api), cross-compiled by
+# ci/build-core.sh. The per-architecture asset/hash are filled by that script;
+# keep a committed fallback so the feed still evaluates without a staging run.
+CORE_COMMIT:=eac5e0c5fba5078a7ff4517a3e3851e7fa0f4f8e
 
-# SHA256 of each prebuilt release tarball, kept in sync by scripts/update-honk-version.sh.
-HONK_HASH_X86_64:=41114fc58c069c5dc2550dc6563755a2bc4b1f9a52eec128300bb4c3ad23fd80
-HONK_HASH_AARCH64:=2aada1c945ace03c6403cc587940b4eddf31cb0846ec31e8318efbd5317b36b7
+-include $(CURDIR)/generated-stage.mk
+
+HONK_ASSET_X86_64?=honk-core-$(CORE_COMMIT)-x86_64.tar.gz
+HONK_ASSET_AARCH64?=honk-core-$(CORE_COMMIT)-aarch64.tar.gz
+HONK_ASSET_ARMV7?=honk-core-$(CORE_COMMIT)-armv7.tar.gz
+HONK_ASSET_I686?=honk-core-$(CORE_COMMIT)-i686.tar.gz
+HONK_HASH_X86_64?=SKIP
+HONK_HASH_AARCH64?=SKIP
+HONK_HASH_ARMV7?=SKIP
+HONK_HASH_I686?=SKIP
+
+ifeq ($(ARCH),x86_64)
+  HONK_ASSET:=$(HONK_ASSET_X86_64)
+  HONK_HASH:=$(HONK_HASH_X86_64)
+else ifeq ($(ARCH),aarch64)
+  HONK_ASSET:=$(HONK_ASSET_AARCH64)
+  HONK_HASH:=$(HONK_HASH_AARCH64)
+else ifeq ($(ARCH),arm_cortex-a7_neon-vfpv4)
+  HONK_ASSET:=$(HONK_ASSET_ARMV7)
+  HONK_HASH:=$(HONK_HASH_ARMV7)
+else ifeq ($(ARCH),arm_cortex-a9)
+  HONK_ASSET:=$(HONK_ASSET_ARMV7)
+  HONK_HASH:=$(HONK_HASH_ARMV7)
+else ifeq ($(ARCH),arm_cortex-a9_neon)
+  HONK_ASSET:=$(HONK_ASSET_ARMV7)
+  HONK_HASH:=$(HONK_HASH_ARMV7)
+else ifeq ($(ARCH),i386_pentium4)
+  HONK_ASSET:=$(HONK_ASSET_I686)
+  HONK_HASH:=$(HONK_HASH_I686)
+endif
 
 PKG_LICENSE:=AGPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=kenzok8
 
-ifeq ($(ARCH),x86_64)
-  HONK_TARGET:=x86_64-unknown-linux-musl
-  HONK_HASH:=$(HONK_HASH_X86_64)
-else ifeq ($(ARCH),aarch64)
-  HONK_TARGET:=aarch64-unknown-linux-musl
-  HONK_HASH:=$(HONK_HASH_AARCH64)
-endif
-
-HONK_SUFFIX:=-stock
-HONK_ASSET:=honk-core-$(HONK_ASSET_TAG)-$(HONK_TARGET)$(HONK_SUFFIX).tar.gz
-
 PKG_SOURCE:=$(HONK_ASSET)
-PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/releases/download/$(HONK_RELEASE_TAG)/
+PKG_SOURCE_URL:=https://github.com/kenzok8/openwrt-honk/releases/download/staging/
 PKG_HASH:=$(HONK_HASH)
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
@@ -45,11 +62,11 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
   URL:=https://github.com/Glassyiris/honk
-  DEPENDS:=@(x86_64||aarch64) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
+  DEPENDS:=@(x86_64||aarch64||arm_cortex-a7_neon-vfpv4||arm_cortex-a9||arm_cortex-a9_neon||i386_pentium4) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
 endef
 
 define Package/honk/description
-  Honk is a transparent proxy core for OpenWrt x86_64 and aarch64.
+  Honk is a transparent proxy core for OpenWrt (x86_64, aarch64, armv7, i686).
 endef
 
 define Package/honk/conffiles
@@ -89,7 +106,8 @@ define Package/honk/install
 	$(INSTALL_BIN) $(CURDIR)/files/90-honk-boot $(1)/etc/uci-defaults/90-honk
 
 	$(INSTALL_DIR) $(1)/usr/share/honk
-	$(INSTALL_DATA) $(CURDIR)/files/default-config.dae $(1)/usr/share/honk/default-config.dae
+	$(INSTALL_DATA) $(CURDIR)/files/config.dae $(1)/usr/share/honk/default-config.dae
+	$(INSTALL_DATA) $(CURDIR)/files/provenance.json $(1)/usr/share/honk/provenance.json
 	$(INSTALL_BIN) $(CURDIR)/files/control.sh $(1)/usr/share/honk/control.sh
 	$(INSTALL_BIN) $(CURDIR)/files/lock.sh $(1)/usr/share/honk/lock.sh
 	$(INSTALL_BIN) $(CURDIR)/files/lifecycle.sh $(1)/usr/share/honk/lifecycle.sh

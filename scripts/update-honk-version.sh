@@ -1,52 +1,39 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# Manually advance the pinned honk-core revision (Glassyiris/honk feat/native-api).
+# The per-architecture tarballs and hashes are produced by the release workflow's
+# ci/build-core.sh, so this script only moves the source pin and bumps the version.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAKEFILE="$REPO_DIR/honk/Makefile"
-UPSTREAM="${HONK_UPSTREAM_REPO:-Glassyiris/honk}"
+UPSTREAM="${HONK_UPSTREAM_REPO:-https://github.com/Glassyiris/honk.git}"
+BRANCH="${HONK_UPSTREAM_BRANCH:-feat/native-api}"
 
-command -v gh >/dev/null 2>&1 || { echo "error: gh is required" >&2; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
 
-echo "Fetching latest native-api release from $UPSTREAM ..."
-tag="$(gh release list --repo "$UPSTREAM" --limit 100 --json tagName,isPrerelease \
-  --jq '.[] | select(.tagName | test("debug[.].*native-api")) | .tagName' | head -1)"
-[ -n "$tag" ] || { echo "error: no native-api release found" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$REPO_DIR/ci/pins.env"
 
-echo "Latest release: $tag"
+core_new="$(git ls-remote "$UPSTREAM" "refs/heads/$BRANCH" | cut -f1)"
+if ! [[ "$core_new" =~ ^[0-9a-f]{40}$ ]]; then
+	echo "error: cannot resolve $BRANCH head from $UPSTREAM" >&2
+	exit 1
+fi
 
-digest_of() {
-  local name="$1"
-  gh release view "$tag" --repo "$UPSTREAM" --json assets \
-    --jq ".assets[] | select(.name == \"$name\") | .digest" | sed 's/^sha256://'
-}
+if [ "$core_new" = "$CORE_COMMIT" ]; then
+	echo "No upstream change: already at $CORE_COMMIT"
+	exit 0
+fi
 
-x86_hash="$(digest_of 'honk-core-debug-x86_64-unknown-linux-musl-stock.tar.gz')"
-aarch64_hash="$(digest_of 'honk-core-debug-aarch64-unknown-linux-musl-stock.tar.gz')"
+version="$(TZ=Asia/Shanghai date +%Y.%m.%d)"
 
-[ "${#x86_hash}" -eq 64 ] || { echo "error: bad x86_64 digest: ${x86_hash:-<empty>}" >&2; exit 1; }
-[ "${#aarch64_hash}" -eq 64 ] || { echo "error: bad aarch64 digest: ${aarch64_hash:-<empty>}" >&2; exit 1; }
+echo "Advancing core pin:"
+echo "  $(printf '%s' "$CORE_COMMIT" | cut -c1-7) -> $(printf '%s' "$core_new" | cut -c1-7)"
+echo "  PKG_VERSION -> $version"
 
-# Version: strip the leading "debug." and translate dots into an OpenWrt-safe
-# date-ish version (debug.2026.10.7.native-api.1 -> 2026.10.07).
-version="$(printf '%s' "$tag" | sed -E 's/^debug\.//; s/^([0-9]{4})\.([0-9]{1,2})\.([0-9]{1,2}).*/\1.\2.\3/')"
-# Normalize two-digit month/day.
-version="$(printf '%s' "$version" | awk -F. '{printf "%s.%02d.%02d", $1, $2, $3}')"
+sed -i "s|^CORE_COMMIT=.*|CORE_COMMIT=$core_new|" "$REPO_DIR/ci/pins.env"
+sed -i "s|^CORE_COMMIT:=.*|CORE_COMMIT:=$core_new|" "$REPO_DIR/honk/Makefile"
+sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=$version|" "$REPO_DIR/honk/Makefile"
+sed -i "s|^PKG_RELEASE:=.*|PKG_RELEASE:=1|" "$REPO_DIR/honk/Makefile"
 
-echo "x86_64:   $x86_hash"
-echo "aarch64:  $aarch64_hash"
-echo "version:  $version"
-
-TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
-
-sed \
-  -e "s|^HONK_RELEASE_TAG:=.*|HONK_RELEASE_TAG:=$tag|" \
-  -e "s|^HONK_HASH_X86_64:=.*|HONK_HASH_X86_64:=$x86_hash|" \
-  -e "s|^HONK_HASH_AARCH64:=.*|HONK_HASH_AARCH64:=$aarch64_hash|" \
-  -e "s|^PKG_VERSION:=.*|PKG_VERSION:=$version|" \
-  -e "s|^PKG_RELEASE:=.*|PKG_RELEASE:=1|" \
-  "$MAKEFILE" > "$TMP"
-
-mv "$TMP" "$MAKEFILE"
-echo "Updated $MAKEFILE"
+echo "Done. Run the release workflow to build the multi-arch tarballs and publish."

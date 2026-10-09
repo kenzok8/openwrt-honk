@@ -43,7 +43,7 @@ jobs:
             fi
           }
 
-          core_new=$(git ls-remote https://github.com/Glassyiris/honk.git HEAD | cut -f1)
+          core_new=$(git ls-remote https://github.com/Glassyiris/honk.git refs/heads/feat/native-api | cut -f1)
           doona_new=$(git ls-remote https://github.com/Zakkaus/doona.git HEAD | cut -f1)
           require_sha "$core_new" core
           require_sha "$doona_new" doona
@@ -99,16 +99,18 @@ jobs:
           set -euo pipefail
           sed -i \
             -e "s/^CORE_COMMIT=.*/CORE_COMMIT=${{ steps.detect.outputs.core_new }}/" \
-            -e "s/^CORE_ARCHIVE=.*/CORE_ARCHIVE=honk-core-${{ steps.detect.outputs.core_new }}-x86_64-unknown-linux-musl-stock.tar.gz/" \
             -e "s/^DOONA_COMMIT=.*/DOONA_COMMIT=${{ steps.detect.outputs.doona_new }}/" \
             -e "s/^DOONA_VERSION=.*/DOONA_VERSION=${{ steps.detect.outputs.doona_version_new }}/" \
             -e "s/^DOONA_ARCHIVE=.*/DOONA_ARCHIVE=doona-${{ steps.detect.outputs.doona_new }}.tar.gz/" \
             ci/pins.env
+          sed -i \
+            -e "s/^CORE_COMMIT:=.*/CORE_COMMIT:=${{ steps.detect.outputs.core_new }}/" \
+            honk/Makefile
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$STAGING"
-          git add ci/pins.env
+          git add ci/pins.env honk/Makefile
           git commit -m "chore: bump pins (${{ steps.detect.outputs.changes }})"
           git -c credential.helper='!gh auth git-credential' \
             push --force origin "HEAD:refs/heads/$STAGING"

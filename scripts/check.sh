@@ -157,10 +157,11 @@ grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefil
 grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
-grep -Fq 'HONK_RELEASE_TAG:=' honk/Makefile
-grep -Fq 'HONK_HASH_X86_64:=' honk/Makefile
-grep -Fq 'HONK_HASH_AARCH64:=' honk/Makefile
-grep -Fq '@(x86_64||aarch64)' honk/Makefile
+grep -Fq 'HONK_ASSET_X86_64?=' honk/Makefile
+grep -Fq 'HONK_ASSET_AARCH64?=' honk/Makefile
+grep -Fq 'HONK_ASSET_ARMV7?=' honk/Makefile
+grep -Fq 'HONK_ASSET_I686?=' honk/Makefile
+grep -Fq '@(x86_64||aarch64||arm_cortex-a7_neon-vfpv4' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
 grep -Fq "'adbdump'" ci/create-release-feed.sh
