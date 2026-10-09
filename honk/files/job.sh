@@ -50,7 +50,14 @@ else
 fi
 maint_pid=$!
 logger -t honk-maintenance "$operation started" 2>/dev/null || :
+# Total watchdog: never poll forever if maintenance.sh hangs.
+_poll_deadline=$(($(date +%s) + 1800))
 while kill -0 "$maint_pid" 2>/dev/null; do
+	if [ "$(date +%s)" -ge "$_poll_deadline" ]; then
+		logger -t honk-maintenance "$operation timed out after 1800s, killing $maint_pid" 2>/dev/null || :
+		kill -9 "$maint_pid" 2>/dev/null || :
+		break
+	fi
 	journal_phase=$(sed -n 's/^phase=//p' /etc/.honk-maintenance/journal 2>/dev/null | sed -n '1p')
 	if [ "$operation" = update_apply ]; then
 		update_phase=$(cat /etc/.honk-update/phase 2>/dev/null)

@@ -414,12 +414,14 @@ core_commit() {
 load_uci_values() {
 	uci_bin=${1:-uci}
 	uci_config=${2:-}
+	# Run uci with optional -c/-t flags without eval: keep args in "$@" style
+	# via a helper so later callers can't inject through string concatenation.
 	if [ -n "$uci_config" ]; then
-		uci_base="$uci_bin -c $uci_config -t $temp_dir/uci-tmp"
+		uci_run() { "$uci_bin" -c "$uci_config" -t "$temp_dir/uci-tmp" "$@"; }
 	else
-		uci_base="$uci_bin"
+		uci_run() { "$uci_bin" "$@"; }
 	fi
-	uci_show=$(eval "$uci_base -q show honk" 2>/dev/null) || return 1
+	uci_show=$(uci_run -q show honk 2>/dev/null) || return 1
 	printf '%s\n' "$uci_show" | awk -F= '
 		/^honk\.main=/ { main++ ; next }
 		/^honk\.main\.(enabled|boot_enabled|initialized|config_file|listen_port|lan_network)=/ { next }
@@ -427,7 +429,7 @@ load_uci_values() {
 		/^honk\.[A-Za-z0-9_.-]+=/ { bad=1; next }
 		END { exit (bad || main != 1) }
 	' || return 1
-	get_uci() { eval "$uci_base -q get honk.main.$1" 2>/dev/null; }
+	get_uci() { uci_run -q get "honk.main.$1" 2>/dev/null; }
 	u_enabled=$(get_uci enabled) || return 1
 	u_boot=$(get_uci boot_enabled) || return 1
 	u_initialized=$(get_uci initialized) || return 1

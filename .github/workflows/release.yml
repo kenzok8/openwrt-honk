@@ -35,6 +35,8 @@ jobs:
         run: |
           set -euo pipefail
           . ci/pins.env
+          # Only this job creates the staging release; build-core only uploads.
+          # (Both used to do view||create, which raced when staging didn't exist.)
           gh release view staging --repo "${{ github.repository }}" >/dev/null 2>&1 || \
             gh release create staging --repo "${{ github.repository }}" --title "staging assets" --prerelease --latest=false
           gh release upload staging "artifacts/cache/$DOONA_ARCHIVE" --repo "${{ github.repository }}" --clobber
@@ -67,8 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           . ci/pins.env
-          gh release view staging --repo "${{ github.repository }}" >/dev/null 2>&1 || \
-            gh release create staging --repo "${{ github.repository }}" --title "staging assets" --prerelease --latest=false
+          # Staging release is created by the doona job; just upload here.
           gh release upload staging artifacts/cache/honk-core-"$CORE_COMMIT"-*.tar.gz --repo "${{ github.repository }}" --clobber
           gh release upload staging honk/generated-stage.mk --repo "${{ github.repository }}" --clobber
 
@@ -106,10 +107,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The manifest carries per-arch SHA256 hashes; building without it
+          # silently disables hash verification (Makefile falls back to SKIP).
           gh release download staging --repo "${{ github.repository }}" \
-            --pattern 'generated-stage.mk' --dir honk --clobber 2>/dev/null || {
-            echo "::warning::no staging generated-stage.mk; falling back to committed hashes"
-          }
+            --pattern 'generated-stage.mk' --dir honk --clobber
+          # Provenance is installed as /usr/share/honk/provenance.json.
+          gh release download staging --repo "${{ github.repository }}" \
+            --pattern 'generated-provenance.json' --dir honk --clobber
 
       - name: Build packages
         continue-on-error: true
@@ -218,7 +222,10 @@ jobs:
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=v$(TZ=Asia/Shanghai date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+            # Suffix with run_id so two dispatches on the same day don't share
+            # a tag (the release action updates the release but never moves the
+            # git tag, leaving tag and release out of sync).
+            echo "tag=v$(TZ=Asia/Shanghai date +%Y.%m.%d)-r${{ github.run_id }}" >> "$GITHUB_OUTPUT"
             echo "prerelease=${{ github.event.inputs.prerelease }}" >> "$GITHUB_OUTPUT"
           fi
 

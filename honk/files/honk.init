@@ -15,6 +15,7 @@ boot() {
 	config_get_bool boot_enabled main boot_enabled 0
 	[ "$boot_enabled" -eq 1 ] || return 0
 	uci set honk.main.enabled='1' || return 1
+	uci commit honk || return 1
 	start
 }
 
@@ -43,4 +44,12 @@ start_service() {
 	procd_set_param respawn 3600 5 5
 	procd_set_param term_timeout 20
 	procd_close_instance
+}
+
+reload_service() {
+	# honk-core has no hot-reload API wired here; a reload is an explicit
+	# restart so existing connections are cycled. The UI only exposes
+	# restart, this exists so manual `/etc/init.d/honk reload` is defined.
+	logger -t honk "reload requested, restarting (no hot-reload)"
+	restart
 }

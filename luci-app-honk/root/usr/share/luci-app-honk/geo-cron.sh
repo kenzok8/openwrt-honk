@@ -4,6 +4,10 @@
 # honk.main.geo_auto_freq (daily|weekly); both actions are idempotent.
 
 ACTION="$1"
+case "$ACTION" in
+	enable|disable) ;;
+	*) echo "usage: $0 enable|disable" >&2; exit 64 ;;
+esac
 CRONTAB="/etc/crontabs/root"
 TAG="# luci-app-honk geo-update"
 SCRIPT="/usr/share/luci-app-honk/update-geo.sh"

@@ -99,15 +99,27 @@ validate_manifest() {
 	json_select .. || return 1
 	[ "$(manifest_field '@.schema')" = 1 ] || return 1
 	[ "$(manifest_field '@.product')" = openwrt-honk ] || return 1
-	[ "$(manifest_field '@.target.architecture')" = x86_64 ] || return 1
-	[ "$(manifest_field '@.target.openwrt')" = 25.12 ] || return 1
-	[ "$(manifest_field '@.target.package_format')" = apk ] || return 1
+	# Target must match this device: map uname -m to manifest arch names.
+	case "$(uname -m)" in
+		x86_64) _local_arch=x86_64 ;;
+		aarch64) _local_arch=aarch64 ;;
+		armv7l) _local_arch=armv7 ;;
+		*) return 1 ;;
+	esac
+	[ "$(manifest_field '@.target.architecture')" = "$_local_arch" ] || return 1
+	# OpenWrt version must match: 24.10 (opkg/ipk) or 25.12 (apk).
+	_local_owrt=$(sed -n 's/^DISTRIB_RELEASE="\([0-9]*\.[0-9]*\).*/\1/p' /etc/openwrt_release 2>/dev/null | head -n 1)
+	case "$_local_owrt" in 24.10|25.12) ;; *) return 1 ;; esac
+	[ "$(manifest_field '@.target.openwrt')" = "$_local_owrt" ] || return 1
+	case "$_local_owrt" in
+		24.10) [ "$(manifest_field '@.target.package_format')" = ipk ] || return 1 ;;
+		25.12) [ "$(manifest_field '@.target.package_format')" = apk ] || return 1 ;;
+	esac
 	[ "$(manifest_field '@.target.kernel_min')" = 6.12 ] || return 1
 	[ "$(manifest_field '@.target.requires_btf')" = true ] || return 1
 	[ "$(manifest_field '@.min_updater_api')" = 1 ] || return 1
 	[ "$(manifest_field '@.state_schema')" = 2 ] || return 1
-	case "$(uname -m)" in x86_64) ;; *) return 1 ;; esac
-	grep -Eq '^DISTRIB_RELEASE="25\.12([.-]|")' /etc/openwrt_release 2>/dev/null || return 1
+	# (arch and OpenWrt version already validated against local system above)
 	[ -r /sys/kernel/btf/vmlinux ] || return 1
 	kernel_version=$(uname -r | sed 's/-.*//')
 	kernel_major=${kernel_version%%.*}
@@ -146,9 +158,9 @@ validate_manifest() {
 		case "$validate_seen" in *" $validate_name "*) return 1 ;; esac
 		validate_seen="$validate_seen$validate_name "
 		case "$validate_version" in ''|*[!A-Za-z0-9.+~-]*) return 1 ;; esac
-		case "$validate_arch" in x86_64|noarch) ;; *) return 1 ;; esac
-		case "$validate_name:$validate_arch" in honk:x86_64|luci-app-honk:x86_64|luci-app-honk:noarch) ;; *) return 1 ;; esac
-		[ "$validate_filename" = "$validate_name-$validate_version.apk" ] || return 1
+		case "$validate_arch" in x86_64|aarch64|armv7|noarch) ;; *) return 1 ;; esac
+		case "$validate_name:$validate_arch" in honk:x86_64|honk:aarch64|honk:armv7|luci-app-honk:x86_64|luci-app-honk:aarch64|luci-app-honk:armv7|luci-app-honk:noarch) ;; *) return 1 ;; esac
+		[ "$validate_filename" = "$validate_name-$validate_version.apk" ] || [ "$validate_filename" = "${validate_name}_${validate_version}_${validate_arch}.ipk" ] || return 1
 		case "$validate_filename" in *'/'*|*'..'*|*[!A-Za-z0-9.+_-]*) return 1 ;; esac
 		case "$validate_size" in ''|*[!0-9]*) return 1 ;; esac
 		[ "$validate_size" -gt 0 ] && [ "$validate_size" -le 134217728 ] || return 1

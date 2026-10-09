@@ -223,7 +223,20 @@ return view.extend({
 				const geoAuto = autoSel.value !== 'off';
 				const geoFreq = autoSel.value === 'weekly' ? 'weekly' : 'daily';
 				if (p === 'v2fly') { gi = GEO_PRESETS.v2fly.geoip; gs = GEO_PRESETS.v2fly.geosite; }
-				else if (p === 'custom') { gi = giInput.value.trim(); gs = gsInput.value.trim(); }
+				else if (p === 'custom') {
+					gi = giInput.value.trim(); gs = gsInput.value.trim();
+					for (const [label, url] of [['GeoIP URL', gi], ['GeoSite URL', gs]]) {
+						if (url) {
+							try {
+								const u = new URL(url);
+								if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('bad protocol');
+							} catch (e) {
+								document.getElementById('honk-geo-msg').textContent = _('Invalid %s: must be an http(s) URL.').format(label);
+								return;
+							}
+						}
+					}
+				}
 				uci.set('honk', 'main', 'geoip_url', gi);
 				uci.set('honk', 'main', 'geosite_url', gs);
 				uci.set('honk', 'main', 'geo_auto', geoAuto ? '1' : '0');
@@ -255,7 +268,8 @@ return view.extend({
 					geoField(_('Source'), presetSel),
 					customRows,
 					geoField(_('Auto-update'), autoSel),
-					E('div', { 'class': 'honk-actions' }, [ saveBtn ])
+					E('div', { 'class': 'honk-actions' }, [ saveBtn ]),
+					E('p', { 'class': 'honk-note', 'id': 'honk-geo-msg' })
 				])
 			]);
 		})();

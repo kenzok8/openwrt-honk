@@ -101,7 +101,7 @@ jobs:
             -e "s/^CORE_COMMIT=.*/CORE_COMMIT=${{ steps.detect.outputs.core_new }}/" \
             -e "s/^DOONA_COMMIT=.*/DOONA_COMMIT=${{ steps.detect.outputs.doona_new }}/" \
             -e "s/^DOONA_VERSION=.*/DOONA_VERSION=${{ steps.detect.outputs.doona_version_new }}/" \
-            -e "s/^DOONA_ARCHIVE=.*/DOONA_ARCHIVE=doona-${{ steps.detect.outputs.doona_new }}.tar.gz/" \
+            -e "s/^DOONA_ARCHIVE=.*/DOONA_ARCHIVE=doona-$(printf '%s' "${{ steps.detect.outputs.doona_new }}" | cut -c1-8).tar.gz/" \
             ci/pins.env
           sed -i \
             -e "s/^CORE_COMMIT:=.*/CORE_COMMIT:=${{ steps.detect.outputs.core_new }}/" \
@@ -138,21 +138,23 @@ jobs:
             echo "::error::could not find the build.yml run for $STAGING"
             exit 1
           fi
-          echo "watching source-build job of run $run_id on $STAGING"
+          echo "watching source-build and core-build jobs of run $run_id on $STAGING"
           conclusion=""
           for _ in $(seq 1 180); do
-            job=$(gh run view "$run_id" --json jobs --jq '.jobs[] | select(.name == "source-build") | {status: .status, conclusion: (.conclusion // "")} | @json' 2>/dev/null || true)
+            job=$(gh run view "$run_id" --json jobs --jq '.jobs[] | select(.name == "source-build" or .name == "Build honk-core (x86_64 smoke)") | {status: .status, conclusion: (.conclusion // "")} | @json' 2>/dev/null || true)
+            # all watched jobs completed?
             if [ -n "$job" ]; then
-              status=$(printf '%s' "$job" | jq -r .status)
-              conclusion=$(printf '%s' "$job" | jq -r .conclusion)
-              if [ "$status" = completed ]; then
+              pending=$(printf '%s' "$job" | jq -s '[.[] | select(.status != "completed")] | length')
+              if [ "$pending" = 0 ]; then
+                failed=$(printf '%s' "$job" | jq -s '[.[] | select(.conclusion != "success")] | length')
+                if [ "$failed" = 0 ]; then conclusion=success; else conclusion=failure; fi
                 break
               fi
             fi
             sleep 20
           done
           if [ "$conclusion" != success ]; then
-            echo "::error::source-build concluded ${conclusion:-unfinished}"
+            echo "::error::source-build/core-build concluded ${conclusion:-unfinished}"
             exit 1
           fi
 
@@ -162,6 +164,6 @@ jobs:
             echo "Staging branch: \`$STAGING\`"
             echo "Validated commit: \`${{ steps.stage.outputs.staging_sha }}\`"
             echo ""
-            echo "Source build passed (check.sh + doona + honk core)."
+            echo "Source build passed (check.sh + doona + honk core x86_64)."
             echo "Promote only after maintainer review; see the manual bump steps in README."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -27,13 +27,7 @@ HONK_HASH_ARMV7?=SKIP
 ifeq ($(ARCH_PACKAGES),x86_64)
   HONK_ASSET:=$(HONK_ASSET_X86_64)
   HONK_HASH:=$(HONK_HASH_X86_64)
-else ifeq ($(ARCH_PACKAGES),aarch64_generic)
-  HONK_ASSET:=$(HONK_ASSET_AARCH64)
-  HONK_HASH:=$(HONK_HASH_AARCH64)
-else ifeq ($(ARCH_PACKAGES),aarch64_cortex-a53)
-  HONK_ASSET:=$(HONK_ASSET_AARCH64)
-  HONK_HASH:=$(HONK_HASH_AARCH64)
-else ifeq ($(ARCH_PACKAGES),aarch64_cortex-a72)
+else ifeq ($(filter aarch64%,$(ARCH_PACKAGES)),$(ARCH_PACKAGES))
   HONK_ASSET:=$(HONK_ASSET_AARCH64)
   HONK_HASH:=$(HONK_HASH_AARCH64)
 else ifeq ($(filter arm_%,$(ARCH_PACKAGES)),$(ARCH_PACKAGES))
@@ -104,7 +98,7 @@ define Package/honk/install
 
 	$(INSTALL_DIR) $(1)/usr/share/honk
 	$(INSTALL_DATA) $(CURDIR)/files/config.dae $(1)/usr/share/honk/default-config.dae
-	$(INSTALL_DATA) $(CURDIR)/files/provenance.json $(1)/usr/share/honk/provenance.json
+	$(INSTALL_DATA) $(CURDIR)/generated-provenance.json $(1)/usr/share/honk/provenance.json
 	$(INSTALL_BIN) $(CURDIR)/files/control.sh $(1)/usr/share/honk/control.sh
 	$(INSTALL_BIN) $(CURDIR)/files/lock.sh $(1)/usr/share/honk/lock.sh
 	$(INSTALL_BIN) $(CURDIR)/files/lifecycle.sh $(1)/usr/share/honk/lifecycle.sh

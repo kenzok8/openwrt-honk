@@ -68,7 +68,7 @@ fi
 	mkdir -p "$(dirname "$DEST")"
 	echo "$(date '+%F %T') begin: $URL"
 
-	if ! curl -fsSL --connect-timeout 15 --max-time 240 -o "$TMP" "$URL"; then
+	if ! curl -fsSL --proto '=http,https' --proto-redir '=http,https' --connect-timeout 15 --max-time 240 -o "$TMP" "$URL"; then
 		echo "$(date '+%F %T') download failed"
 		rm -f "$TMP"
 		rc=1

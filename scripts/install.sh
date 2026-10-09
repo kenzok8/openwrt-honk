@@ -15,7 +15,10 @@ fetch_text() {
 
 download_file() {
 	url="$1"; out="$2"
-	if command -v curl >/dev/null 2>&1; then curl -fL "$url" -o "$out"; else wget -qO "$out" "$url"; fi
+	# Note: --allow-untrusted is used at install time because these packages are
+	# built in CI and signed with an ephemeral key the device does not trust.
+	# Downloads go through a proxy by default; retry to survive flaky networks.
+	if command -v curl >/dev/null 2>&1; then curl -fL --retry 5 --retry-delay 10 --retry-all-errors "$url" -o "$out"; else wget -qO "$out" "$url"; fi
 }
 
 proxy_url() {
@@ -81,8 +84,9 @@ main() {
 	[ -n "$release_json" ] || { echo "无法获取最新 Release 信息。" >&2; exit 1; }
 
 	# 从 release assets 里挑出本机架构的 honk 与 luci-app-honk。
-	honk_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*honk[^\"]*${ARCH}\.${EXT}\"" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
-	luci_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*luci-app-honk[^\"]*\.${EXT}\"" | grep -v "_${ARCH}" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
+	# 注意：honk 模式必须排除 luci-app-honk，否则 head -n 1 可能抓错包。
+	honk_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*honk[^\"]*${ARCH}\.${EXT}\"" | grep -v "luci-app-honk" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
+	luci_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*luci-app-honk[^\"]*\.${EXT}\"" | grep -v "\-${ARCH}\." | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
 	if [ -z "$luci_asset" ]; then
 		# noarch APK 不带架构后缀；IPK 是 _all.ipk。
 		luci_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*luci-app-honk[^\"]*\.${EXT}\"" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
@@ -92,7 +96,7 @@ main() {
 		alt="$(fallback_arch "$ARCH" || true)"
 		if [ -n "$alt" ]; then
 			echo "架构 $ARCH 无独立包，回退到 $alt。"
-			honk_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*honk[^\"]*${alt}\.apk\"" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
+			honk_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*honk[^\"]*${alt}\.apk\"" | grep -v "luci-app-honk" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
 		fi
 	fi
 

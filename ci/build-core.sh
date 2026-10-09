@@ -15,7 +15,7 @@ CARGO_HOME=${CARGO_HOME:-"$ROOT/.cache/cargo"}
 export CARGO_HOME
 mkdir -p "$CACHE_DIR" "$WORK_DIR" "$CARGO_HOME/bin"
 
-for tool in git rustup cargo zig sha256sum tar readelf curl zstd rg file; do
+for tool in git rustup cargo zig sha256sum tar readelf curl zstd rg file python3; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 test "$(zig version)" = "$ZIG_VERSION" || { echo "Expected Zig $ZIG_VERSION." >&2; exit 1; }
@@ -59,7 +59,7 @@ test -x "$WORK_DIR/source/ci/zig-bindgen-env"
 
 BPF_LINKER_TGZ="$WORK_DIR/bpf-linker.tar.zst"
 BPF_LINKER_URL="https://github.com/aya-rs/bpf-linker/releases/download/v$BPF_LINKER_VERSION/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
-curl -fL "$BPF_LINKER_URL" -o "$BPF_LINKER_TGZ"
+curl -fL --retry 5 --retry-delay 10 --retry-all-errors "$BPF_LINKER_URL" -o "$BPF_LINKER_TGZ"
 test "$(sha256sum "$BPF_LINKER_TGZ" | cut -d' ' -f1)" = "$BPF_LINKER_SHA256"
 zstd -dc "$BPF_LINKER_TGZ" | tar -xf - -C "$CARGO_HOME/bin"
 chmod +x "$CARGO_HOME/bin/bpf-linker"
@@ -89,7 +89,9 @@ STAGE_MK="$ROOT/honk/generated-stage.mk"
 # aya 0.14.0 exhaustively destructures libc::timespec, which breaks when
 # musl32_time64 changes the struct layout on 32-bit targets (extra padding
 # fields). One-line fix to the vendored source; harmless on 64-bit.
-cargo +"$TOOLCHAIN" fetch --locked --target x86_64-unknown-linux-musl >/dev/null 2>&1 || true
+if ! cargo +"$TOOLCHAIN" fetch --locked --target x86_64-unknown-linux-musl >/dev/null 2>&1; then
+	echo "warning: cargo fetch failed; vendored-source patches below may be skipped" >&2
+fi
 for aya_utils in "$CARGO_HOME"/registry/src/*/aya-0.14.0/src/programs/utils.rs; do
 	[ -f "$aya_utils" ] || continue
 	sed -i 's/let libc::timespec { tv_sec, tv_nsec } = time;/let libc::timespec { tv_sec, tv_nsec, .. } = time;/' "$aya_utils"

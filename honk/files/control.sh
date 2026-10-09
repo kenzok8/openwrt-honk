@@ -140,7 +140,9 @@ consume_maintenance_capability() {
 	consumed_cap=$HONK_MAINT_DIR/.capability-consumed.$$
 	[ ! -e "$consumed_cap" ] || return 1
 	mv "$HONK_MAINT_CAP_FILE" "$consumed_cap" 2>/dev/null || return 1
-	trap 'rm -f "$consumed_cap"' 0
+	# Chain with any existing EXIT trap instead of overwriting it.
+	_prev_exit_trap=$(trap -p EXIT | sed "s/^trap -- '//;s/' EXIT$//")
+	trap 'rm -f "$consumed_cap"; [ -n "$_prev_exit_trap" ] && eval "$_prev_exit_trap"' 0
 	cap_format=$(maintenance_value format "$consumed_cap") || return 1
 	cap_nonce=$(maintenance_value nonce "$consumed_cap") || return 1
 	cap_txn=$(maintenance_value txn_id "$consumed_cap") || return 1
@@ -353,7 +355,11 @@ settings_rollback() {
 settings() {
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
 	. /usr/share/libubox/jshn.sh || { echo '{"ok":false,"message":"jshn_unavailable"}'; return 1; }
-	settings_json=$(cat)
+	# Bound stdin to 64KiB (DoS protection); read one extra byte to detect truncation.
+	settings_json=$(head -c 65537)
+	if [ "${#settings_json}" -gt 65536 ]; then
+		echo '{"ok":false,"message":"settings_too_large"}'; return 1
+	fi
 	json_load "$settings_json" || { echo '{"ok":false,"message":"invalid_settings_json"}'; return 1; }
 	json_get_var new_network lan_network
 	json_get_type network_type lan_network

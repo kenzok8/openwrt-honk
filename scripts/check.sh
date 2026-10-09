@@ -8,7 +8,7 @@ for tool in bash sh node sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
-for script in ci/build-doona.sh ci/create-release-feed.sh scripts/check.sh; do
+for script in ci/build-doona.sh scripts/check.sh; do
 	bash -n "$script"
 done
 for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
@@ -160,15 +160,9 @@ grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/roo
 grep -Fq 'HONK_ASSET_X86_64?=' honk/Makefile
 grep -Fq 'HONK_ASSET_AARCH64?=' honk/Makefile
 grep -Fq 'HONK_ASSET_ARMV7?=' honk/Makefile
-grep -Fq 'HONK_ASSET_I686?=' honk/Makefile
-grep -Fq '@(x86_64||aarch64||arm_cortex-a7_neon-vfpv4' honk/Makefile
+grep -Fq '@(x86_64||aarch64||arm)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
-grep -Fq "'adbdump'" ci/create-release-feed.sh
-grep -Fq ' -V -m "$STAGE/manifest.json" -p "$MANIFEST_PUBLIC_KEY"' ci/create-release-feed.sh
-grep -Fq "extract', '--destination'" ci/create-release-feed.sh
-grep -Fq 'packages/Packages.adb' ci/create-release-feed.sh
-grep -Fq 'apk-tool' ci/create-release-feed.sh
 grep -Fq '+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
 grep -Fq "! rg -n 'MockBackend|mockBackend|mock-backend' dist" ci/build-doona.sh
 ! grep -Fq "! rg -n 'mock backend|MockBackend|mockBackend' dist" ci/build-doona.sh

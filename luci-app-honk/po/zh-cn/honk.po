@@ -1148,3 +1148,12 @@ msgstr "解析粘贴内容失败。"
 
 msgid "YAML parser failed to load"
 msgstr "YAML 解析器加载失败"
+
+msgid "Direct configuration"
+msgstr "直接配置"
+
+msgid "Honk reads its nodes, subscriptions and routing from /etc/honk/config.dae."
+msgstr "Honk 从 /etc/honk/config.dae 读取节点、订阅和路由。"
+
+msgid "Add nodes as %s or subscriptions as %s in /etc/honk/config.dae, then reload Honk"
+msgstr "在 /etc/honk/config.dae 中以 %s 添加节点或以 %s 添加订阅，然后重载 Honk"
