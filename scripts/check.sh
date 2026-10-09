@@ -140,7 +140,6 @@ grep -Fq '$(eval $(call BuildPackage,luci-app-honk))' luci-app-honk/Makefile
 grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
 grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
 grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
-grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
 grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
 grep -Fq 'HONK_ASSET_X86_64?=' honk/Makefile

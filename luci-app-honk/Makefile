@@ -74,8 +74,6 @@ define Package/luci-app-honk/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/honk
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/honk/*.js $(1)/www/luci-static/resources/view/honk/
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/honk/*.css $(1)/www/luci-static/resources/view/honk/
-	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/honk/vendor
-	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/honk/vendor/* $(1)/www/luci-static/resources/view/honk/vendor/
 
 	$(INSTALL_DIR) $(1)/usr/share/doona
 	$(CP) $(PKG_BUILD_DIR)/root/usr/share/doona/* $(1)/usr/share/doona/
