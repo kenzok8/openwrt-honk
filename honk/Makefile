@@ -15,6 +15,8 @@ CORE_COMMIT:=eac5e0c5fba5078a7ff4517a3e3851e7fa0f4f8e
 
 -include $(CURDIR)/generated-stage.mk
 
+$(info honk: ARCH=[$(ARCH)] ARCH_PACKAGES=[$(ARCH_PACKAGES)])
+
 HONK_ASSET_X86_64?=honk-core-$(CORE_COMMIT)-x86_64.tar.gz
 HONK_ASSET_AARCH64?=honk-core-$(CORE_COMMIT)-aarch64.tar.gz
 HONK_ASSET_ARMV7?=honk-core-$(CORE_COMMIT)-armv7.tar.gz
@@ -22,13 +24,21 @@ HONK_HASH_X86_64?=SKIP
 HONK_HASH_AARCH64?=SKIP
 HONK_HASH_ARMV7?=SKIP
 
-ifeq ($(ARCH),x86_64)
+# ARCH_PACKAGES is the package arch (e.g. arm_cortex-a7_neon-vfpv4);
+# ARCH is the CPU arch (x86_64/aarch64/arm) and coincides for 64-bit.
+ifeq ($(ARCH_PACKAGES),x86_64)
   HONK_ASSET:=$(HONK_ASSET_X86_64)
   HONK_HASH:=$(HONK_HASH_X86_64)
-else ifeq ($(ARCH),aarch64)
+else ifeq ($(ARCH_PACKAGES),aarch64_generic)
   HONK_ASSET:=$(HONK_ASSET_AARCH64)
   HONK_HASH:=$(HONK_HASH_AARCH64)
-else ifeq ($(ARCH),arm)
+else ifeq ($(ARCH_PACKAGES),aarch64_cortex-a53)
+  HONK_ASSET:=$(HONK_ASSET_AARCH64)
+  HONK_HASH:=$(HONK_HASH_AARCH64)
+else ifeq ($(ARCH_PACKAGES),aarch64_cortex-a72)
+  HONK_ASSET:=$(HONK_ASSET_AARCH64)
+  HONK_HASH:=$(HONK_HASH_AARCH64)
+else ifeq ($(filter arm_%,$(ARCH_PACKAGES)),$(ARCH_PACKAGES))
   HONK_ASSET:=$(HONK_ASSET_ARMV7)
   HONK_HASH:=$(HONK_HASH_ARMV7)
 endif
