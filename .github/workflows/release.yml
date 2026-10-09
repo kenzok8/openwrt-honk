@@ -85,7 +85,6 @@ jobs:
           - aarch64_generic
           - arm_cortex-a7_neon-vfpv4
           - arm_cortex-a9
-          - i386_pentium4
           - x86_64
         sdk:
           - "24.10"
@@ -229,7 +228,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
-          ARCHS="aarch64_cortex-a53 aarch64_cortex-a72 aarch64_generic arm_cortex-a7_neon-vfpv4 arm_cortex-a9 i386_pentium4 x86_64"
+          ARCHS="aarch64_cortex-a53 aarch64_cortex-a72 aarch64_generic arm_cortex-a7_neon-vfpv4 arm_cortex-a9 x86_64"
           PREVIOUS_TAG="$(git tag --sort=-creatordate | grep '^v' | grep -v "^${TAG}$" | head -1 || true)"
 
           if [ -n "$PREVIOUS_TAG" ]; then
