@@ -185,6 +185,8 @@ maintenance_start_guard() {
 lock_owner_invalid() {
 	[ -d "$HONK_LOCK_DIR" ] || return 1
 	lock_owner=$(cat "$HONK_LOCK_DIR/pid" 2>/dev/null)
+	# pid file now stores "pid starttime"; only the leading PID matters here.
+	lock_owner=${lock_owner%% *}
 	case "$lock_owner" in ''|*[!0-9]*) return 0 ;; esac
 	return 1
 }

@@ -15,7 +15,8 @@ honk_lock_acquire() {
 }
 
 honk_lock_is_stale() {
-	read -r owner owner_start < "$HONK_LOCK_DIR/pid" 2>/dev/null || return 1
+	[ -r "$HONK_LOCK_DIR/pid" ] || return 1
+	read -r owner owner_start < "$HONK_LOCK_DIR/pid" || return 1
 	case "$owner" in ''|*[!0-9]*) return 1 ;; esac
 	# Dead if the PID is gone, or if it was reused by a newer process.
 	! kill -0 "$owner" 2>/dev/null && return 0
@@ -24,7 +25,8 @@ honk_lock_is_stale() {
 }
 
 honk_lock_release() {
-	read -r owner owner_start < "$HONK_LOCK_DIR/pid" 2>/dev/null || return 1
+	[ -r "$HONK_LOCK_DIR/pid" ] || return 1
+	read -r owner owner_start < "$HONK_LOCK_DIR/pid" || return 1
 	[ "$owner" = "$$" ] && [ "$owner_start" = "$(_honk_proc_starttime $$)" ] || return 1
 	rm -f "$HONK_LOCK_DIR/pid" && rmdir "$HONK_LOCK_DIR"
 }
