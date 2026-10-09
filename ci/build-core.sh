@@ -28,6 +28,13 @@ declare -A TARGETS=(
 	[armv7]="armv7-unknown-linux-musleabihf"
 	[i686]="i686-unknown-linux-musl"
 )
+# zig spells 32-bit targets differently: armv7 -> arm, i686 -> x86.
+declare -A ZIG_TARGETS=(
+	[x86_64]="x86_64-linux-musl"
+	[aarch64]="aarch64-linux-musl"
+	[armv7]="arm-linux-musleabihf"
+	[i686]="x86-linux-musl"
+)
 
 rm -rf "$WORK_DIR/source"
 git clone --quiet "$CORE_REPOSITORY" "$WORK_DIR/source"
@@ -81,7 +88,7 @@ STAGE_MK="$ROOT/honk/generated-stage.mk"
 CORE_ARCHS=${CORE_ARCHS:-"x86_64 aarch64 armv7 i686"}
 for arch in $CORE_ARCHS; do
 	target="${TARGETS[$arch]}"
-	zig_target="${target/-unknown/}"
+	zig_target="${ZIG_TARGETS[$arch]}"
 	lupper=$(printf '%s' "$target" | tr 'a-z-' 'A-Z_')
 
 	export ZIGCC_TARGET="$zig_target"
