@@ -22,18 +22,19 @@ test "$(zig version)" = "$ZIG_VERSION" || { echo "Expected Zig $ZIG_VERSION." >&
 
 # OpenWrt ARCH -> Rust target. arm_cortex-a7 / arm_cortex-a9 share armv7; the
 # OpenWrt ARCH name is what honk/Makefile keys on, so keep it as the map key.
+# NOTE: i686 is intentionally omitted: aya-obj 0.3.0/0.4.0 ship pre-generated
+# Linux bindings for x86_64/aarch64/arm(v7)/mips*/riscv64/s390x/loongarch64
+# but not for 32-bit x86, so the generated module is empty (E0432).
 declare -A TARGETS=(
 	[x86_64]="x86_64-unknown-linux-musl"
 	[aarch64]="aarch64-unknown-linux-musl"
 	[armv7]="armv7-unknown-linux-musleabihf"
-	[i686]="i686-unknown-linux-musl"
 )
-# zig spells 32-bit targets differently: armv7 -> arm, i686 -> x86.
+# zig spells 32-bit targets differently: armv7 -> arm.
 declare -A ZIG_TARGETS=(
 	[x86_64]="x86_64-linux-musl"
 	[aarch64]="aarch64-linux-musl"
 	[armv7]="arm-linux-musleabihf"
-	[i686]="x86-linux-musl"
 )
 
 rm -rf "$WORK_DIR/source"
@@ -118,7 +119,7 @@ open(p, "w").write(s)
 print("patched driver.rs for 32-bit time_t")
 PYEOF
 
-CORE_ARCHS=${CORE_ARCHS:-"x86_64 aarch64 armv7 i686"}
+CORE_ARCHS=${CORE_ARCHS:-"x86_64 aarch64 armv7"}
 for arch in $CORE_ARCHS; do
 	target="${TARGETS[$arch]}"
 	zig_target="${ZIG_TARGETS[$arch]}"
@@ -135,7 +136,7 @@ for arch in $CORE_ARCHS; do
 	# mismatch libc types (E0308 in boring/src/x509/verify.rs).
 	extra_rustflags=""
 	case "$arch" in
-		armv7|i686) extra_rustflags=" --cfg musl32_time64" ;;
+		armv7) extra_rustflags=" --cfg musl32_time64" ;;
 	esac
 	eval "export CARGO_TARGET_${lupper}_RUSTFLAGS='-C link-self-contained=no${extra_rustflags}'"
 	BINDGEN_EXTRA_CLANG_ARGS=$("$PWD/ci/zig-bindgen-env" "$zig_target")
@@ -172,7 +173,7 @@ cat > "$ROOT/honk/generated-provenance.json" <<EOF
     "commit": "$CORE_COMMIT",
     "version": "$CORE_VERSION",
     "features": "$FEATURES",
-    "architectures": ["x86_64", "aarch64", "armv7", "i686"]
+    "architectures": ["x86_64", "aarch64", "armv7"]
   },
   "bpf_linker": {
     "release_version": "$BPF_LINKER_VERSION",

@@ -18,11 +18,9 @@ CORE_COMMIT:=eac5e0c5fba5078a7ff4517a3e3851e7fa0f4f8e
 HONK_ASSET_X86_64?=honk-core-$(CORE_COMMIT)-x86_64.tar.gz
 HONK_ASSET_AARCH64?=honk-core-$(CORE_COMMIT)-aarch64.tar.gz
 HONK_ASSET_ARMV7?=honk-core-$(CORE_COMMIT)-armv7.tar.gz
-HONK_ASSET_I686?=honk-core-$(CORE_COMMIT)-i686.tar.gz
 HONK_HASH_X86_64?=SKIP
 HONK_HASH_AARCH64?=SKIP
 HONK_HASH_ARMV7?=SKIP
-HONK_HASH_I686?=SKIP
 
 ifeq ($(ARCH),x86_64)
   HONK_ASSET:=$(HONK_ASSET_X86_64)
@@ -39,9 +37,6 @@ else ifeq ($(ARCH),arm_cortex-a9)
 else ifeq ($(ARCH),arm_cortex-a9_neon)
   HONK_ASSET:=$(HONK_ASSET_ARMV7)
   HONK_HASH:=$(HONK_HASH_ARMV7)
-else ifeq ($(ARCH),i386_pentium4)
-  HONK_ASSET:=$(HONK_ASSET_I686)
-  HONK_HASH:=$(HONK_HASH_I686)
 endif
 
 PKG_LICENSE:=AGPL-3.0-only
@@ -62,11 +57,11 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
   URL:=https://github.com/Glassyiris/honk
-  DEPENDS:=@(x86_64||aarch64||arm_cortex-a7_neon-vfpv4||arm_cortex-a9||arm_cortex-a9_neon||i386_pentium4) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
+  DEPENDS:=@(x86_64||aarch64||arm_cortex-a7_neon-vfpv4||arm_cortex-a9||arm_cortex-a9_neon) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +jsonfilter +jshn +sqlite3-cli +libubox +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
 endef
 
 define Package/honk/description
-  Honk is a transparent proxy core for OpenWrt (x86_64, aarch64, armv7, i686).
+  Honk is a transparent proxy core for OpenWrt (x86_64, aarch64, armv7).
 endef
 
 define Package/honk/conffiles
