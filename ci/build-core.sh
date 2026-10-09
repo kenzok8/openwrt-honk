@@ -95,7 +95,16 @@ for arch in $CORE_ARCHS; do
 	eval "export CC_${target//-/_}=\$PWD/ci/zigcc"
 	eval "export CXX_${target//-/_}=\$PWD/ci/zigcxx"
 	eval "export CARGO_TARGET_${lupper}_LINKER=\$PWD/ci/zigcc"
-	eval "export CARGO_TARGET_${lupper}_RUSTFLAGS='-C link-self-contained=no'"
+	# 32-bit musl: Rust's libc defaults time_t to i32 (c_long) unless the
+	# musl32_time64 cfg is set, but zig's musl headers (musl >= 1.2.0) use
+	# 64-bit time_t, so bindgen sees i64. Force the cfg to align libc's
+	# time_t with the actual C library, otherwise boring-sys bindings
+	# mismatch libc types (E0308 in boring/src/x509/verify.rs).
+	extra_rustflags=""
+	case "$arch" in
+		armv7|i686) extra_rustflags=" --cfg musl32_time64" ;;
+	esac
+	eval "export CARGO_TARGET_${lupper}_RUSTFLAGS='-C link-self-contained=no${extra_rustflags}'"
 	BINDGEN_EXTRA_CLANG_ARGS=$("$PWD/ci/zig-bindgen-env" "$zig_target")
 	export BINDGEN_EXTRA_CLANG_ARGS
 
