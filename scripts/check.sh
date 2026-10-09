@@ -16,7 +16,7 @@ for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-
 done
 sh -n honk/files/honk.init
 sh -n honk/files/90-honk-boot
-for file in luci-app-honk/htdocs/luci-static/resources/view/honk/{rpc,overview,settings,dashboard,configuration,logs,maintenance,sha256,converter}.js; do
+for file in luci-app-honk/htdocs/luci-static/resources/view/honk/{rpc,overview,settings,dashboard,configuration,logs,maintenance}.js; do
 	node --check "$file"
 done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
@@ -133,20 +133,6 @@ test "$(cat "$reset_fixture/new/etc/honk/system.dae")" = 'system config'
 test "$(cat "$reset_fixture/new/etc/honk/state/honk.db")" = 'administrator-preserved'
 test ! -e "$reset_fixture/new/etc/honk/extra.dae"
 rm -rf "$reset_fixture"
-
-node <<'NODE'
-const fs = require('fs');
-const crypto = require('crypto');
-const sha256Source = fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/sha256.js', 'utf8')
-	.replace(/return baseclass\.extend\(\{ sha256: sha256 \}\);/, 'return sha256;');
-const sha256 = new Function(sha256Source)();
-for (const input of [Buffer.alloc(0), Buffer.from('abc'), Buffer.alloc(2 * 1024 * 1024, 0x5a)]) {
-	const actual = sha256(input);
-	const expected = crypto.createHash('sha256').update(input).digest('hex');
-	if (actual !== expected)
-		throw new Error(`Pure JavaScript SHA-256 mismatch for ${input.length} bytes`);
-}
-NODE
 
 grep -Fq 'include $(INCLUDE_DIR)/package.mk' luci-app-honk/Makefile
 grep -Fq '$(eval $(call BuildPackage,luci-app-honk))' luci-app-honk/Makefile
