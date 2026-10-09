@@ -70,6 +70,7 @@ jobs:
           gh release view staging --repo "${{ github.repository }}" >/dev/null 2>&1 || \
             gh release create staging --repo "${{ github.repository }}" --title "staging assets" --prerelease --latest=false
           gh release upload staging artifacts/cache/honk-core-"$CORE_COMMIT"-*.tar.gz --repo "${{ github.repository }}" --clobber
+          gh release upload staging honk/generated-stage.mk --repo "${{ github.repository }}" --clobber
 
   build:
     name: ${{ matrix.arch }} · SDK ${{ matrix.sdk }}
@@ -100,6 +101,16 @@ jobs:
           ref: 44f98c51d04aebd1aa79fe4f603559c1ec2085da
           path: .github/actions/gh-action-sdk
           persist-credentials: false
+
+      - name: Fetch core stage manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download staging --repo "${{ github.repository }}" \
+            --pattern 'generated-stage.mk' --dir honk --clobber 2>/dev/null || {
+            echo "::warning::no staging generated-stage.mk; falling back to committed hashes"
+          }
 
       - name: Build packages
         continue-on-error: true

@@ -110,7 +110,7 @@ for arch in $CORE_ARCHS; do
 	sha=$(sha256sum "$CACHE_DIR/$archive" | cut -d' ' -f1)
 
 	# Per-architecture variables for honk/Makefile.
-	printf 'HONK_ASSET_%s:=%s\n' "$(printf '%s' "$arch" | tr 'a-z' 'A-Z')" "$archive"
+	printf 'HONK_ASSET_%s:=%s\n' "$(printf '%s' "$arch" | tr 'a-z' 'A-Z')" "$archive" >> "$STAGE_MK"
 	printf 'HONK_HASH_%s:=%s\n' "$(printf '%s' "$arch" | tr 'a-z' 'A-Z')" "$sha" >> "$STAGE_MK"
 done
 
