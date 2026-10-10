@@ -339,9 +339,10 @@ add_nodes() {
 }
 
 extract_dae_block() {
-	# $1 = 块名, $2 = 文件；输出该顶级块（含大括号）。
+	# $1 = 块名, $2 = 文件；输出该顶级块（含大括号）。只匹配行首（无缩进）的块，
+	# 避免把 dns 里的 routing/request 子块误当成顶级 routing。
 	awk -v name="$1" '
-		$0 ~ "^[[:space:]]*" name "[[:space:]]*\\{" {
+		$0 ~ "^" name "[[:space:]]*\\{" {
 			in_block = 1
 			depth = 0
 		}
@@ -366,7 +367,7 @@ import_dae() {
 
 	# 提取 node 块（过滤 honk-core 不支持的 ssr/snell 协议）
 	node_block=$(awk '
-		$0 ~ /^[[:space:]]*node[[:space:]]*\{/ {
+		$0 ~ /^node[[:space:]]*\{/ {
 			in_block = 1
 			depth = 0
 			print
