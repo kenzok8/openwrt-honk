@@ -34,6 +34,23 @@ const callSettings = rpc.declare({
 	expect: { '': {} }
 });
 
+const callAddSubscription = rpc.declare({
+	object: 'honk',
+	method: 'add_subscription',
+	params: [ 'name', 'url' ],
+	expect: { '': {} }
+});
+const callAddNodes = rpc.declare({
+	object: 'honk',
+	method: 'add_nodes',
+	params: [ 'links' ],
+	expect: { '': {} }
+});
+const callImportDae = rpc.declare({
+	object: 'honk',
+	method: 'import_dae',
+	expect: { '': {} }
+});
 const callRepair = rpc.declare({ object: 'honk', method: 'repair', expect: { '': {} } });
 const callBackup = rpc.declare({ object: 'honk', method: 'backup', expect: { '': {} } });
 const callRestore = rpc.declare({ object: 'honk', method: 'restore', expect: { '': {} } });
@@ -152,6 +169,11 @@ function tokenMessage(token) {
 		share_links_invalid_or_conflicting: _('A share link is invalid or conflicts with an existing node. Review the input and try again.'),
 		subscription_invalid: _('The subscription name or URL is invalid.'),
 		subscription_invalid_or_conflicting: _('The subscription is invalid or its name already exists.'),
+		subscription_added: _('Subscription added and Honk reloaded.'),
+		nodes_added: _('Nodes added and Honk reloaded.'),
+		dae_imported: _('Configuration imported and Honk reloaded.'),
+		config_missing: _('The configuration file is missing.'),
+		config_write_failed: _('Could not write the configuration file.'),
 		dae_too_large: _('The dae file exceeds the 2 MiB limit.'),
 		dae_invalid_or_unsupported: _('The dae file contains invalid sections or unsupported includes.'),
 		candidate_invalid: _('The imported configuration could not be parsed.'),
@@ -264,6 +286,9 @@ return baseclass.extend({
 	stop: callStop,
 	restart: callRestart,
 	settings: callSettings,
+	addSubscription: callAddSubscription,
+	addNodes: callAddNodes,
+	importDae: callImportDae,
 	repair: callRepair,
 	backup: callBackup,
 	restore: callRestore,

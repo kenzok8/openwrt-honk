@@ -24,7 +24,7 @@
 		"write": {
 			"cgi-io": [ "upload" ],
 			"ubus": {
-				"honk": [ "initialize", "start", "stop", "restart", "settings", "repair", "backup", "restore", "restore_prepare", "reset", "update_apply" ]
+				"honk": [ "initialize", "start", "stop", "restart", "settings", "add_subscription", "add_nodes", "import_dae", "repair", "backup", "restore", "restore_prepare", "reset", "update_apply" ]
 			},
 			"file": {
 				"/tmp/honk-maintenance/restore.tar.gz": [ "write" ],

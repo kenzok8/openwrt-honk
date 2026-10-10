@@ -256,6 +256,19 @@
 	align-items: center;
 }
 
+.honk-subscription-add {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-top: 10px;
+}
+
+.honk-subscription-add .cbi-input-text {
+	flex: 1;
+	min-width: 160px;
+}
+
 /* ---------- Meta line (mono, muted) ---------- */
 
 .honk-meta {

@@ -1157,3 +1157,60 @@ msgstr "Honk 从 /etc/honk/config.dae 读取节点、订阅和路由。"
 
 msgid "Add nodes as %s or subscriptions as %s in /etc/honk/config.dae, then reload Honk"
 msgstr "在 /etc/honk/config.dae 中以 %s 添加节点或以 %s 添加订阅，然后重载 Honk"
+
+msgid "Subscription added and Honk reloaded."
+msgstr "订阅已添加并重载 Honk。"
+
+msgid "Nodes added and Honk reloaded."
+msgstr "节点已添加并重载 Honk。"
+
+msgid "Configuration imported and Honk reloaded."
+msgstr "配置已导入并重载 Honk。"
+
+msgid "Name, e.g. MyAirport"
+msgstr "名称，例如 MyAirport"
+
+msgid "A valid HTTP or HTTPS URL is required."
+msgstr "请输入有效的 HTTP 或 HTTPS 链接。"
+
+msgid "Adding subscription…"
+msgstr "正在添加订阅…"
+
+msgid "Parsing nodes…"
+msgstr "正在解析节点…"
+
+msgid "No nodes could be parsed from the input."
+msgstr "无法从输入中解析出节点。"
+
+msgid "Importing %d node(s)…"
+msgstr "正在导入 %d 个节点…"
+
+msgid "%d node(s) imported."
+msgstr "已导入 %d 个节点。"
+
+msgid "Paste nodes or subscription content first."
+msgstr "请先粘贴节点或订阅内容。"
+
+msgid "The pasted content is too large."
+msgstr "粘贴内容过大。"
+
+msgid "Choose a .dae file first."
+msgstr "请先选择 .dae 文件。"
+
+msgid "The dae file exceeds the 2 MiB limit."
+msgstr "dae 文件超过 2 MiB 限制。"
+
+msgid "Uploading configuration…"
+msgstr "正在上传配置…"
+
+msgid "Importing configuration…"
+msgstr "正在导入配置…"
+
+msgid "Could not import the configuration."
+msgstr "无法导入配置。"
+
+msgid "Import a native dae config.dae (e.g. exported from Tower). Its node block is merged into /etc/honk/config.dae."
+msgstr "导入原生 dae config.dae（例如 Tower 导出的）。其 node 块会合并到 /etc/honk/config.dae。"
+
+msgid "Routing, DNS and groups are managed in the Doona dashboard once Honk is started. You can also edit /etc/honk/config.dae directly."
+msgstr "Honk 启动后，路由、DNS 和分组可在 Doona 面板管理。也可以直接编辑 /etc/honk/config.dae。"

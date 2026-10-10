@@ -236,6 +236,166 @@ logs() {
 	rm -f "$log_file"
 }
 
+add_subscription() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	json_get_var sub_name name
+	json_get_var sub_url url
+
+	case "$sub_name" in
+		''|*[!A-Za-z0-9_-]*) emit_result false subscription_invalid; return 1 ;;
+	esac
+	case "$sub_url" in
+		http://*|https://*) ;;
+		*) emit_result false subscription_invalid; return 1 ;;
+	esac
+
+	cfg=/etc/honk/config.dae
+	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
+
+	if grep -qE "^[[:space:]]*${sub_name}:[[:space:]]*['\"]" "$cfg"; then
+		emit_result false subscription_invalid_or_conflicting
+		return 1
+	fi
+
+	cp -p "$cfg" "$cfg.bak" 2>/dev/null || true
+
+	if ! awk -v name="$sub_name" -v url="$sub_url" '
+		/^subscription[[:space:]]*\{/ {
+			print
+			printf "    %s: \047%s\047 {\n        interval: 0s\n        route: direct\n    }\n", name, url
+			found = 1
+			next
+		}
+		{ print }
+		END {
+			if (!found) {
+				printf "\nsubscription {\n    %s: \047%s\047 {\n        interval: 0s\n        route: direct\n    }\n}\n", name, url
+			}
+		}
+	' "$cfg" > "$cfg.tmp" 2>/dev/null; then
+		rm -f "$cfg.tmp"
+		emit_result false config_write_failed
+		return 1
+	fi
+
+	mv "$cfg.tmp" "$cfg" || { rm -f "$cfg.tmp"; emit_result false config_write_failed; return 1; }
+	chmod 0600 "$cfg" 2>/dev/null || true
+
+	if [ -n "$(honk_lifecycle_managed_pid 2>/dev/null)" ]; then
+		/etc/init.d/honk reload >/dev/null 2>&1 || :
+	fi
+
+	emit_result true subscription_added
+}
+
+add_nodes() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	json_get_var node_links links
+
+	[ -n "$node_links" ] || { emit_result false invalid_request; return 1; }
+
+	cfg=/etc/honk/config.dae
+	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
+
+	node_lines=$(printf '%s\n' "$node_links" | awk '
+		BEGIN { n = 0 }
+		{
+			if ($0 !~ /^(vless|vmess|ss|ssr|tuic|trojan|hysteria2|hy2|socks5|http|https):\/\//) next
+			n++
+			printf "    node_%03d: \047%s\047\n", n, $0
+		}
+		END { if (n == 0) exit 1 }
+	') || { emit_result false share_links_invalid_or_conflicting; return 1; }
+
+	cp -p "$cfg" "$cfg.bak" 2>/dev/null || true
+
+	if ! awk -v lines="$node_lines" '
+		/^[[:space:]]*node[[:space:]]*\{/ {
+			print
+			printf "%s\n", lines
+			found = 1
+			next
+		}
+		{ print }
+		END {
+			if (!found) printf "\nnode {\n%s\n}\n", lines
+		}
+	' "$cfg" > "$cfg.tmp" 2>/dev/null; then
+		rm -f "$cfg.tmp"
+		emit_result false config_write_failed
+		return 1
+	fi
+
+	mv "$cfg.tmp" "$cfg" || { rm -f "$cfg.tmp"; emit_result false config_write_failed; return 1; }
+	chmod 0600 "$cfg" 2>/dev/null || true
+
+	if [ -n "$(honk_lifecycle_managed_pid 2>/dev/null)" ]; then
+		/etc/init.d/honk reload >/dev/null 2>&1 || :
+	fi
+
+	emit_result true nodes_added
+}
+
+import_dae() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+
+	src=/tmp/honk-v2-upload/import.dae
+	[ -f "$src" ] || { emit_result false dae_upload_unavailable; return 1; }
+
+	cfg=/etc/honk/config.dae
+	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
+
+	node_block=$(awk '
+		$0 ~ /^[[:space:]]*node[[:space:]]*\{/ {
+			in_block = 1
+			depth = 0
+		}
+		in_block {
+			print
+			depth += gsub(/\{/, "{")
+			depth -= gsub(/\}/, "}")
+			if (depth <= 0 && $0 ~ /\}/) in_block = 0
+		}
+	' "$src")
+	[ -n "$node_block" ] || { emit_result false dae_invalid_or_unsupported; return 1; }
+
+	cp -p "$cfg" "$cfg.bak" 2>/dev/null || true
+
+	if ! awk -v node_block="$node_block" '
+		$0 ~ /^[[:space:]]*node[[:space:]]*\{/ {
+			printf "%s\n", node_block
+			replaced = 1
+			depth = 1
+			while (depth > 0 && (getline line) > 0) {
+				depth += gsub(/\{/, "{", line)
+				depth -= gsub(/\}/, "}", line)
+			}
+			next
+		}
+		{ print }
+		END {
+			if (!replaced) printf "\n%s\n", node_block
+		}
+	' "$cfg" > "$cfg.tmp" 2>/dev/null; then
+		rm -f "$cfg.tmp"
+		emit_result false config_write_failed
+		return 1
+	fi
+
+	mv "$cfg.tmp" "$cfg" || { rm -f "$cfg.tmp"; emit_result false config_write_failed; return 1; }
+	chmod 0600 "$cfg" 2>/dev/null || true
+	rm -f "$src" 2>/dev/null || true
+
+	if [ -n "$(honk_lifecycle_managed_pid 2>/dev/null)" ]; then
+		/etc/init.d/honk reload >/dev/null 2>&1 || :
+	fi
+
+	emit_result true dae_imported
+}
+
 set_enabled() {
 	uci set "honk.main.enabled=$1" && uci commit honk
 }
@@ -267,7 +427,7 @@ restore_prepare() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean"},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean"},"add_subscription":{"name":"String","url":"String"},"add_nodes":{"links":"String"},"import_dae":{},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -282,6 +442,15 @@ list)
 				;;
 			settings)
 				exec "$CONTROL" settings
+				;;
+			add_subscription)
+				add_subscription
+				;;
+			add_nodes)
+				add_nodes
+				;;
+			import_dae)
+				import_dae
 				;;
 			repair)
 				exec "$CONTROL" repair
