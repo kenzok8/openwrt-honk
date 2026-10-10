@@ -54,6 +54,9 @@ function parsePasted(content) {
 			text = decoded;
 	}
 
+	if (converter.looksLikeMihomoJson(text))
+		return Promise.resolve(converter.parseMihomoJson(text));
+
 	if (converter.looksLikeClashYaml(text)) {
 		return loadYamlParser().then(function(yaml) {
 			const doc = yaml.load(text);

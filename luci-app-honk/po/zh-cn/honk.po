@@ -1214,3 +1214,30 @@ msgstr "导入原生 dae config.dae（例如 Tower 导出的）。其 node 块�
 
 msgid "Routing, DNS and groups are managed in the Doona dashboard once Honk is started. You can also edit /etc/honk/config.dae directly."
 msgstr "Honk 启动后，路由、DNS 和分组可在 Doona 面板管理。也可以直接编辑 /etc/honk/config.dae。"
+
+msgid "Could not add the subscription."
+msgstr "无法添加订阅。"
+
+msgid "Could not import nodes."
+msgstr "无法导入节点。"
+
+msgid "Could not write the configuration file."
+msgstr "无法写入配置文件。"
+
+msgid "The configuration file is missing."
+msgstr "配置文件不存在。"
+
+msgid "Enter a name and the subscription URL. Honk writes it into /etc/honk/config.dae, fetches the nodes and reloads."
+msgstr "输入名称和订阅链接，Honk 会写入 /etc/honk/config.dae、拉取节点并重载。"
+
+msgid "Invalid %s: must be an http(s) URL."
+msgstr "无效的 %s：必须是 http(s) 链接。"
+
+msgid "Name is required."
+msgstr "请输入名称。"
+
+msgid "Paste Clash YAML, Surge INI, Base64 or share links."
+msgstr "粘贴 Clash YAML、Surge INI、Base64 或分享链接。"
+
+msgid "Paste Clash YAML, Surge INI, Base64 or share links; they are parsed locally into nodes and written to /etc/honk/config.dae."
+msgstr "粘贴 Clash YAML、Surge INI、Base64 或分享链接，会在本地解析为节点并写入 /etc/honk/config.dae。"

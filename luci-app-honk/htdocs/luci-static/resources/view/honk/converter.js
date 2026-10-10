@@ -415,6 +415,76 @@ function parseSurgeProxies(text) {
 	return { links: links, rejected: rejected };
 }
 
+// Mihomo/mihomo-format JSON keeps nodes in `outbounds` and names them with
+// `tag` instead of `name`, with nested `tls`/`transport` objects. Normalize to
+// the Clash shape so the existing convertProxy converters work unchanged.
+function looksLikeMihomoJson(text) {
+	const t = String(text || '').trim();
+	if (!t || t[0] !== '{')
+		return false;
+	try {
+		const doc = JSON.parse(t);
+		return !!(doc && Array.isArray(doc.outbounds));
+	}
+	catch (e) {
+		return false;
+	}
+}
+
+function normalizeMihomoNode(node) {
+	const n = Object.assign({}, node);
+	if (node.tag !== undefined && node.name === undefined) n.name = node.tag;
+	if (node.server_port !== undefined && node.port === undefined) n.port = node.server_port;
+
+	const tls = node.tls;
+	if (tls && typeof tls === 'object') {
+		if (tls.server_name !== undefined && n.servername === undefined) n.servername = tls.server_name;
+		if (tls.insecure && n['skip-cert-verify'] === undefined) n['skip-cert-verify'] = true;
+		if (Array.isArray(tls.alpn) && n.alpn === undefined) n.alpn = tls.alpn;
+		if (tls.utls && tls.utls.fingerprint !== undefined && n['client-fingerprint'] === undefined)
+			n['client-fingerprint'] = tls.utls.fingerprint;
+		if (tls.reality && typeof tls.reality === 'object') {
+			if (!n['reality-opts']) n['reality-opts'] = {};
+			if (tls.reality.public_key !== undefined) n['reality-opts']['public-key'] = tls.reality.public_key;
+			if (tls.reality.short_id !== undefined) n['reality-opts']['short-id'] = tls.reality.short_id;
+		}
+	}
+
+	const transport = node.transport;
+	if (transport && typeof transport === 'object') {
+		if (transport.type && n.network === undefined) n.network = transport.type;
+		if (transport.type === 'ws' && transport.path && !n['ws-opts']) {
+			n['ws-opts'] = { path: transport.path };
+			if (transport.headers && transport.headers.Host)
+				n['ws-opts'].headers = { Host: transport.headers.Host };
+		}
+	}
+	return n;
+}
+
+function parseMihomoJson(text) {
+	let doc;
+	try {
+		doc = JSON.parse(String(text || ''));
+	}
+	catch (e) {
+		return { links: [], rejected: 1 };
+	}
+	const outbounds = (doc && doc.outbounds) || [];
+	const links = [];
+	let rejected = 0;
+	outbounds.forEach(function(node) {
+		if (isMetadataProxy(node)) {
+			rejected++;
+			return;
+		}
+		const result = convertProxy(normalizeMihomoNode(node));
+		if (result.ok) links.push(result.link);
+		else rejected++;
+	});
+	return { links: links, rejected: rejected };
+}
+
 return baseclass.extend({
 	convertProxy: convertProxy,
 	convertProxies: convertProxies,
@@ -422,7 +492,10 @@ return baseclass.extend({
 	looksLikeNodeList: looksLikeNodeList,
 	looksLikeClashYaml: looksLikeClashYaml,
 	looksLikeSurge: looksLikeSurge,
+	looksLikeMihomoJson: looksLikeMihomoJson,
 	tryBase64Decode: tryBase64Decode,
 	parseUriList: parseUriList,
-	parseSurgeProxies: parseSurgeProxies
+	parseSurgeProxies: parseSurgeProxies,
+	parseMihomoJson: parseMihomoJson,
+	normalizeMihomoNode: normalizeMihomoNode
 });

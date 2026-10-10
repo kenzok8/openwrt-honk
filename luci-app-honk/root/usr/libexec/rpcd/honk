@@ -352,8 +352,12 @@ import_dae() {
 		$0 ~ /^[[:space:]]*node[[:space:]]*\{/ {
 			in_block = 1
 			depth = 0
+			print
+			next
 		}
 		in_block {
+			# Skip protocols honk-core does not support (ssr, snell, ...).
+			if ($0 ~ /node_[A-Za-z0-9_]+:[[:space:]]*\047(ssr|snell):\/\//) next
 			print
 			depth += gsub(/\{/, "{")
 			depth -= gsub(/\}/, "}")
