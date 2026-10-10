@@ -338,6 +338,22 @@ add_nodes() {
 	emit_result true nodes_added
 }
 
+extract_dae_block() {
+	# $1 = 块名, $2 = 文件；输出该顶级块（含大括号）。
+	awk -v name="$1" '
+		$0 ~ "^[[:space:]]*" name "[[:space:]]*\\{" {
+			in_block = 1
+			depth = 0
+		}
+		in_block {
+			print
+			depth += gsub(/\{/, "{")
+			depth -= gsub(/\}/, "}")
+			if (depth <= 0 && $0 ~ /\}/) in_block = 0
+		}
+	' "$2"
+}
+
 import_dae() {
 	request=$(cat)
 	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
@@ -348,6 +364,7 @@ import_dae() {
 	cfg=/etc/honk/config.dae
 	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
 
+	# 提取 node 块（过滤 honk-core 不支持的 ssr/snell 协议）
 	node_block=$(awk '
 		$0 ~ /^[[:space:]]*node[[:space:]]*\{/ {
 			in_block = 1
@@ -356,7 +373,6 @@ import_dae() {
 			next
 		}
 		in_block {
-			# Skip protocols honk-core does not support (ssr, snell, ...).
 			if ($0 ~ /node_[A-Za-z0-9_]+:[[:space:]]*\047(ssr|snell):\/\//) next
 			print
 			depth += gsub(/\{/, "{")
@@ -364,24 +380,49 @@ import_dae() {
 			if (depth <= 0 && $0 ~ /\}/) in_block = 0
 		}
 	' "$src")
-	[ -n "$node_block" ] || { emit_result false dae_invalid_or_unsupported; return 1; }
+	group_block=$(extract_dae_block group "$src")
+	routing_block=$(extract_dae_block routing "$src")
+	dns_block=$(extract_dae_block dns "$src")
+
+	[ -n "$node_block" ] || [ -n "$group_block" ] || [ -n "$routing_block" ] || [ -n "$dns_block" ] || { emit_result false dae_invalid_or_unsupported; return 1; }
 
 	cp -p "$cfg" "$cfg.bak" 2>/dev/null || true
 
-	if ! awk -v node_block="$node_block" '
-		$0 ~ /^[[:space:]]*node[[:space:]]*\{/ {
-			printf "%s\n", node_block
-			replaced = 1
+	# 整体替换 node/group/routing/dns 四个业务块，保留 include（system.dae）与 subscription。
+	if ! awk -v node_block="$node_block" -v group_block="$group_block" -v routing_block="$routing_block" -v dns_block="$dns_block" '
+		function skip_block() {
 			depth = 1
 			while (depth > 0 && (getline line) > 0) {
 				depth += gsub(/\{/, "{", line)
 				depth -= gsub(/\}/, "}", line)
 			}
+		}
+		/^[[:space:]]*node[[:space:]]*\{/ {
+			if (node_block != "") { printf "%s\n", node_block; node_done = 1 }
+			skip_block()
+			next
+		}
+		/^[[:space:]]*group[[:space:]]*\{/ {
+			if (group_block != "") { printf "%s\n", group_block; group_done = 1 }
+			skip_block()
+			next
+		}
+		/^[[:space:]]*routing[[:space:]]*\{/ {
+			if (routing_block != "") { printf "%s\n", routing_block; routing_done = 1 }
+			skip_block()
+			next
+		}
+		/^[[:space:]]*dns[[:space:]]*\{/ {
+			if (dns_block != "") { printf "%s\n", dns_block; dns_done = 1 }
+			skip_block()
 			next
 		}
 		{ print }
 		END {
-			if (!replaced) printf "\n%s\n", node_block
+			if (node_block != "" && !node_done) printf "\n%s\n", node_block
+			if (group_block != "" && !group_done) printf "\n%s\n", group_block
+			if (routing_block != "" && !routing_done) printf "\n%s\n", routing_block
+			if (dns_block != "" && !dns_done) printf "\n%s\n", dns_block
 		}
 	' "$cfg" > "$cfg.tmp" 2>/dev/null; then
 		rm -f "$cfg.tmp"
