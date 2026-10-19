@@ -98,3 +98,19 @@ ci/build-core.sh
 ## 许可证
 
 本仓库原创集成文件采用 GPL-3.0-only。Honk 核心与 Doona 各自保留上游许可和第三方声明；打包时随软件安装至 `/usr/share/licenses/`。核心提交、Doona 提交、补丁摘要及实际阶段归档散列记录在构建生成的 provenance 文件中。
+
+## 分支说明：`main` 与 `mydist`
+
+| 分支 | 用途 | DNS 归属 |
+|------|------|----------|
+| `main` | 主线机型（IPQ 等） | honk 自己接管 :53，走内置 DoH 上游 |
+| `mydist` | **仅 X86 / ROCKCHIP**（mydist 固件） | dnsmasq → SmartDNS（`127.0.0.1:6053`） |
+
+`mydist` 分支与主线只有一处行为差异，都在 `honk/files/config.dae`：
+
+1. `dport(53) -> direct(must)` 放在路由规则的第一条，把 :53 留在内核直连路径上，DNS 由 dnsmasq（LAN 侧）和 SmartDNS（上游）负责；
+2. 去掉两条 `direct(must)` 里多余的 `&& !dport(53)`；
+3. `dns.upstream.default` 指向 `udp://127.0.0.1:6053`，honk 自身的解析也经过 SmartDNS。
+
+配套的 `mydist/router-dns` 会在每次启动时幂等地把这套策略重新写回 `/etc/honk/config.dae`（`config.dae` 是 conffile，升级不会覆盖用户文件），所以老机器升级后同样生效。IPQ 等主线机型继续使用 `main`，不受影响。
+
