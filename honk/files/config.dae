@@ -10,7 +10,7 @@ group {
 
 dns {
     upstream {
-        default: 'udp://127.0.0.1:6053' -> direct
+        default: 'udp://127.0.0.1:53' -> direct
         remote: 'https://8.8.8.8/dns-query?tls_server_name=dns.google' -> proxy
     }
     routing {

@@ -101,16 +101,78 @@ ci/build-core.sh
 
 ## 分支说明：`main` 与 `mydist`
 
-| 分支 | 用途 | DNS 归属 |
-|------|------|----------|
-| `main` | 主线机型（IPQ 等） | honk 自己接管 :53，走内置 DoH 上游 |
-| `mydist` | **仅 X86 / ROCKCHIP**（mydist 固件） | dnsmasq → SmartDNS（`127.0.0.1:6053`） |
+| 分支 | 用途 | DNS 归属 | 数据面 |
+|------|------|----------|--------|
+| `main` | 主线机型（IPQ、MTK 等） | honk 自己接管 :53，走内置 DoH 上游 | honk 的 TCX + 原版 fw4/NSS |
+| `mydist` | **仅 X86 / ROCKCHIP**（mydist 固件） | SmartDNS 独占 :53，honk 不碰 DNS | honk TCX + einat/dpd/ACL（classic TC） |
 
-`mydist` 分支与主线只有一处行为差异，都在 `honk/files/config.dae`：
+### 为什么需要第二种对接方式
 
-1. `dport(53) -> direct(must)` 放在路由规则的第一条，把 :53 留在内核直连路径上，DNS 由 dnsmasq（LAN 侧）和 SmartDNS（上游）负责；
-2. 去掉两条 `direct(must)` 里多余的 `&& !dport(53)`；
-3. `dns.upstream.default` 指向 `udp://127.0.0.1:6053`，honk 自身的解析也经过 SmartDNS。
+honk 默认的 DNS 设计是“自己接管”：
 
-配套的 `mydist/router-dns` 会在每次启动时幂等地把这套策略重新写回 `/etc/honk/config.dae`（`config.dae` 是 conffile，升级不会覆盖用户文件），所以老机器升级后同样生效。IPQ 等主线机型继续使用 `main`，不受影响。
+- `system.dae` 里 `nfqueue_enable: true`，控制脚本会把 `nfqueue_enable` 强制写回 true；
+- `config.dae` 的 `routing` 里有两条 `!dport(53) -> direct(must)`，把 :53 从内核直连路径里**排除**；
+- 于是它的数据面会把 LAN 的 :53 重定向进自己的 DNS 引擎，用自己的 `dns.upstream` 解析。
+
+mydist 固件里 DNS 有唯一归属：**SmartDNS 监听 :53**（`dnsmasq` 端口 0、停用）。如果 honk 继续按默认策略接管 :53：
+
+1. SmartDNS 永远收不到 LAN 的查询；
+2. honk 自己的 DoH 上游（`https://223.5.5.5/dns-query`）在部分网络不可用；
+3. DNS 的日志、缓存、DoT 上游全部脱离这套固件的控制面。
+
+### `mydist` 分支改了什么
+
+只改 `honk/files/config.dae` 三处：
+
+| # | 主线 | `mydist` | 作用 |
+|---|------|----------|------|
+| 1 | 无 `dport(53)` 规则，只有 `dip(...) && !dport(53)` | `dport(53) -> direct(must)` 作为**第一条**路由规则 | :53 留在内核直连路径，查询交给 SmartDNS |
+| 2 | 两条 `direct(must)` 带 `&& !dport(53)` | 去掉这个条件 | 不再出现“自相矛盾”的规则 |
+| 3 | `default: 'https://223.5.5.5/dns-query...'` | `default: 'udp://127.0.0.1:53'` | honk 自身（节点解析、规则匹配）也走 SmartDNS |
+
+`dns.routing` 的 `request` 段（private/cn/fallback）不变，节点、订阅、Doona、LuCI 全部不变。
+
+### 与 `mydist/router-dns` 的配合
+
+`/etc/honk/config.dae` 是 conffile，升级不会覆盖用户文件。所以固件里的 `mydist/router-dns` 每次启动（`START=18`，早于 honk 的 `S95`）都会调用 `honk-dns.sh patch`：
+
+- 幂等删除自己上次写入的标记行，再重新插入 `dport(53) -> direct(must)`；
+- 去掉残留的 `&& !dport(53)`；
+- 只在 `default` 仍是 stock DoH 时才把它改成 `udp://127.0.0.1:53`（用户自己改过就不动）；
+- 如果 UI 把 `config.dae` 重写坏了，用 `config.dae.mydist.bak` 恢复后再打一次。
+
+这样老机器升级、UI 重置、honk 重装都不会把 DNS 归属弄丢。
+
+### 数据面为什么能共存
+
+honk 用 **TCX** 挂程序，einat 也用 TCX；而 mydist 的 ACL/快路径用 **classic `cls_bpf`**。内核先执行 TCX、再执行 classic，所以：
+
+```
+WAN ingress : honk TCX → einat TCX → router-acl (pref 90) → dpd (pref 100)
+```
+
+honk 决定代理的流在 TCX 阶段就被重定向到 `dae0`，根本到不了后面两层；只有 honk 放行的直连流才会被 einat/dpd 接手。这是两种“加速”能同时存在的原因，也是 `mydist` 分支不需要改数据面的原因。
+
+### 构建与发布（`generated-*` 资产）
+
+本仓库的 `.gitignore` 排除了三个构建产物，它们由 `release.yml` 作为 **release asset** 发布：
+
+| 文件 | 内容 |
+|------|------|
+| `honk/generated-stage.mk` | 每个架构的 `honk-core` 资产名 + SHA256 + `PKG_SOURCE_URL` |
+| `honk/generated-provenance.json` | 核心/Doona 提交、补丁摘要、工具版本，打包进 `/usr/share/honk/provenance.json` |
+| `luci-app-honk/generated-doona-stage.mk` | Doona 归档的 URL + SHA256 |
+
+消费方（CI 的 `Scripts/Packages.sh`）按 `honk/Makefile` 的 `CORE_COMMIT` 找到对应 release，下载三个文件，并把里面写死的 `kenzok8/openwrt-honk` URL 改写成实际 release 目录。
+
+`ci/pins.env` 固定了核心提交 `423fef2…`、Doona 提交、Zig 0.14.1、bpf-linker 0.11.0 与 OpenWrt SDK 版本；改版本必须同时更新 pin 与 `generated-stage.mk`。
+
+### 使用方式
+
+| 使用方 | 分支 |
+|--------|------|
+| `kwrum1/honk-ImmortalWRT-CI` 的 X86 / ROCKCHIP | `mydist` |
+| 其它所有目标、手动安装脚本 | `main` |
+
+安装脚本与主线行为一致；`mydist` 分支只是把 DNS 交还给 SmartDNS，不改变 honk 的核心二进制、Doona 界面或节点配置格式。
 
