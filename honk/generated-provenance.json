@@ -1,0 +1,15 @@
+{
+  "core": {
+    "repository": "https://github.com/Glassyiris/honk.git",
+    "commit": "aebc0d78d567cac1cd74ee9c56674857c5441451",
+    "version": "0.0.1-alpha",
+    "patch_rev": "p1",
+    "features": "clash-api,ebpf,rprx,native-api",
+    "architectures": ["x86_64", "aarch64", "armv7"]
+  },
+  "bpf_linker": {
+    "release_version": "0.11.0",
+    "reported_version": "bpf-linker 0.0.0",
+    "sha256": "10f62ba9ab7e544d538370552660efcb4f1a19153d5752bbf0f6b51f3bada450"
+  }
+}
