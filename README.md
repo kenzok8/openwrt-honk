@@ -1,6 +1,6 @@
 <h1 align="center">openwrt-honk</h1>
 
-<p align="center">OpenWrt x86_64 透明代理一体包：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
+<p align="center">OpenWrt x86_64 / aarch64 / armv7 透明代理一体包：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
 
 ## 界面预览
 
@@ -30,19 +30,19 @@
 ## 一键安装
 
 ```bash
-wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash
+wget -O - https://raw.githubusercontent.com/kwrum1/openwrt-honk/refs/heads/main/scripts/install.sh | ash
 ```
 
 大陆网络加速：
 
 ```bash
-wget --no-check-certificate -O - https://ghfast.top/https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash
+wget --no-check-certificate -O - https://ghfast.top/https://raw.githubusercontent.com/kwrum1/openwrt-honk/refs/heads/main/scripts/install.sh | ash
 ```
 
 卸载：
 
 ```bash
-wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/uninstall.sh | ash
+wget -O - https://raw.githubusercontent.com/kwrum1/openwrt-honk/refs/heads/main/scripts/uninstall.sh | ash
 ```
 
 > 一键脚本会复用设备已有的 Geo 数据包；缺少时从聚合源下载，下载失败则尝试设备现有软件源。
@@ -59,7 +59,7 @@ wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main
 
 核心和 Doona 的完整提交、Doona OpenWrt 补丁摘要，以及 OpenWrt 25.12.4 x86/64 官方 SDK 地址和 SHA256 均固定在 `ci/pins.env`。Doona 从源码构建，保留 OpenWrt 同源 API 补丁；归档不含可选中文字体，浏览器使用系统字体。构建脚本从固定输入生成静态 UI、stock musl 核心和安装包。
 
-`auto-bump.yml` 每 6 小时检查上游。发现新提交后，它在独立分支写入 pin、包版本和 Doona 归档哈希，启动 `release.yml` 构建核心、Doona 和全部 12 组 SDK 安装包。任一组失败就停止晋级；全部通过后，自动将经过验证的提交和正式 tag 原子推送到 `main`，发布正式 Release，并更新 R2 软件源。每次构建的源码资产使用独立 tag；候选构建不会更新生产软件源。正式发布后的 Release 或 R2 上传若失败，工作流会报错，需用同批构建产物恢复。
+`auto-bump.yml` 在本 fork 已固定 pin、只保留手动触发（补丁按特定 upstream commit 编写，不能自动漂移）；原设计每 6 小时检查上游。发现新提交后，它在独立分支写入 pin、包版本和 Doona 归档哈希，启动 `release.yml` 构建核心、Doona 和全部 12 组 SDK 安装包。任一组失败就停止晋级；全部通过后，自动将经过验证的提交和正式 tag 原子推送到 `main`，发布正式 Release，并更新 R2 软件源。每次构建的源码资产使用独立 tag；候选构建不会更新生产软件源。正式发布后的 Release 或 R2 上传若失败，工作流会报错，需用同批构建产物恢复。
 
 完整构建（包括核心构建）需在大小写敏感的 Linux 文件系统上运行（Doona 上游同时有仅大小写不同的文件）。需要 Rust/rustup、Zig 0.14.1、Node.js 22.13 或更新版本与 Corepack、Git、curl、ripgrep、GNU tar、zstd、`readelf`，以及 `build-essential`、clang、LLVM、libbpf、libelf、pkg-config、CMake、libclang 和 OpenWrt SDK 所需工具。核心交叉编译脚本会核对 Rust/Doona/SDK 输入和 Zig、bpf-linker 版本；SDK 阶段限定 Linux x86_64。
 
@@ -73,6 +73,23 @@ ci/build-core.sh
 
 脚本将源码归档写入被 Git 忽略的 `artifacts/cache/`。12 组 SDK 安装包由 `release.yml` 构建；它从本次运行独立的源码资产 tag 下载带 SHA256 的阶段文件，任一散列不匹配或安装包缺失都会使构建失败。
 
+## 直连加速共存（p1）
+
+本仓库的 core 不是纯上游二进制：`ci/build-core.sh` 在 checkout 后应用
+`ci/patches/honk-direct-unspec.py`，把 honk 的 **direct** 判决从 `TC_ACT_OK` 改成
+`TC_ACT_UNSPEC` + `DIRECT_UNSPEC_MARK`。这样：
+
+- 直连流（含 `direct(must)` / offload）继续进入 classic TC 链，mydist 的 dpd 可以继续加速；
+- 代理流仍 redirect 到 `dae0`，block 仍 `SHOT`，两者都不进 classic；
+- NAT 仍是 einat（honk 不做 masquerade）。
+
+产物名为 `honk-core-<commit>-p1-<arch>.tar.gz`，发布在 `core-p1`；dpd 通过
+`/usr/share/honk/direct-unspec` 识别。**上游原版 core 没有这个行为**：direct 返回 `OK`，
+classic 链被跳过，dpd 只能 `observe`。要用“代理 + 直连加速”必须用 p1 core。
+
+平台：x86_64 / aarch64（RK3588 等）/ armv7 都构建同一份补丁；ROCKCHIP 与 X86 使用同一套
+OpenWrt 配置（dpd + honk + ACL + QoS）。
+
 ## 依赖
 
 | 包名 | 说明 |
@@ -80,7 +97,7 @@ ci/build-core.sh
 | `ca-bundle` | CA 证书包 |
 | `kmod-sched-core` / `kmod-sched-bpf` | eBPF 流量调度 |
 | `kmod-veth` | 虚拟以太网设备 |
-| `kmod-nft-queue` | nftables 队列 |
+| `kmod-nft-queue` | nftables 队列（仅 `nfqueue_enable: true` 时需要；本包默认 false） |
 | `v2ray-geoip` / `v2ray-geosite` | 路由 GeoIP/GeoSite 数据 |
 | `rpcd` / `luci-base` / `cgi-io` | LuCI 运行依赖 |
 
@@ -88,7 +105,7 @@ ci/build-core.sh
 
 ## 系统要求
 
-- OpenWrt x86_64（推荐 25.x，需 Linux 6.12+ 且内核开启 BTF）
+- OpenWrt x86_64 / aarch64（RK3588 等）/ armv7（推荐 25.x，需 Linux 6.12+ 且内核开启 BTF）
 
 ## 致谢
 
