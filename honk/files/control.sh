@@ -105,6 +105,10 @@ check_config() {
 	valid_clash_api || { fail "invalid Clash API settings"; return 1; }
 }
 
+nfqueue_required() {
+	grep -qE '^[[:space:]]*nfqueue_enable:[[:space:]]*true' /etc/honk/system.dae 2>/dev/null
+}
+
 check_kernel() {
 	kernel=$(uname -r | cut -d- -f1)
 	major=$(printf '%s' "$kernel" | cut -d. -f1)
@@ -115,7 +119,9 @@ check_kernel() {
 	command -v ip >/dev/null 2>&1 || { fail "ip command unavailable"; return 1; }
 	command -v modprobe >/dev/null 2>&1 || { fail "modprobe unavailable"; return 1; }
 	[ -r /sys/kernel/btf/vmlinux ] || { fail "kernel BTF unavailable"; return 1; }
-	for module in sch_ingress cls_bpf veth nft_queue nfnetlink_queue; do
+	modules="sch_ingress cls_bpf veth"
+	nfqueue_required && modules="$modules nft_queue nfnetlink_queue"
+	for module in $modules; do
 		module_available "$module" || { fail "kernel module $module unavailable"; return 1; }
 	done
 }
@@ -217,7 +223,9 @@ preflight() {
 
 prepare_runtime() {
 	preflight || return 1
-	for module in sch_ingress cls_bpf veth nft_queue nfnetlink_queue; do
+	modules="sch_ingress cls_bpf veth"
+	nfqueue_required && modules="$modules nft_queue nfnetlink_queue"
+	for module in $modules; do
 		module_loaded "$module" || modprobe "$module" || { fail "cannot load kernel module $module"; return 1; }
 	done
 	mkdir -p /etc/honk/state || { fail "cannot create persistent state directory"; return 1; }
