@@ -1,0 +1,54 @@
+name: Build patched honk core
+
+# Builds the p1 core (direct-classified flows handed back to the classic TC
+# chain) for every OpenWrt architecture and publishes it under the fixed tag
+# `core-p1`. honk/Makefile points there; the tag is stable so an image build
+# does not depend on a per-run release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  HONK_SOURCE_TAG: core-p1
+
+jobs:
+  core:
+    name: honk-core p1 (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64, armv7]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.14.1
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep zstd
+
+      - name: Build honk-core
+        run: CORE_ARCHS=${{ matrix.arch }} ci/build-core.sh
+
+      - name: Publish core asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: core-p1
+          name: Patched honk core p1
+          prerelease: true
+          generate_release_notes: false
+          files: |
+            artifacts/cache/honk-core-*.tar.gz
+            honk/generated-stage.mk
+            honk/generated-provenance.json
