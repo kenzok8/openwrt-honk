@@ -4,6 +4,11 @@ name: Build patched honk core
 # chain) for every OpenWrt architecture and publishes it under the fixed tag
 # `core-p1`. honk/Makefile points there; the tag is stable so an image build
 # does not depend on a per-run release.
+#
+# One job, all architectures: ci/build-core.sh writes a single
+# honk/generated-stage.mk with the per-arch asset names and hashes. Splitting
+# into a matrix would have each job overwrite that manifest with only its own
+# arch.
 on:
   workflow_dispatch:
 
@@ -15,13 +20,9 @@ env:
 
 jobs:
   core:
-    name: honk-core p1 (${{ matrix.arch }})
+    name: honk-core p1 (x86_64 + aarch64 + armv7)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64, armv7]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,9 +40,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep zstd
 
       - name: Build honk-core
-        run: CORE_ARCHS=${{ matrix.arch }} ci/build-core.sh
+        run: ci/build-core.sh
 
-      - name: Publish core asset
+      - name: Publish core assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: core-p1
