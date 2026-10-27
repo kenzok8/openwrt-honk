@@ -19,4 +19,11 @@ fi
 if [ -f /etc/honk/config.dae ] && ! grep -q 'qname(suffix: lan)' /etc/honk/config.dae; then
 	sed -i 's/^\([[:space:]]*\)qname(geosite: private) -> asis/\1qname(suffix: lan) -> default\n\1qname(suffix: local) -> default\n\1qname(geosite: private) -> asis/' /etc/honk/config.dae
 fi
+
+# The native API/UI (doona on port 9527) used to bind loopback only, so the
+# controller page could not be opened from the LAN. system.dae is a conffile:
+# upgrades keep the old copy, so rewrite it once here.
+if [ -f /etc/honk/system.dae ] && grep -q "listen: '127.0.0.1:9527'" /etc/honk/system.dae; then
+	sed -i "s/listen: '127\.0\.0\.1:9527'/listen: '0.0.0.0:9527'/" /etc/honk/system.dae
+fi
 exit 0

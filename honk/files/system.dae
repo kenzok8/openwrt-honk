@@ -13,7 +13,11 @@ global {
 experimental {
     native_api {
         enabled: true
-        listen: '127.0.0.1:9527'
+        # The native API is the proxy's controller UI (doona), not a datapath
+        # listener: it has to answer the browser on the LAN, so bind all
+        # addresses. password_auth stays on (first visit creates the admin),
+        # and the WAN side is still closed by the firewall.
+        listen: '0.0.0.0:9527'
         password_auth: true
         allow_anonymous_loopback: false
         config_write: true

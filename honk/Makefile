@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=2026.10.24
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 # Pinned honk-core revision (Glassyiris/honk feat/native-api), cross-compiled by
 # ci/build-core.sh. That script also applies ci/patches/honk-direct-unspec.py:
