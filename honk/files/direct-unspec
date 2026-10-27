@@ -1,0 +1,10 @@
+honk-core built with the mydist direct hand-back patch (p1).
+
+Direct-classified flows return TC_ACT_UNSPEC and carry DIRECT_UNSPEC_MARK, so the
+classic TC chain (mydist's dpd) sees them and can keep accelerating direct
+traffic while honk proxies the rest. Proxy and block verdicts remain terminal for
+honk, and NAT stays with einat on the WAN.
+
+Absence of this file means an unpatched core: dpd must stay in observe while honk
+owns the LAN TCX, because its direct exits return TC_ACT_OK and the classic chain
+is never reached.

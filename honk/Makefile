@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+﻿# SPDX-License-Identifier: GPL-3.0-only
 #
 # Copyright (C) 2026 kenzok8
 
@@ -6,18 +6,23 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=2026.10.24
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Pinned honk-core revision (Glassyiris/honk feat/native-api), cross-compiled by
-# ci/build-core.sh. The per-architecture asset/hash are filled by that script;
-# keep a committed fallback so the feed still evaluates without a staging run.
+# ci/build-core.sh. That script also applies ci/patches/honk-direct-unspec.py:
+# direct-classified flows are handed back to the classic TC chain so a packet
+# accelerator (dpd) can keep them while honk proxies the rest. The -p1 suffix in
+# the asset name is the patch revision; it keeps these archives from colliding
+# with the unpatched upstream ones. The per-architecture asset/hash are filled
+# by that script; keep a committed fallback so the feed still evaluates.
 CORE_COMMIT:=aebc0d78d567cac1cd74ee9c56674857c5441451
+HONK_PATCH_REV:=p1
 
 -include $(CURDIR)/generated-stage.mk
 
-HONK_ASSET_X86_64?=honk-core-$(CORE_COMMIT)-x86_64.tar.gz
-HONK_ASSET_AARCH64?=honk-core-$(CORE_COMMIT)-aarch64.tar.gz
-HONK_ASSET_ARMV7?=honk-core-$(CORE_COMMIT)-armv7.tar.gz
+HONK_ASSET_X86_64?=honk-core-$(CORE_COMMIT)-$(HONK_PATCH_REV)-x86_64.tar.gz
+HONK_ASSET_AARCH64?=honk-core-$(CORE_COMMIT)-$(HONK_PATCH_REV)-aarch64.tar.gz
+HONK_ASSET_ARMV7?=honk-core-$(CORE_COMMIT)-$(HONK_PATCH_REV)-armv7.tar.gz
 HONK_HASH_X86_64?=SKIP
 HONK_HASH_AARCH64?=SKIP
 HONK_HASH_ARMV7?=SKIP
@@ -40,7 +45,7 @@ PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=kenzok8
 
 PKG_SOURCE:=$(HONK_ASSET)
-PKG_SOURCE_URL?=https://github.com/kenzok8/openwrt-honk/releases/download/staging/
+PKG_SOURCE_URL?=https://github.com/kwrum1/openwrt-honk/releases/download/core-p1/
 PKG_HASH:=$(HONK_HASH)
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
@@ -99,6 +104,7 @@ define Package/honk/install
 	$(INSTALL_DIR) $(1)/usr/share/honk
 	$(INSTALL_DATA) $(CURDIR)/files/config.dae $(1)/usr/share/honk/default-config.dae
 	$(INSTALL_DATA) $(CURDIR)/generated-provenance.json $(1)/usr/share/honk/provenance.json
+	$(INSTALL_DATA) $(CURDIR)/files/direct-unspec $(1)/usr/share/honk/direct-unspec
 	$(INSTALL_BIN) $(CURDIR)/files/control.sh $(1)/usr/share/honk/control.sh
 	$(INSTALL_BIN) $(CURDIR)/files/lock.sh $(1)/usr/share/honk/lock.sh
 	$(INSTALL_BIN) $(CURDIR)/files/lifecycle.sh $(1)/usr/share/honk/lifecycle.sh
