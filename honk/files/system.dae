@@ -7,7 +7,7 @@ global {
     auto_config_kernel_parameter: true
     data_dir: '/etc/honk'
     store_subscribe: true
-    nfqueue_enable: true
+    nfqueue_enable: false
 }
 
 experimental {
