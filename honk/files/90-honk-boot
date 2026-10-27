@@ -11,4 +11,12 @@ else
 	/etc/init.d/honk disable
 fi
 
+
+# Keep .lan/.local names working when the core's DNS controller intercepts port
+# 53: send those suffixes to the default (SmartDNS) upstream. Older conffiles do
+# not carry the rule; add it once. Without it a private-domain lookup falls
+# through to the proxy/DoH fallback and answers NXDOMAIN on a box with no node.
+if [ -f /etc/honk/config.dae ] && ! grep -q 'qname(suffix: lan)' /etc/honk/config.dae; then
+	sed -i 's/^\([[:space:]]*\)qname(geosite: private) -> asis/\1qname(suffix: lan) -> default\n\1qname(suffix: local) -> default\n\1qname(geosite: private) -> asis/' /etc/honk/config.dae
+fi
 exit 0
