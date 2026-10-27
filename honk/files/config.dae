@@ -15,6 +15,8 @@ dns {
     }
     routing {
         request {
+            qname(suffix: lan) -> default
+            qname(suffix: local) -> default
             qname(geosite: private) -> asis
             qname(geosite: cn) -> default
             fallback: remote
