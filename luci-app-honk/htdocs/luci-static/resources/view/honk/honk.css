@@ -358,6 +358,16 @@
 	line-height: 1.5;
 }
 
+/* Full dae configuration editor: keep dae source lines unwrapped so line
+   numbers and indentation stay meaningful while scrolling horizontally. */
+.honk-page .honk-config-editor {
+	min-height: 420px;
+	white-space: pre;
+	overflow-wrap: normal;
+	overflow-x: auto;
+	tab-size: 4;
+}
+
 .honk-page .cbi-input-text:focus,
 .honk-page .cbi-input-password:focus,
 .honk-page .cbi-input-select:focus,
@@ -495,6 +505,14 @@
 }
 
 /* ---------- Notes & alerts ---------- */
+
+.honk-mode-note .honk-inline-link {
+	margin-left: 8px;
+	color: var(--hk-accent-border);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	font-size: 12.5px;
+}
 
 .honk-note {
 	font-size: 12.5px;

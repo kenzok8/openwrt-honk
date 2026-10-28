@@ -1,0 +1,138 @@
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -213,6 +213,8 @@
+ 
+ #[derive(clap::Subcommand, Debug)]
+ pub enum ConfigCommand {
++    /// Validate a dae source tree without starting the runtime
++    Validate,
+     /// Write the active revision as one dae file, listener secrets included
+     Export {
+         /// New file to write; an existing one is refused
+@@ -237,7 +239,7 @@
+     pub command: Option<ClashCommand>,
+ 
+     /// Path to configuration file
+-    #[arg(short, long, default_value = "/etc/honk/config.dae")]
++    #[arg(short, long, default_value = "/etc/honk/config.dae", global = true)]
+     pub config: PathBuf,
+ 
+     /// Append operational logs to this path, overriding `global.log_file`
+@@ -301,6 +303,84 @@
+     };
+ 
+     match cmd {
++        #[cfg(feature = "native-api")]
++        ClashCommand::Config {
++            action: ConfigCommand::Validate,
++        } => {
++            if cli
++                .config
++                .extension()
++                .is_none_or(|extension| !extension.eq_ignore_ascii_case("dae"))
++            {
++                anyhow::bail!("configuration file must use the .dae extension");
++            }
++            anyhow::ensure!(
++                cli.store == ConfigStore::File,
++                "configuration validation requires file mode"
++            );
++            let mut diagnostics = Vec::new();
++            let (config, sources) =
++                match load_operator_config_captured(&cli.config, &mut diagnostics) {
++                    Ok(loaded) => loaded,
++                    Err(error) => {
++                        if !diagnostics
++                            .last()
++                            .is_some_and(|diagnostic| diagnostic == &*error.diagnostic)
++                        {
++                            diagnostics.push(*error.diagnostic);
++                        }
++                        println!(
++                            "{}",
++                            serde_json::json!({
++                                "ok": false,
++                                "message": "configuration_validation_failed",
++                                "diagnostics": diagnostics.iter().map(|diagnostic| {
++                                    serde_json::json!({
++                                        "code": diagnostic.code,
++                                        "line": diagnostic.line,
++                                        "column": diagnostic.byte_column,
++                                        "setting": diagnostic.setting.to_string(),
++                                        "message": diagnostic.message,
++                                    })
++                                }).collect::<Vec<_>>(),
++                            })
++                        );
++                        anyhow::bail!("configuration validation failed");
++                    }
++                };
++            if sources.is_none() && config.experimental.native_api.config_write {
++                println!(
++                    "{}",
++                    serde_json::json!({
++                        "ok": false,
++                        "message": "configuration_validation_failed",
++                        "diagnostics": [{
++                            "code": "source-capture-required",
++                            "line": null,
++                            "column": null,
++                            "setting": "experimental.native_api.config_write",
++                            "message": "configuration administration requires captured dae sources",
++                        }],
++                    })
++                );
++                anyhow::bail!("configuration validation failed");
++            }
++            println!(
++                "{}",
++                serde_json::json!({
++                    "ok": true,
++                    "message": "configuration_valid",
++                    "diagnostics": [],
++                    "runtime": {
++                        "native_api_enabled": config.experimental.native_api.enabled,
++                        "native_api_listen": config.experimental.native_api.listen,
++                        "clash_api_listen": config.experimental.clash_api.external_controller,
++                        "clash_api_secret_set": !config.experimental.clash_api.secret.is_empty(),
++                        "lan_interfaces": config.global.lan_interface,
++                    },
++                })
++            );
++        }
+         #[cfg(feature = "native-api")]
+         ClashCommand::Config {
+             action:
+--- a/crates/honk-core/src/control/lifecycle.rs
++++ b/crates/honk-core/src/control/lifecycle.rs
+@@ -748,6 +748,30 @@
+             self.configure_health_loop().await;
+             self.open_epoch(epoch.as_mut().expect("startup epoch"))
+                 .await?;
++            if let Ok(token) = std::env::var("HONK_READY_TOKEN") {
++                let config_hash = std::env::var("HONK_READY_CONFIG_HASH")
++                    .map_err(|_| anyhow::anyhow!("readiness config hash is missing"))?;
++                let api_enabled = std::env::var("HONK_READY_API_ENABLED")
++                    .map_err(|_| anyhow::anyhow!("readiness API state is missing"))?;
++                let api_listen = std::env::var("HONK_READY_API_LISTEN").unwrap_or_default();
++                let clash_api_listen = std::env::var("HONK_READY_CLASH_API_LISTEN").unwrap_or_default();
++                let clash_api_secret_set = std::env::var("HONK_READY_CLASH_API_SECRET_SET")
++                    .map_err(|_| anyhow::anyhow!("readiness Clash API state is missing"))?;
++                let marker = format!("/var/run/honk/core-ready-{token}");
++                std::fs::write(
++                    marker,
++                    format!(
++                        "pid={}\ntoken={}\nconfig_hash={}\napi_enabled={}\napi_listen={}\nclash_api_listen={}\nclash_api_secret_set={}\n",
++                        std::process::id(),
++                        token,
++                        config_hash,
++                        api_enabled,
++                        api_listen,
++                        clash_api_listen,
++                        clash_api_secret_set
++                    ),
++                )?;
++            }
+             Ok::<(), anyhow::Error>(())
+         }
+         .await;

@@ -51,6 +51,13 @@ const callImportDae = rpc.declare({
 	method: 'import_dae',
 	expect: { '': {} }
 });
+const callConfigRead = rpc.declare({ object: 'honk', method: 'config_read', expect: { '': {} } });
+const callConfigDraftRead = rpc.declare({ object: 'honk', method: 'config_draft_read', expect: { '': {} } });
+const callLanCandidates = rpc.declare({ object: 'honk', method: 'lan_candidates', expect: { '': {} } });
+const callConfigValidate = rpc.declare({ object: 'honk', method: 'config_validate', params: [ 'content' ], expect: { '': {} } });
+const callConfigSave = rpc.declare({ object: 'honk', method: 'config_save', params: [ 'content' ], expect: { '': {} } });
+const callConfigApply = rpc.declare({ object: 'honk', method: 'config_apply', expect: { '': {} } });
+const callConfigUseManaged = rpc.declare({ object: 'honk', method: 'config_use_managed', expect: { '': {} } });
 const callRepair = rpc.declare({ object: 'honk', method: 'repair', expect: { '': {} } });
 const callBackup = rpc.declare({ object: 'honk', method: 'backup', expect: { '': {} } });
 const callRestore = rpc.declare({ object: 'honk', method: 'restore', expect: { '': {} } });
@@ -210,6 +217,29 @@ function tokenMessage(token) {
 		dae_upload_unavailable: _('The dae upload is missing or unavailable. Upload the file again.'),
 		dae_upload_invalid: _('The uploaded dae file is invalid.'),
 		dae_upload_changed: _('The uploaded dae file changed. Upload it again.'),
+		upload_failed: _('Honk could not prepare the upload location. Check the upload directory permissions and try again.'),
+		upload_directory_unavailable: _('Honk could not prepare a private configuration upload directory.'),
+		upload_target_unavailable: _('The temporary configuration upload is unavailable. Try again.'),
+		config_too_large: _('The configuration file exceeds the 2 MiB limit.'),
+		config_applied: _('Configuration applied and Honk is running.'),
+		config_apply_failed_rolled_back: _('Honk could not start with this configuration. The previous file was restored.'),
+		config_apply_rollback_failed_snapshot_retained: _('Startup failed and the automatic rollback did not finish. The snapshot was kept; run system recovery.'),
+		config_changed_concurrently: _('The configuration changed during the operation. Nothing was applied.'),
+		config_write_failed_snapshot_retained: _('Could not write the configuration. The snapshot was kept.'),
+		service_stop_unconfirmed_snapshot_retained: _('Could not confirm that Honk stopped. The operation was aborted and the snapshot was kept.'),
+		manual_mode_required: _('Manual mode is active. Restore managed mode before using the subscription tools.'),
+		managed_mode_restored: _('Managed mode restored.'),
+		managed_snapshot_missing: _('There is no saved managed configuration to restore.'),
+		lan_candidates_unavailable: _('Could not read the list of network interfaces.'),
+		config_read_failed: _('Honk could not read the current configuration.'),
+		config_request_invalid: _('The configuration request is empty or invalid.'),
+		config_validation_failed: _('The configuration did not pass static validation.'),
+		config_validation_unavailable: _('The core validator did not return a result.'),
+		config_saved_pending_apply: _('Configuration saved. The running service is unchanged until you apply it.'),
+		config_loaded: _('Configuration loaded.'),
+		dae_loaded: _('Configuration file loaded into the editor.'),
+		upload_ready: _('Upload location ready.'),
+		upload_cleared: _('Temporary upload cleared.'),
 		upload_unavailable: _('A private upload location could not be prepared.'),
 		settings_write_failed: _('Could not save Honk settings.'),
 		curl_missing: _('The curl command is missing. Install the curl package and try again.'),
@@ -318,6 +348,13 @@ return baseclass.extend({
 	addSubscription: callAddSubscription,
 	addNodes: callAddNodes,
 	importDae: callImportDae,
+	configRead: callConfigRead,
+	configDraftRead: callConfigDraftRead,
+	lanCandidates: callLanCandidates,
+	configValidate: callConfigValidate,
+	configSave: callConfigSave,
+	configApply: callConfigApply,
+	configUseManaged: callConfigUseManaged,
 	repair: callRepair,
 	backup: callBackup,
 	restore: callRestore,
