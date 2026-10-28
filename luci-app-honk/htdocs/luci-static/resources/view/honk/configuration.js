@@ -251,9 +251,7 @@ return view.extend({
 			}).join(' | ');
 		}
 
-		/* Three settings that are legal dae syntax but wrong for this firmware
-		   layout: the core accepts them at validation time and only fails when the
-		   service starts, which is too late to be useful. Surface them first. */
+		/* 本机事实：LuCI 的 Doona 端口、活跃 L3 设备。取一次复用。 */
 		let runtimeFacts = null;
 		function runtimeContext() {
 			if (!runtimeFacts)
@@ -271,46 +269,39 @@ return view.extend({
 			return runtimeFacts;
 		}
 
-		function nativeApiBlock(text) {
-			const match = /native_api\s*\{([\s\S]*?)\n[ \t]*\}/.exec(text);
-			return match ? match[1] : '';
+		/* 保存时后端会替用户做的本机适配。LuCI 的 rpc 会过滤未知字段，
+		   所以这里按同样的规则重算一遍，好在点保存之前就告诉用户。 */
+		function adaptationNotes(text) {
+			const notes = [];
+			if (/^[ \t]*ui[ \t]*:[ \t]*['"]?embedded/m.test(text))
+				notes.push('ui → /usr/share/doona');
+			if (!/^[ \t]*include[ \t]*\{/m.test(text) &&
+				(/^[ \t]*global[ \t]*\{/m.test(text) || /^[ \t]*experimental[ \t]*\{/m.test(text)))
+				notes.push('global / experimental → system.dae');
+			const lan = /^[ \t]*lan_interface[ \t]*:[ \t]*([^\n]+)$/m.exec(text);
+			if (!lan)
+				return Promise.resolve(notes);
+			return runtimeContext().then(function(ctx) {
+				const named = lan[1].replace(/#.*$/, '').split(',').map(function(item) {
+					return item.trim().replace(/^['"]|['"]$/g, '');
+				}).filter(Boolean);
+				if (ctx.devices.length && named.length && !named.some(function(name) { return ctx.devices.indexOf(name) >= 0; }))
+					notes.push('lan_interface → ' + ctx.devices[0]);
+				return notes;
+			});
 		}
 
-		function configWarnings(text) {
-			return runtimeContext().then(function(ctx) {
-				const warnings = [];
-				const block = nativeApiBlock(text);
-
-				if (/^[ \t]*ui[ \t]*:[ \t]*['"]?embedded['"]?/m.test(block))
-					warnings.push(_('native_api.ui is embedded, but this firmware builds Honk without the native-ui feature, so the core exits on startup. Use /usr/share/doona instead.'));
-
-				const listen = /^[ \t]*listen[ \t]*:[ \t]*['"]([^'"]+)['"]/m.exec(block);
-				if (listen) {
-					const address = listen[1];
-					const port = address.slice(address.lastIndexOf(':') + 1);
-					if (port && port !== ctx.listenPort)
-						warnings.push(_('The file opens Doona on port %s, but LuCI opens it on port %s, so the Doona button will not connect. Use 127.0.0.1:%s.').format(port, ctx.listenPort, ctx.listenPort));
-				}
-
-				const lan = /^[ \t]*lan_interface[ \t]*:[ \t]*([^\n]+)$/m.exec(text);
-				if (lan && ctx.devices.length) {
-					const named = lan[1].replace(/#.*$/, '').split(',').map(function(item) {
-						return item.trim().replace(/^['"]|['"]$/g, '');
-					}).filter(Boolean);
-					const missing = named.filter(function(name) { return ctx.devices.indexOf(name) < 0; });
-					if (missing.length)
-						warnings.push(_('lan_interface %s does not exist on this router (available: %s), so Honk would not see the LAN.').format(missing.join(', '), ctx.devices.join(', ')));
-				}
-
-				return warnings;
+		function withNotes(text) {
+			return adaptationNotes(editor.value).then(function(notes) {
+				if (!notes.length)
+					return text;
+				return text + ' ' + _('(will adapt for this router: %s)').format(notes.join(', '));
 			});
 		}
 
 		function reportValidation(result, target) {
-			return configWarnings(editor.value).then(function(warnings) {
-				target.textContent = [ validationText(result) ].concat(warnings.map(function(item) {
-					return '⚠ ' + item;
-				})).join(' ');
+			return withNotes(validationText(result)).then(function(text) {
+				target.textContent = text;
 			});
 		}
 
@@ -327,11 +318,12 @@ return view.extend({
 					target.textContent = validationText(result);
 					return;
 				}
-				return configWarnings(content).then(function(warnings) {
-					const tail = _('Write this configuration to /etc/honk/config.dae and start Honk? The previous file is restored if startup fails.');
-					const question = warnings.length
-						? _('These settings will most likely stop Honk on this router:') + '\n\n' + warnings.join('\n') + '\n\n' + tail
-						: tail;
+				return adaptationNotes(content).then(function(adapted) {
+					const blocks = [];
+					if (adapted.length)
+						blocks.push(_('Saving will adapt for this router: %s').format(adapted.join(', ')));
+					blocks.push(_('Write this configuration to /etc/honk/config.dae and start Honk? The previous file is restored if startup fails.'));
+					const question = blocks.join('\n\n');
 					if (!confirm(question))
 						return;
 					return commitContent(content, target);
@@ -372,7 +364,7 @@ return view.extend({
 				   disk — but keep the outcome message the user needs to read. */
 				const outcome = target.textContent;
 				return refreshMode().then(function() {
-					return loadCurrent(outcome === editorStatus.textContent ? outcome : '').catch(function() {});
+					return loadCurrent(outcome === editorStatus.textContent ? outcome : '', true).catch(function() {});
 				});
 			}).finally(function() {
 				L.env.rpctimeout = previousTimeout;
@@ -399,8 +391,12 @@ return view.extend({
 			});
 		}
 
-		function loadCurrent(message) {
+		/* force = false 用于页面初次载入：如果用户已经抢先开始输入，不要用磁盘内容
+		   把他的编辑冲掉（异步回填比手速快）。apply 之后要的是磁盘真身，用 force。 */
+		function loadCurrent(message, force) {
 			return honk.configRead().then(honk.ensureOk).then(function(result) {
+				if (!force && editor.value !== editorBaseline && editor.value !== '')
+					return result;
 				setEditorContent(result.content || '', message || _('Current configuration loaded from /etc/honk/config.dae.'));
 				return result;
 			});
@@ -430,7 +426,7 @@ return view.extend({
 			ev.preventDefault();
 			if (!confirmEditorReplace()) return;
 			reloadBtn.disabled = true;
-			loadCurrent().catch(function(error) {
+			loadCurrent(null, true).catch(function(error) {
 				editorStatus.textContent = honk.errorMessage(error, _('Could not read the saved configuration.'));
 			}).finally(function() { reloadBtn.disabled = false; });
 		});
@@ -461,7 +457,7 @@ return view.extend({
 			editorStatus.textContent = _('Restoring the managed configuration…');
 			honk.configUseManaged().then(honk.ensureOk).then(function(result) {
 				editorStatus.textContent = honk.resultMessage(result, _('Managed mode restored.'));
-				return refreshMode().then(function() { return loadCurrent(); });
+				return refreshMode().then(function() { return loadCurrent(null, true); });
 			}).catch(function(error) {
 				editorStatus.textContent = honk.errorMessage(error, _('Could not restore managed mode.'));
 			}).finally(function() { managedBtn.disabled = false; });
