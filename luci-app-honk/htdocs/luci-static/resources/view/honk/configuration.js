@@ -129,9 +129,12 @@ return view.extend({
 			}).finally(function() { subBtn.disabled = false; });
 		});
 
+		const subModeHint = E('p', { 'class': 'honk-note honk-mode-hint' }, _('Manual mode: this tool is disabled until you restore managed mode (link at the top).'));
+		subModeHint.hidden = true;
 		const subSection = E('section', { 'class': 'honk-card' }, [
 			E('h3', { 'class': 'honk-card-title' }, _('Add subscription')),
 			E('p', { 'class': 'honk-note' }, _('Enter a name and subscription URL. Honk checks for usable nodes before saving.')),
+			subModeHint,
 			E('div', { 'class': 'honk-subscription-add' }, [ nameInput, urlInput, subBtn ]),
 			subStatus
 		]);
@@ -168,9 +171,12 @@ return view.extend({
 			}).finally(function() { pasteBtn.disabled = false; });
 		});
 
+		const pasteModeHint = E('p', { 'class': 'honk-note honk-mode-hint' }, _('Manual mode: this tool is disabled until you restore managed mode (link at the top).'));
+		pasteModeHint.hidden = true;
 		const pasteSection = E('section', { 'class': 'honk-card' }, [
 			E('h3', { 'class': 'honk-card-title' }, _('Paste nodes')),
 			E('p', { 'class': 'honk-note' }, _('Paste Clash YAML, Surge INI, Base64 or share links; they are parsed locally into nodes and written to /etc/honk/config.dae.')),
+			pasteModeHint,
 			pasteInput,
 			E('div', { 'class': 'honk-actions' }, [ pasteBtn ]),
 			pasteStatus
@@ -377,6 +383,13 @@ return view.extend({
 			return honk.status().then(function(status) {
 				const manual = !!status && status.config_mode === 'manual';
 				managedBtn.hidden = !manual;
+				subModeHint.hidden = !manual;
+				pasteModeHint.hidden = !manual;
+				subBtn.disabled = manual;
+				pasteBtn.disabled = manual;
+				nameInput.disabled = manual;
+				urlInput.disabled = manual;
+				pasteInput.disabled = manual;
 				modeText.textContent = manual
 					? _('Manual mode: the file below owns nodes, groups, routing and DNS.')
 					: _('Managed mode: the subscription and paste-nodes tools are active. Saving here switches Honk to manual mode.');

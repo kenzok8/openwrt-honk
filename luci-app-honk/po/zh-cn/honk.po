@@ -1469,3 +1469,24 @@ msgstr "导入配置"
 
 msgid "Import and start"
 msgstr "导入并启动"
+
+msgid "Manual mode: this tool is disabled until you restore managed mode (link at the top)."
+msgstr "手动模式下这个工具不可用，点页面顶部的「恢复托管模式」后再用。"
+
+msgid "Manual mode is active, so this tool cannot edit the configuration. Select Restore managed mode first."
+msgstr "当前是手动模式，这个工具不会改动配置。请先点「恢复托管模式」。"
+
+msgid "Could not switch back to managed mode. The previous configuration was restored."
+msgstr "切回托管模式失败，已恢复上一版配置。"
+
+msgid "Switching back to managed mode failed and the rollback did not finish. The snapshot was kept."
+msgstr "切回托管模式失败且回滚未完成，快照已保留，请到「维护」执行系统恢复。"
+
+msgid "The saved managed configuration is not a valid regular file."
+msgstr "保存的托管配置不是普通文件，无法恢复。"
+
+msgid "There is no saved draft to apply."
+msgstr "没有可应用的已保存草稿。"
+
+msgid "The saved draft is not a valid regular file."
+msgstr "保存的草稿不是普通文件。"
