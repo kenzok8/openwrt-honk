@@ -1490,3 +1490,9 @@ msgstr "没有可应用的已保存草稿。"
 
 msgid "The saved draft is not a valid regular file."
 msgstr "保存的草稿不是普通文件。"
+
+msgid "Manual mode: these settings belong to config.dae, so they are read-only here. Restore managed mode on the Configuration page to change them."
+msgstr "手动模式：这些设置由 config.dae 决定，这里只读。要改的话先到「配置」页点「恢复托管模式」。"
+
+msgid "Manual mode is active, so these settings cannot be saved. Restore managed mode on the Configuration page first."
+msgstr "当前是手动模式，设置无法保存。请先到「配置」页恢复托管模式。"

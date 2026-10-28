@@ -92,6 +92,19 @@ function installStyles() {
 	pageStylesInstalled = true;
 }
 
+/* A core bound to 0.0.0.0 (or ::) reports a wildcard authority. A browser
+   cannot open that, but the router is still reachable at the host LuCI was
+   loaded from, so substitute that instead of hiding the panel button. */
+function wildcardHost(hostname) {
+	const name = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+	return name === '0.0.0.0' || name === '::' || name === '';
+}
+
+function urlHost(hostname) {
+	const name = String(hostname || '');
+	return name.indexOf(':') >= 0 ? '[' + name.replace(/^\[|\]$/g, '') + ']' : name;
+}
+
 function localWebUi(status) {
 	if (!status || !status.initialized || !status.running || !status.api_ready || !status.api_url)
 		return null;
@@ -110,6 +123,9 @@ function localWebUi(status) {
 			url.protocol !== 'http:' && url.protocol !== 'https:' ||
 			url.username || url.password || url.search || url.hash)
 			return null;
+
+		if (wildcardHost(hostname) && window.location.hostname)
+			return url.protocol + '//' + urlHost(window.location.hostname) + ':' + port + '/ui/';
 
 		const octets = hostname.split('.');
 		let localIPv4 = false;
@@ -137,7 +153,9 @@ function localClashUi(status, secret) {
 		return null;
 	try {
 		const url = new URL(status.clash_api_url);
-		const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+		const host = wildcardHost(url.hostname)
+			? String(window.location.hostname || '').replace(/^\[|\]$/g, '').toLowerCase()
+			: url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
 		const port = status.clash_api_port || url.port;
 		const query = [
 			'host=' + encodeURIComponent(host),
