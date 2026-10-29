@@ -31,13 +31,14 @@ function metaItem(label, value) {
 }
 
 function field(label, input, help) {
-	const row = E('div', { 'class': 'cbi-value' }, [
-		E('label', { 'class': 'cbi-value-title', 'for': input.id }, label),
-		E('div', { 'class': 'cbi-value-field' }, input)
-	]);
+	/* 说明文字放进控件列下方，两栏布局时才不会挤到右边去 */
+	const cell = E('div', { 'class': 'cbi-value-field' }, [ input ]);
 	if (help)
-		row.appendChild(E('div', { 'class': 'cbi-value-description honk-note' }, help));
-	return row;
+		cell.appendChild(E('div', { 'class': 'cbi-value-description honk-note' }, help));
+	return E('div', { 'class': 'cbi-value' }, [
+		E('label', { 'class': 'cbi-value-title', 'for': input.id }, label),
+		cell
+	]);
 }
 
 function captureFields(root) {
