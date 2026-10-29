@@ -487,17 +487,29 @@
 	cursor: not-allowed;
 }
 
-/* Argon 暗色：分段控件默认的选中态是纯白药丸，在深色背景上非常刺眼，
-   这里改成"比底色亮一点"的层次 + 主题前景色。 */
-html[data-darkmode="true"] .honk-page .honk-seg {
-	background: rgba(255, 255, 255, 0.07);
+/* 分段/标签控件：选中态原来用纯白药丸，深色主题下非常刺眼。
+   Argon 的暗色是额外加载 dark.css、不在 <html> 上留标记，所以不能靠
+   属性选择器区分明暗；这里统一用中性灰的半透明层次，明暗两种背景都成立，
+   同时把主题给 <button> 的边框和阴影压掉，保证和轨道融为一体。 */
+.honk-page .honk-seg {
+	background: rgba(128, 128, 128, 0.18);
 }
 
-html[data-darkmode="true"] .honk-page .honk-seg-btn.is-active,
-html[data-darkmode="true"] .honk-page .honk-seg-btn[aria-selected="true"] {
-	background: rgba(255, 255, 255, 0.16);
+.honk-page .honk-seg-btn {
+	border: 0 !important;
+	background: transparent !important;
 	color: inherit;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+	box-shadow: none !important;
+	opacity: 0.7;
+}
+
+.honk-page .honk-seg-btn.is-active,
+.honk-page .honk-seg-btn[aria-selected="true"] {
+	background: rgba(128, 128, 128, 0.38) !important;
+	color: inherit;
+	opacity: 1;
+	font-weight: 600;
+	box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.22) !important;
 }
 
 /* ---------- iOS toggle switch (boot-enabled checkbox) ---------- */
