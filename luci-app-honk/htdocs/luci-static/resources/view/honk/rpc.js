@@ -222,7 +222,7 @@ function tokenMessage(token) {
 		import_failed: _('The core could not prepare this import preview.'),
 		share_links_too_large: _('Share links exceed the 16 KiB per request limit.'),
 		share_links_invalid_or_conflicting: _('A share link is invalid or conflicts with an existing node. Review the input and try again.'),
-		subscription_invalid: _('The subscription name or URL is invalid.'),
+		subscription_invalid: _('The subscription could not be added: the name must be 1-64 characters without single quotes, and the URL must be a valid http(s) link.'),
 		subscription_invalid_or_conflicting: _('The subscription is invalid or its name already exists.'),
 		subscription_no_nodes: _('The subscription returned no usable nodes. The configuration was not changed.'),
 		subscription_added: _('Subscription saved with usable nodes.'),

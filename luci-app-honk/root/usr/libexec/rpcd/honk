@@ -553,8 +553,17 @@ add_subscription() {
 	json_get_var sub_name name
 	json_get_var sub_url url
 
+	# 名字允许中文和空格：内核的 tag 支持引号写法，我们只在写入时决定要不要加引号。
+	# 但单引号、反斜杠、换行会破坏 dae 的字符串，必须拒绝。
 	case "$sub_name" in
-		''|*[!A-Za-z0-9_-]*) emit_result false subscription_invalid; return 1 ;;
+		'') emit_result false subscription_invalid; return 1 ;;
+		*\'*|*\\*) emit_result false subscription_invalid; return 1 ;;
+	esac
+	[ "$(printf '%s' "$sub_name" | tr -d '\n\r')" = "$sub_name" ] || { emit_result false subscription_invalid; return 1; }
+	[ "$(printf '%s' "$sub_name" | wc -c)" -le 64 ] || { emit_result false subscription_invalid; return 1; }
+	case "$sub_name" in
+		*[!A-Za-z0-9_-]*) sub_tag="'$sub_name'" ;;
+		*) sub_tag=$sub_name ;;
 	esac
 	case "$sub_url" in
 		http://*|https://*) ;;
@@ -567,14 +576,14 @@ add_subscription() {
 	require_managed_mode || return 1
 	original_hash=$(sha256sum "$cfg" | awk '{print $1}')
 
-	if grep -qE "^[[:space:]]*${sub_name}:[[:space:]]*['\"]" "$cfg"; then
+	if grep -qF "$sub_tag:" "$cfg" || grep -qF "'$sub_name':" "$cfg"; then
 		emit_result false subscription_invalid_or_conflicting
 		return 1
 	fi
 
 	candidate=$(mktemp /etc/honk/.config.dae.XXXXXX) || { emit_result false config_write_failed; return 1; }
 
-	if ! awk -v name="$sub_name" -v url="$sub_url" '
+	if ! awk -v name="$sub_tag" -v url="$sub_url" '
 		/^subscription[[:space:]]*\{/ {
 			print
 			printf "    %s: \047%s\047 {\n        interval: 86400s\n        route: direct\n    }\n", name, url

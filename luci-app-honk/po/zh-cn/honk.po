@@ -1895,3 +1895,6 @@ msgstr "重置管理员失败，请查看核心日志。"
 
 msgid "Core is running; stop Honk before resetting the administrator."
 msgstr "核心正在运行，请先停止 Honk 再重置管理员。"
+
+msgid "The subscription could not be added: the name must be 1-64 characters without single quotes, and the URL must be a valid http(s) link."
+msgstr "无法添加订阅：名称 1-64 个字符且不能含单引号；链接必须是有效的 http(s) 地址。"
