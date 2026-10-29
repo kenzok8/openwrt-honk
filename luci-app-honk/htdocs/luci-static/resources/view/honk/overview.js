@@ -346,9 +346,18 @@ return view.extend({
 					currentStatus = updatedStatus;
 					renderSetup(updatedStatus);
 					renderStatus(updatedStatus, null);
-				}).catch(function() {
+				}).catch(function(error) {
 					password.value = '';
-					message.textContent = _('Initialization failed. Check the system status.');
+					/* 以前这里把错误整个吞掉，用户只看到「初始化失败」。现在先给出
+					   具体错误码的中文说明，再顺手跑一遍系统检查，把缺什么列出来。 */
+					message.textContent = honk.errorMessage(error, _('Initialization failed.'));
+					return honk.check().catch(function() { return null; }).then(function(check) {
+						const issues = (check && Array.isArray(check.errors)) ? check.errors : [];
+						if (issues.length)
+							message.textContent += ' ' + _('System check: %s').format(issues.map(honk.statusIssue).join('; '));
+						else
+							message.textContent += ' ' + _('The system check found nothing, so this may be a temporary failure: retry, and check the logs if it repeats.');
+					});
 				}).finally(function() {
 					setupBusy = false;
 					submit.disabled = false;
