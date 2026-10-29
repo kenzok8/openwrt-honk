@@ -318,30 +318,34 @@ return view.extend({
 			return null;
 		}
 
-		/* 多候选且无法确定时让用户挑；取消返回 null（表示不改这一项）。 */
+		/* 多候选且无法确定时让用户挑；取消返回 null（表示不改这一项）。
+		   ui.showModal() 返回的是 DOM 元素、不是 Promise，所以只能靠按钮回调
+		   resolve；Esc 会被 LuCI 转成点击 .right 里第一个按钮（即取消）。 */
 		function chooseLanDevice(ctx) {
 			return new Promise(function(resolve) {
 				const select = E('select', { 'class': 'cbi-input-select' }, ctx.candidates.map(function(item) {
 					const label = [ item.network, item.l3_device, item.ipv4 ].filter(Boolean).join(' · ');
 					return E('option', { 'value': item.l3_device }, label);
 				}));
-				let chosen = null;
 				ui.showModal(_('Choose the LAN interface'), [
 					E('div', {}, [
 						E('p', {}, _('None of the active interfaces belongs to the configured LAN network. Pick the one Honk should see as LAN:')),
 						select
 					]),
 					E('div', { 'class': 'right' }, [
-						E('button', { 'class': 'cbi-button', 'click': function(ev) { ev.preventDefault(); ui.hideModal(); resolve(null); } }, [ _('Cancel') ]),
+						E('button', { 'class': 'cbi-button', 'click': function(ev) {
+							ev.preventDefault();
+							ui.hideModal();
+							resolve(null);
+						} }, [ _('Cancel') ]),
 						' ',
 						E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function(ev) {
 							ev.preventDefault();
-							chosen = select.value;
 							ui.hideModal();
-							resolve(chosen);
+							resolve(select.value || null);
 						} }, [ _('Use this interface') ])
 					])
-				]).then(function() { resolve(chosen); });
+				]);
 			});
 		}
 
@@ -382,6 +386,9 @@ return view.extend({
 
 				return pick.then(function(device) {
 					if (!device) {
+						/* 用户在选择框里按了取消：直接中止这次保存，不要再问一遍。 */
+						if (allowPrompt && ctx.candidates.length > 1)
+							return { notes: notes, warnings: warnings, text: next, cancelled: true };
 						warnings.push(_('lan_interface: cannot tell which interface is the LAN here (candidates: %s); set it yourself').format(ctx.devices.join(', ') || '—'));
 						return { notes: notes, warnings: warnings, text: next };
 					}
@@ -393,9 +400,14 @@ return view.extend({
 			});
 		}
 
-		/* 保存前把适配写进编辑器。返回 false 表示用户拒绝，调用方应中止。 */
+		/* 保存前把适配写进编辑器。返回 false 表示用户拒绝或内容已变，调用方应中止。 */
 		function adaptEditor() {
-			return planAdaptations(editor.value, true).then(function(plan) {
+			const snapshot = editor.value;
+			return planAdaptations(snapshot, true).then(function(plan) {
+				if (plan.cancelled) {
+					editorStatus.textContent = _('Save cancelled.');
+					return false;
+				}
 				if (!plan.notes.length && !plan.warnings.length)
 					return true;
 				const blocks = [];
@@ -406,6 +418,11 @@ return view.extend({
 				blocks.push(_('Apply them in the editor now?'));
 				if (!confirm(blocks.join('\n\n')))
 					return false;
+				/* 等设备查询 / 用户选择期间编辑器可能被改过，别用旧结果覆盖。 */
+				if (editor.value !== snapshot) {
+					editorStatus.textContent = _('The editor changed while checking. Nothing was applied; check again.');
+					return false;
+				}
 				if (plan.notes.length) {
 					editor.value = plan.text;
 					editor.dispatchEvent(new Event('input'));
@@ -537,7 +554,12 @@ return view.extend({
 					throw new Error(_('The file is empty.'));
 				fileInput.value = '';
 				setEditorContent(content, _('Loaded %s into the editor.').format(file.name));
+				const snapshot = editor.value;
 				return planAdaptations(content, true).then(function(plan) {
+					if (plan.cancelled) {
+						importStatus.textContent = _('Import cancelled.');
+						return null;
+					}
 					const blocks = [];
 					if (plan.notes.length)
 						blocks.push(_('These lines will be changed for this router:') + '\n' + plan.notes.join('\n'));
@@ -547,6 +569,10 @@ return view.extend({
 						blocks.push(_('Apply them in the editor now?'));
 						if (!confirm(blocks.join('\n\n')))
 							return null;
+					}
+					if (editor.value !== snapshot) {
+						importStatus.textContent = _('The editor changed while checking. Nothing was applied; import the file again.');
+						return null;
 					}
 					if (plan.notes.length)
 						setEditorContent(plan.text, _('Adapted in the editor: %s').format(plan.notes.join('; ')));

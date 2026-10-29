@@ -1538,3 +1538,12 @@ msgstr "就用这个网卡"
 
 msgid "lan_interface: cannot tell which interface is the LAN here (candidates: %s); set it yourself"
 msgstr "lan_interface：无法判断本机哪块网卡是 LAN（候选：%s），请自行确认"
+
+msgid "The editor changed while checking. Nothing was applied; check again."
+msgstr "检查期间编辑器内容被改动了，没有应用任何修改，请重新检查。"
+
+msgid "The editor changed while checking. Nothing was applied; import the file again."
+msgstr "检查期间编辑器内容被改动了，没有应用任何修改，请重新导入文件。"
+
+msgid "Import cancelled."
+msgstr "已取消导入。"
