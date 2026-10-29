@@ -1568,3 +1568,9 @@ msgstr "仍然保存这份订阅吗？"
 
 msgid "unsupported"
 msgstr "不支持"
+
+msgid "Choose file"
+msgstr "选择文件"
+
+msgid "No file chosen"
+msgstr "未选择任何文件"

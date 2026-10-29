@@ -287,13 +287,21 @@ return view.extend({
 
 		/* --- Import a complete configuration and start Honk with it --- */
 		const importStatus = E('p', { 'class': 'honk-note', 'role': 'status', 'aria-live': 'polite' }, '');
-		const fileInput = E('input', { 'type': 'file', 'name': 'dae', 'accept': '.dae,text/plain' });
+		/* 原生 file 控件在各主题下都被拉成一个大盒子、内嵌按钮贴着左上角，
+		   和右边的按钮对不齐。改成隐藏原生控件、用 label 当按钮。 */
+		const fileInput = E('input', { 'type': 'file', 'name': 'dae', 'accept': '.dae,text/plain', 'hidden': 'hidden' });
+		const fileName = E('span', { 'class': 'honk-file-name' }, _('No file chosen'));
+		const filePick = E('label', { 'class': 'cbi-button honk-file-pick' }, [ _('Choose file'), fileInput ]);
+		fileInput.addEventListener('change', function() {
+			const picked = fileInput.files && fileInput.files[0];
+			fileName.textContent = picked ? picked.name : _('No file chosen');
+		});
 		const importBtn = E('button', { 'class': 'cbi-button cbi-button-apply', 'type': 'button' }, [ _('Import and start') ]);
 
 		const importSection = E('section', { 'class': 'honk-card' }, [
 			E('h3', { 'class': 'honk-card-title' }, _('Import a configuration')),
 			E('p', { 'class': 'honk-note' }, _('Upload a complete dae file (subscriptions, nodes and routing included) and Honk starts with it: the file is validated, written to /etc/honk/config.dae and the service is restarted. To hand-edit or paste instead, use the editor below.')),
-			E('div', { 'class': 'honk-subscription-add' }, [ fileInput, importBtn ]),
+			E('div', { 'class': 'honk-file-row' }, [ filePick, fileName, importBtn ]),
 			importStatus
 		]);
 
