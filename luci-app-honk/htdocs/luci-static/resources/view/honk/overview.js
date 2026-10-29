@@ -320,6 +320,7 @@ return view.extend({
 			const submit = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Initialize Honk'));
 			form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Initial setup')));
 			form.appendChild(E('p', { 'class': 'honk-note' }, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
+			form.appendChild(E('p', { 'class': 'honk-note' }, _('Username: letters, digits, underscore, dot or hyphen (max 64 characters). Password: 8 to 128 characters.')));
 			form.appendChild(field(_('Username'), username));
 			form.appendChild(field(_('Password'), password));
 			form.appendChild(E('div', { 'class': 'cbi-page-actions' }, submit));
@@ -330,6 +331,17 @@ return view.extend({
 				const secret = password.value;
 				if (!user || !secret) {
 					message.textContent = _('Enter both a username and password.');
+					return;
+				}
+				/* 和后端 read_credentials 的规则保持一致，避免"看着合法却提交失败" */
+				if (!/^[A-Za-z0-9_.-]{1,64}$/.test(user)) {
+					message.textContent = _('Username may only contain letters, digits, underscore, dot or hyphen (max 64 characters).');
+					return;
+				}
+				/* 内核 auth.rs 规定密码 8–128 个字符（按 Unicode 码点计），这里先拦一道 */
+				const secretLength = Array.from(secret).length;
+				if (secretLength < 8 || secretLength > 128) {
+					message.textContent = _('The password must be between 8 and 128 characters.');
 					return;
 				}
 
@@ -351,12 +363,17 @@ return view.extend({
 					/* 以前这里把错误整个吞掉，用户只看到「初始化失败」。现在先给出
 					   具体错误码的中文说明，再顺手跑一遍系统检查，把缺什么列出来。 */
 					message.textContent = honk.errorMessage(error, _('Initialization failed.'));
-					return honk.check().catch(function() { return null; }).then(function(check) {
+					/* 三态：查出问题 / 检查通过 / 检查根本没跑完。以前 check() 失败被当成"没问题"。 */
+					return honk.check().then(function(check) {
 						const issues = (check && Array.isArray(check.errors)) ? check.errors : [];
 						if (issues.length)
 							message.textContent += ' ' + _('System check: %s').format(issues.map(honk.statusIssue).join('; '));
+						else if (check && check.ok === true)
+							message.textContent += ' ' + _('The system check passed. If it keeps failing, check the core log under Maintenance → Logs and report the code above.');
 						else
-							message.textContent += ' ' + _('The system check found nothing, so this may be a temporary failure: retry, and check the logs if it repeats.');
+							message.textContent += ' ' + _('The system check did not finish. Retry, or check the core log under Maintenance → Logs.');
+					}, function() {
+						message.textContent += ' ' + _('The system check did not finish (interface timeout or error). Retry, or check the core log under Maintenance → Logs.');
 					});
 				}).finally(function() {
 					setupBusy = false;
