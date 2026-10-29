@@ -1520,3 +1520,21 @@ msgstr "已取消保存。"
 
 msgid "Loaded %s into the editor."
 msgstr "已把 %s 载入编辑器。"
+
+msgid "These lines will be changed for this router:"
+msgstr "这几行会按本机修改："
+
+msgid "Needs your attention:"
+msgstr "需要你处理："
+
+msgid "Choose the LAN interface"
+msgstr "选择 LAN 网卡"
+
+msgid "None of the active interfaces belongs to the configured LAN network. Pick the one Honk should see as LAN:"
+msgstr "当前活跃的网卡都不属于 LuCI 里配置的 LAN 网络。请挑一个 Honk 应该当作 LAN 的网卡："
+
+msgid "Use this interface"
+msgstr "就用这个网卡"
+
+msgid "lan_interface: cannot tell which interface is the LAN here (candidates: %s); set it yourself"
+msgstr "lan_interface：无法判断本机哪块网卡是 LAN（候选：%s），请自行确认"

@@ -137,8 +137,12 @@ status() {
 	if [ "$running" = 1 ] && [ "$clash_api_enabled" = 1 ] && [ "$clash_api_port" -gt 0 ] && honk_lifecycle_listener_owned "$managed_pid" "$clash_api_port"; then clash_api_ready=1; fi
 	clash_ui_ready=0
 	[ -s /usr/share/honk/zashboard/index.html ] && clash_ui_ready=1
-	clash_secret_set=0
-	[ -n "$clash_api_secret" ] && clash_secret_set=1
+	# UCI 里的 secret 只对托管模式有意义：手动模式的密码在 config.dae 里，
+	# 已经由运行标记读取过，这里不能再拿 UCI 覆盖。
+	if [ "$config_mode" != manual ]; then
+		clash_secret_set=0
+		[ -n "$clash_api_secret" ] && clash_secret_set=1
+	fi
 	if [ "$running" = 1 ] && honk_lifecycle_api_owned "$managed_pid"; then api_ready=1; else api_ready=0; fi
 	core_version=$($CORE --version 2>/dev/null | sed -n '1p')
 	[ -n "$core_version" ] || core_version=unknown

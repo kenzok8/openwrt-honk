@@ -5,6 +5,7 @@
 'require view';
 'require view.honk.rpc as honk';
 'require view.honk.converter as converter';
+'require ui';
 
 const DAE_LIMIT = 2 * 1024 * 1024;
 const PASTE_LIMIT = 2 * 1024 * 1024;
@@ -251,7 +252,7 @@ return view.extend({
 			}).join(' | ');
 		}
 
-		/* 本机事实：LuCI 的 Doona 端口、活跃 L3 设备。取一次复用。 */
+		/* 本机事实：LuCI 的 Doona 端口、活跃 L3 候选（含所属 netifd 网络）。取一次复用。 */
 		let runtimeFacts = null;
 		function runtimeContext() {
 			if (!runtimeFacts)
@@ -260,61 +261,168 @@ return view.extend({
 					honk.lanCandidates().catch(function() { return {}; })
 				]).then(function(results) {
 					const status = results[0] || {};
-					const candidates = (results[1] && results[1].candidates) || [];
+					const candidates = ((results[1] && results[1].candidates) || []).filter(function(item) {
+						return item && item.l3_device;
+					});
 					return {
 						listenPort: String(status.listen_port || 9527),
+						lanNetwork: status.lan_network || 'lan',
+						candidates: candidates,
 						devices: candidates.map(function(item) { return item.l3_device; })
 					};
 				});
 			return runtimeFacts;
 		}
 
+		/* 只在 native_api 块里改 ui，而且值必须**正好**是 embedded（embedded-custom 不算）。 */
+		function fixNativeUi(text) {
+			const lines = text.split('\n');
+			const start = lines.findIndex(function(line) { return /^[ \t]*native_api[ \t]*\{/.test(line); });
+			if (start < 0)
+				return null;
+			const baseIndent = lines[start].match(/^[ \t]*/)[0].length;
+			for (let i = start + 1; i < lines.length; i++) {
+				const line = lines[i];
+				if (!line.trim())
+					continue;
+				const indent = line.match(/^[ \t]*/)[0].length;
+				if (indent <= baseIndent && /^[ \t]*\}/.test(line))
+					break;
+				const match = /^([ \t]*ui[ \t]*:[ \t]*)(['"]?)embedded\2[ \t]*(#.*)?$/.exec(line);
+				if (match) {
+					lines[i] = match[1] + "'/usr/share/doona'" + (match[3] ? ' ' + match[3] : '');
+					return { text: lines.join('\n') };
+				}
+			}
+			return null;
+		}
+
+		function locateLanInterface(text) {
+			const lines = text.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				const match = /^([ \t]*)lan_interface[ \t]*:[ \t]*([^\n#]+?)[ \t]*(#.*)?$/.exec(lines[i]);
+				if (match)
+					return { index: i, indent: match[1], value: match[2], comment: match[3] };
+			}
+			return null;
+		}
+
+		/* 优先 netifd 里配置的 LAN 网络；不做「取第一个活跃设备」，那可能是 WAN / VPN。 */
+		function preferredLanDevice(ctx) {
+			const order = [ ctx.lanNetwork, 'lan' ];
+			for (let i = 0; i < order.length; i++) {
+				const hit = ctx.candidates.find(function(item) { return item.network === order[i]; });
+				if (hit)
+					return { device: hit.l3_device, source: hit.network };
+			}
+			return null;
+		}
+
+		/* 多候选且无法确定时让用户挑；取消返回 null（表示不改这一项）。 */
+		function chooseLanDevice(ctx) {
+			return new Promise(function(resolve) {
+				const select = E('select', { 'class': 'cbi-input-select' }, ctx.candidates.map(function(item) {
+					const label = [ item.network, item.l3_device, item.ipv4 ].filter(Boolean).join(' · ');
+					return E('option', { 'value': item.l3_device }, label);
+				}));
+				let chosen = null;
+				ui.showModal(_('Choose the LAN interface'), [
+					E('div', {}, [
+						E('p', {}, _('None of the active interfaces belongs to the configured LAN network. Pick the one Honk should see as LAN:')),
+						select
+					]),
+					E('div', { 'class': 'right' }, [
+						E('button', { 'class': 'cbi-button', 'click': function(ev) { ev.preventDefault(); ui.hideModal(); resolve(null); } }, [ _('Cancel') ]),
+						' ',
+						E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function(ev) {
+							ev.preventDefault();
+							chosen = select.value;
+							ui.hideModal();
+							resolve(chosen);
+						} }, [ _('Use this interface') ])
+					])
+				]).then(function() { resolve(chosen); });
+			});
+		}
+
 		/* 本机适配计划：算出「要改哪几处」和「改完的文本」，但**不落盘**。
-		   改的是编辑器里的同一份配置，用户看得见、可以再手动调。 */
-		function planAdaptations(text) {
+		   allowPrompt = true 时才会弹选择框（校验时不要弹）。 */
+		function planAdaptations(text, allowPrompt) {
 			return runtimeContext().then(function(ctx) {
 				const notes = [];
+				const warnings = [];
 				let next = text;
 
-				if (/^[ \t]*ui[ \t]*:[ \t]*['"]?embedded/m.test(next)) {
-					next = next.replace(/^([ \t]*ui[ \t]*:).*$/m, "$1 '/usr/share/doona'");
-					notes.push('ui: embedded → /usr/share/doona');
+				const uiFix = fixNativeUi(next);
+				if (uiFix) {
+					next = uiFix.text;
+					notes.push("native_api.ui: embedded → '/usr/share/doona'");
 				}
 
-				const lan = /^([ \t]*)lan_interface[ \t]*:[ \t]*([^\n#]+)(.*)$/m.exec(next);
-				if (lan && ctx.devices.length) {
-					const named = lan[2].split(',').map(function(item) {
-						return item.trim().replace(/^['"]|['"]$/g, '');
-					}).filter(Boolean);
-					if (named.length && !named.some(function(name) { return ctx.devices.indexOf(name) >= 0; })) {
-						next = next.replace(lan[0], lan[1] + "lan_interface: '" + ctx.devices[0] + "'" + (lan[3] || ''));
-						notes.push('lan_interface: ' + named.join(',') + ' → ' + ctx.devices[0]);
+				const lan = locateLanInterface(next);
+				if (!lan)
+					return { notes: notes, warnings: warnings, text: next };
+
+				const named = lan.value.split(',').map(function(item) {
+					return item.trim().replace(/^['"]|['"]$/g, '');
+				}).filter(Boolean);
+				if (!named.length || !ctx.devices.length || named.some(function(name) { return ctx.devices.indexOf(name) >= 0; }))
+					return { notes: notes, warnings: warnings, text: next };
+
+				const preferred = preferredLanDevice(ctx);
+				let pick;
+				if (preferred)
+					pick = Promise.resolve(preferred.device);
+				else if (ctx.candidates.length === 1)
+					pick = Promise.resolve(ctx.candidates[0].l3_device);
+				else if (allowPrompt)
+					pick = chooseLanDevice(ctx);
+				else
+					pick = Promise.resolve(null);
+
+				return pick.then(function(device) {
+					if (!device) {
+						warnings.push(_('lan_interface: cannot tell which interface is the LAN here (candidates: %s); set it yourself').format(ctx.devices.join(', ') || '—'));
+						return { notes: notes, warnings: warnings, text: next };
 					}
-				}
-
-				return { notes: notes, text: next };
+					const lines = next.split('\n');
+					lines[lan.index] = lan.indent + "lan_interface: '" + device + "'" + (lan.comment ? ' ' + lan.comment : '');
+					notes.push('lan_interface: ' + named.join(',') + ' → ' + device);
+					return { notes: notes, warnings: warnings, text: lines.join('\n') };
+				});
 			});
 		}
 
 		/* 保存前把适配写进编辑器。返回 false 表示用户拒绝，调用方应中止。 */
 		function adaptEditor() {
-			return planAdaptations(editor.value).then(function(plan) {
-				if (!plan.notes.length)
+			return planAdaptations(editor.value, true).then(function(plan) {
+				if (!plan.notes.length && !plan.warnings.length)
 					return true;
-				if (!confirm(_('This configuration needs fixes for this router:') + '\n\n' + plan.notes.join('\n') + '\n\n' + _('Apply them in the editor now?')))
+				const blocks = [];
+				if (plan.notes.length)
+					blocks.push(_('These lines will be changed for this router:') + '\n' + plan.notes.join('\n'));
+				if (plan.warnings.length)
+					blocks.push(_('Needs your attention:') + '\n' + plan.warnings.join('\n'));
+				blocks.push(_('Apply them in the editor now?'));
+				if (!confirm(blocks.join('\n\n')))
 					return false;
-				editor.value = plan.text;
-				editor.dispatchEvent(new Event('input'));
-				editorStatus.textContent = _('Adapted in the editor: %s').format(plan.notes.join('; '));
+				if (plan.notes.length) {
+					editor.value = plan.text;
+					editor.dispatchEvent(new Event('input'));
+					editorStatus.textContent = _('Adapted in the editor: %s').format(plan.notes.join('; '));
+				}
 				return true;
 			});
 		}
 
 		function withNotes(text) {
-			return planAdaptations(editor.value).then(function(plan) {
-				if (!plan.notes.length)
-					return text;
-				return text + ' ' + _('Saving will adapt for this router: %s').format(plan.notes.join(', '));
+			return planAdaptations(editor.value, false).then(function(plan) {
+				const parts = [];
+				if (plan.notes.length)
+					parts.push(_('Saving will adapt for this router: %s').format(plan.notes.join(', ')));
+				if (plan.warnings.length)
+					parts.push(plan.warnings.join(' '));
+				return parts.length ? text + ' ' + parts.join(' ') : text;
 			});
 		}
 
@@ -429,12 +537,19 @@ return view.extend({
 					throw new Error(_('The file is empty.'));
 				fileInput.value = '';
 				setEditorContent(content, _('Loaded %s into the editor.').format(file.name));
-				return planAdaptations(content).then(function(plan) {
-					if (plan.notes.length) {
-						if (!confirm(_('This configuration needs fixes for this router:') + '\n\n' + plan.notes.join('\n') + '\n\n' + _('Apply them in the editor now?')))
+				return planAdaptations(content, true).then(function(plan) {
+					const blocks = [];
+					if (plan.notes.length)
+						blocks.push(_('These lines will be changed for this router:') + '\n' + plan.notes.join('\n'));
+					if (plan.warnings.length)
+						blocks.push(_('Needs your attention:') + '\n' + plan.warnings.join('\n'));
+					if (blocks.length) {
+						blocks.push(_('Apply them in the editor now?'));
+						if (!confirm(blocks.join('\n\n')))
 							return null;
-						setEditorContent(plan.text, _('Adapted in the editor: %s').format(plan.notes.join('; ')));
 					}
+					if (plan.notes.length)
+						setEditorContent(plan.text, _('Adapted in the editor: %s').format(plan.notes.join('; ')));
 					return applyContent(editor.value, importStatus).then(function() {
 						if (importStatus.textContent === _('Configuration applied and Honk is running.'))
 							importStatus.textContent = _('%s imported and Honk is running.').format(file.name);
