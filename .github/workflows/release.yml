@@ -509,7 +509,14 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          test "$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq .object.sha)" = "${{ github.sha }}"
+          # 轻量 tag 的 .object.sha 就是提交 SHA；带注释的 tag（git tag -a）这里
+          # 指向 tag 对象，真正的提交在 .object.object.sha，两种都要能过。
+          tag_ref_sha="$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.sha')"
+          tag_commit_sha="$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.object.sha // .object.sha')"
+          test "$tag_commit_sha" = "${{ github.sha }}" || {
+            echo "::error::tag $TAG resolves to $tag_commit_sha (ref $tag_ref_sha), expected ${{ github.sha }}"
+            exit 1
+          }
           mkdir -p published
           gh release download "$TAG" --repo "${{ github.repository }}" --dir published
           cp dist/SHA256SUMS published/SHA256SUMS.expected
