@@ -1505,3 +1505,18 @@ msgstr "（将按本机适配：%s）"
 
 msgid "Saving will adapt for this router: %s"
 msgstr "保存时会按本机适配：%s"
+
+msgid "This configuration needs fixes for this router:"
+msgstr "这份配置有几处需要按本机修正："
+
+msgid "Apply them in the editor now?"
+msgstr "现在就在编辑器里改掉吗？"
+
+msgid "Adapted in the editor: %s"
+msgstr "已在编辑器里适配：%s"
+
+msgid "Save cancelled."
+msgstr "已取消保存。"
+
+msgid "Loaded %s into the editor."
+msgstr "已把 %s 载入编辑器。"

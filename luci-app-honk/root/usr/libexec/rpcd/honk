@@ -38,22 +38,6 @@ require_managed_mode() {
 	return 1
 }
 
-# 和 emit_result 一样，但附带这次规范化改动了哪几处，前端据此提示用户。
-emit_result_notes() {
-	ok=$1
-	message=$2
-	[ "$ok" = true ] && ok=1 || ok=0
-	json_init
-	json_add_boolean ok "$ok"
-	json_add_string message "$message"
-	json_add_array normalized
-	for note in $NORMALIZE_NOTES; do
-		json_add_string "" "$note"
-	done
-	json_close_array
-	json_dump
-}
-
 emit_errors() {
 	ok=$1
 	[ "$ok" = true ] && ok=1 || ok=0
@@ -801,178 +785,6 @@ lan_candidates() {
 }
 
 
-# ---------------------------------------------------------------------------
-# 单文件兼容
-#
-# 上游模板、以及用户从视频里抄的配置，都把 global / experimental 写在
-# config.dae 里面。LuCI 需要它们在 system.dae —— 那才是它改监听端口和
-# Clash API 那一段的文件。所以导入时在这里拆开：用户始终只看到一份配置。
-# ---------------------------------------------------------------------------
-NORMALIZE_NOTES=
-
-extract_top_block() {
-	awk -v name="$1" '
-		$0 ~ "^[[:space:]]*" name "[[:space:]]*\\{" { inside = 1; depth = 0 }
-		inside {
-			depth += gsub(/\{/, "{")
-			depth -= gsub(/\}/, "}")
-			print
-			if (depth <= 0) exit
-		}
-	' "$2"
-}
-
-strip_top_block() {
-	awk -v name="$1" '
-		$0 ~ "^[[:space:]]*" name "[[:space:]]*\\{" { skip = 1; depth = 0 }
-		skip {
-			depth += gsub(/\{/, "{")
-			depth -= gsub(/\}/, "}")
-			if (depth <= 0) skip = 0
-			next
-		}
-		{ print }
-	' "$2" > "$3"
-}
-
-# 本机实际的 LAN 设备名，取自 netifd 的 lan 接口。
-lan_device_name() {
-	lan_net=$(uci -q get honk.main.lan_network 2>/dev/null)
-	[ -n "$lan_net" ] || lan_net=lan
-	lan_status=$(ubus call "network.interface.$lan_net" status 2>/dev/null) || return 1
-	lan_dev=$(printf '%s' "$lan_status" | jsonfilter -e '@.l3_device' 2>/dev/null)
-	[ -n "$lan_dev" ] || lan_dev=$(printf '%s' "$lan_status" | jsonfilter -e '@.device' 2>/dev/null)
-	[ -n "$lan_dev" ] || return 1
-	printf '%s' "$lan_dev"
-}
-
-# 导入的 experimental 里没带 clash_api 时，把本机 system.dae 里的那一刻补回去，
-# 否则用户原有的 Clash 面板会凭空消失（UCI 里却还是启用状态）。
-preserve_clash_api() {
-	imported=$1
-	[ -f "$imported" ] || return 0
-	grep -qE "^[[:space:]]*clash_api[[:space:]]*\\{" "$imported" && return 0
-	[ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] || return 0
-	clash_src=$(mktemp /etc/honk/.normalize-clash.XXXXXX) || return 0
-	extract_top_block clash_api /etc/honk/system.dae > "$clash_src" 2>/dev/null
-	if [ ! -s "$clash_src" ]; then
-		rm -f "$clash_src"
-		return 0
-	fi
-	awk '
-		FNR == NR { extra[++n] = $0; next }
-		{ lines[++m] = $0 }
-		END {
-			for (i = 1; i < m; i++) print lines[i]
-			for (i = 1; i <= n; i++) print extra[i]
-			if (m > 0) print lines[m]
-		}
-	' "$clash_src" "$imported" > "$imported.new" && mv -f "$imported.new" "$imported" || rm -f "$imported.new"
-	rm -f "$clash_src"
-	NORMALIZE_NOTES="$NORMALIZE_NOTES clash_api=kept"
-	return 0
-}
-
-# 就地规范化 config_candidate；抽出来的内核参数放进 system_candidate。
-# 没做过任何改动时 system_candidate 为空，调用方据此不改 system.dae。
-normalize_candidate() {
-	system_candidate=
-	NORMALIZE_NOTES=
-	norm_config=$(mktemp /etc/honk/.normalize-config.XXXXXX) || return 1
-	cp "$config_candidate" "$norm_config" || { rm -f "$norm_config"; return 1; }
-
-	# ui: embedded 需要 native-ui 编译特性，本固件没编，改成本机 Doona 目录。
-	if grep -qE "^[[:space:]]*ui[[:space:]]*:[[:space:]]*['\"]?embedded" "$norm_config"; then
-		norm_tmp=$(mktemp /etc/honk/.normalize-tmp.XXXXXX) || { rm -f "$norm_config"; return 1; }
-		if sed "s|^\([[:space:]]*ui[[:space:]]*:\).*$|\1 '/usr/share/doona'|" "$norm_config" > "$norm_tmp"; then
-			mv -f "$norm_tmp" "$norm_config" || { rm -f "$norm_tmp" "$norm_config"; return 1; }
-			NORMALIZE_NOTES="$NORMALIZE_NOTES ui=/usr/share/doona"
-		else
-			rm -f "$norm_tmp" "$norm_config"
-			return 1
-		fi
-	fi
-
-	# lan_interface 写的网卡在本机一个都不存在时，换成实际 LAN 设备，
-	# 否则核心启动会直接报 "No such device"。
-	norm_ifaces=$(sed -n "s/^[[:space:]]*lan_interface[[:space:]]*:[[:space:]]*\(.*\)$/\1/p" "$norm_config" | head -n 1 | sed "s/#.*$//" | tr -d "'\"" | tr ',' ' ')
-	if [ -n "$norm_ifaces" ]; then
-		norm_present=0
-		for norm_dev in $norm_ifaces; do
-			ip link show "$norm_dev" >/dev/null 2>&1 && norm_present=1
-		done
-		if [ "$norm_present" = 0 ]; then
-			norm_lan=$(lan_device_name)
-			if [ -n "$norm_lan" ]; then
-				norm_tmp=$(mktemp /etc/honk/.normalize-tmp.XXXXXX) || { rm -f "$norm_config"; return 1; }
-				if sed "s|^\([[:space:]]*lan_interface[[:space:]]*:\).*$|\1 '$norm_lan'|" "$norm_config" > "$norm_tmp"; then
-					mv -f "$norm_tmp" "$norm_config" || { rm -f "$norm_tmp" "$norm_config"; return 1; }
-					NORMALIZE_NOTES="$NORMALIZE_NOTES lan_interface=$norm_lan"
-				else
-					rm -f "$norm_tmp" "$norm_config"
-					return 1
-				fi
-			fi
-		fi
-	fi
-
-	# 单文件写法：把 global / experimental 搬到 system.dae，并在 config.dae
-	# 顶部补 include。已有 include 的文件保持原样。
-	if ! grep -qE "^[[:space:]]*include[[:space:]]*\\{" "$norm_config"; then
-		norm_system=$(mktemp /etc/honk/.normalize-system.XXXXXX) || { rm -f "$norm_config"; return 1; }
-		if [ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ]; then
-			cat /etc/honk/system.dae > "$norm_system" || { rm -f "$norm_system" "$norm_config"; return 1; }
-		fi
-		norm_found=0
-		for norm_block in global experimental; do
-			norm_part=$(mktemp /etc/honk/.normalize-block.XXXXXX) || continue
-			if extract_top_block "$norm_block" "$norm_config" > "$norm_part" && [ -s "$norm_part" ]; then
-				norm_rest=$(mktemp /etc/honk/.normalize-rest.XXXXXX) || { rm -f "$norm_part"; continue; }
-				if strip_top_block "$norm_block" "$norm_config" "$norm_rest" && mv -f "$norm_rest" "$norm_config"; then
-					# 同名块先删掉，再追加导入的那份：给了就覆盖，没给就保留本机值。
-					norm_kept=$(mktemp /etc/honk/.normalize-kept.XXXXXX) || { rm -f "$norm_part"; continue; }
-					if strip_top_block "$norm_block" "$norm_system" "$norm_kept"; then
-						mv -f "$norm_kept" "$norm_system" || rm -f "$norm_kept"
-					else
-						rm -f "$norm_kept"
-					fi
-					[ "$norm_block" = experimental ] && preserve_clash_api "$norm_part"
-					cat "$norm_part" >> "$norm_system"
-					printf '\n' >> "$norm_system"
-					NORMALIZE_NOTES="$NORMALIZE_NOTES $norm_block=system.dae"
-					norm_found=1
-				else
-					rm -f "$norm_rest"
-				fi
-			fi
-			rm -f "$norm_part"
-		done
-		if [ "$norm_found" = 1 ]; then
-			norm_joined=$(mktemp /etc/honk/.normalize-joined.XXXXXX) || { rm -f "$norm_system" "$norm_config"; return 1; }
-			if { printf 'include {\n    system.dae\n}\n\n'; cat "$norm_config"; } > "$norm_joined"; then
-				mv -f "$norm_joined" "$norm_config" || { rm -f "$norm_joined" "$norm_system" "$norm_config"; return 1; }
-				system_candidate=$norm_system
-			else
-				rm -f "$norm_joined" "$norm_system" "$norm_config"
-				return 1
-			fi
-		else
-			rm -f "$norm_system"
-		fi
-	fi
-
-	mv -f "$norm_config" "$config_candidate" || { rm -f "$norm_config"; return 1; }
-	return 0
-}
-
-# 给校验结果补上 normalized 数组，前端据此告诉用户改了哪几处。
-inject_notes() {
-	[ -n "$NORMALIZE_NOTES" ] || { printf '%s\n' "$1"; return 0; }
-	notes=
-	for note in $NORMALIZE_NOTES; do notes="$notes${notes:+,}\"$note\""; done
-	printf '%s\n' "$(printf '%s' "$1" | sed "s|}$|,\"normalized\":[$notes]}|")"
-}
-
 config_candidate_from_request() {
 	request=$(cat)
 	json_load "$request" 2>/dev/null || return 1
@@ -991,25 +803,10 @@ config_candidate_from_request() {
 	return 0
 }
 
-# 校验必须在「配置文件 + 它 include 的 system.dae」成对的目录里跑，
-# 否则 include 会解析到线上那一份，校验结果就不是即将生效的内容。
-stage_validation_pair() {
-	validation_dir=$(mktemp -d /tmp/honk-config-validation.XXXXXX) || return 1
-	cp "$config_candidate" "$validation_dir/config.dae" || { rm -rf "$validation_dir"; return 1; }
-	if [ -n "${system_candidate:-}" ] && [ -f "$system_candidate" ]; then
-		cp "$system_candidate" "$validation_dir/system.dae" || { rm -rf "$validation_dir"; return 1; }
-	elif [ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ]; then
-		cp /etc/honk/system.dae "$validation_dir/system.dae" || { rm -rf "$validation_dir"; return 1; }
-	fi
-	return 0
-}
-
 validate_config_candidate() {
-	stage_validation_pair || return 1
-	validation_file=$(mktemp /tmp/honk-config-validation.XXXXXX) || { rm -rf "$validation_dir"; return 1; }
-	chmod 0600 "$validation_file" || { rm -rf "$validation_dir" "$validation_file"; return 1; }
-	if "$CORE" config validate --config "$validation_dir/config.dae" > "$validation_file" 2>/dev/null; then
-		rm -rf "$validation_dir"
+	validation_file=$(mktemp /tmp/honk-config-validation.XXXXXX) || return 1
+	chmod 0600 "$validation_file" || { rm -f "$validation_file"; return 1; }
+	if "$CORE" config validate --config "$config_candidate" > "$validation_file" 2>/dev/null; then
 		config_validation=$(cat "$validation_file")
 		json_load "$config_validation" 2>/dev/null || { rm -f "$validation_file"; return 1; }
 		json_get_var validation_ok ok
@@ -1020,7 +817,6 @@ validate_config_candidate() {
 	config_validation=$(cat "$validation_file")
 	json_load "$config_validation" 2>/dev/null || config_validation='{"ok":false,"message":"configuration_validation_failed","diagnostics":[]}'
 	rm -f "$validation_file"
-	[ -n "${validation_dir:-}" ] && rm -rf "$validation_dir"
 	return 1
 }
 
@@ -1031,13 +827,11 @@ config_validate() {
 		2) emit_result false config_too_large; return 1 ;;
 		3) emit_result false config_write_failed; return 1 ;;
 	esac
-	normalize_candidate || { rm -f "$config_candidate"; emit_result false config_write_failed; return 1; }
 	validate_config_candidate
 	validation_status=$?
 	rm -f "$config_candidate"
-	[ -n "${system_candidate:-}" ] && rm -f "$system_candidate"
 	if [ -n "$config_validation" ]; then
-		inject_notes "$config_validation"
+		printf '%s\n' "$config_validation"
 		return 0
 	fi
 	emit_result false config_validation_unavailable
@@ -1052,11 +846,9 @@ config_save() {
 		2) emit_result false config_too_large; return 1 ;;
 		3) emit_result false config_write_failed; return 1 ;;
 	esac
-	normalize_candidate || { rm -f "$config_candidate"; emit_result false config_write_failed; return 1; }
 	if ! validate_config_candidate; then
 		rm -f "$config_candidate"
-		[ -n "${system_candidate:-}" ] && rm -f "$system_candidate"
-		[ -n "$config_validation" ] && inject_notes "$config_validation" || emit_result false config_validation_unavailable
+		[ -n "$config_validation" ] && printf '%s\n' "$config_validation" || emit_result false config_validation_unavailable
 		return 0
 	fi
 	draft_path=/etc/honk/manual-config.dae
@@ -1078,14 +870,8 @@ config_save() {
 	fi
 	chmod 0600 "$draft_path" || { emit_result false config_write_failed; return 1; }
 	rm -f "$draft_backup"
-	# 抽出来的 system 部分另存一份，apply 时整对写入。
-	system_draft=/etc/honk/manual-system.dae
-	if [ -n "${system_candidate:-}" ] && [ -f "$system_candidate" ]; then
-		chmod 0600 "$system_candidate" && mv -f "$system_candidate" "$system_draft" || { emit_result false config_write_failed; return 1; }
-	else
-		rm -f "$system_draft"
-	fi
-	emit_result_notes true config_saved_pending_apply
+	rm -f /etc/honk/manual-system.dae
+	emit_result true config_saved_pending_apply
 }
 
 config_apply() {
@@ -1098,14 +884,9 @@ config_apply() {
 	rmdir "$activate_dir" || { rm -rf "$activate_dir"; rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
 	chmod 0600 "$activate_file" || { rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
 	config_candidate=$activate_file
-	# 草稿阶段已经规范化过：system 部分单独存了一份，一起校验、一起写。
-	system_candidate=
-	if [ -f /etc/honk/manual-system.dae ] && [ ! -L /etc/honk/manual-system.dae ]; then
-		system_candidate=/etc/honk/manual-system.dae
-	fi
 	if ! validate_config_candidate; then
 		rm -f "$activate_file"
-		[ -n "$config_validation" ] && inject_notes "$config_validation" || emit_result false config_validation_unavailable
+		[ -n "$config_validation" ] && printf '%s\n' "$config_validation" || emit_result false config_validation_unavailable
 		return 1
 	fi
 	candidate_hash=$(sha256sum "$activate_file" | awk '{print $1}')
@@ -1122,7 +903,7 @@ config_apply() {
 	fi
 	backup_dir=$(mktemp -d /etc/honk/.manual-apply-backup.XXXXXX) || { rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
 	chmod 0700 "$backup_dir" || { rm -rf "$backup_dir"; rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
-	cp -p /etc/honk/config.dae "$backup_dir/config.dae" && cp -p /etc/honk/system.dae "$backup_dir/system.dae" && cp -p /etc/config/honk "$backup_dir/honk.uci" || {
+	cp -p /etc/honk/config.dae "$backup_dir/config.dae" && cp -p /etc/config/honk "$backup_dir/honk.uci" || {
 		rm -rf "$backup_dir" "$activate_file"
 		emit_result false config_write_failed
 		return 1
@@ -1155,29 +936,14 @@ config_apply() {
 		emit_result false config_write_failed_snapshot_retained
 		return 1
 	fi
-	# 导入时抽出来的 global / experimental 写回 system.dae。备份在上面已经做过。
-	if [ -n "${system_candidate:-}" ]; then
-		system_tmp=$(mktemp /etc/honk/.system-apply.XXXXXX) || { emit_result false config_write_failed_snapshot_retained; return 1; }
-		if cp "$system_candidate" "$system_tmp" && chmod 0600 "$system_tmp" && mv -f "$system_tmp" /etc/honk/system.dae; then
-			rm -f /etc/honk/manual-system.dae
-		else
-			rm -f "$system_tmp"
-			emit_result false config_write_failed_snapshot_retained
-			return 1
-		fi
-	fi
-	# 有 include 就说明 LuCI 能管这份配置（端口 / Clash API），用托管模式；
-	# 否则退回手动模式，文件说了算。
-	desired_mode=manual
-	grep -qE "^[[:space:]]*include[[:space:]]*\{" /etc/honk/config.dae && desired_mode=managed
-	if ! uci set honk.main.config_mode=$desired_mode || ! uci set honk.main.enabled=1 || ! uci set honk.main.initialized=1 || ! uci commit honk || ! chmod 0600 /etc/config/honk; then
+	if ! uci set honk.main.config_mode=manual || ! uci set honk.main.enabled=1 || ! uci set honk.main.initialized=1 || ! uci commit honk || ! chmod 0600 /etc/config/honk; then
 		apply_failed=1
 	else
 		apply_failed=0
 	fi
 	if [ "$apply_failed" = 0 ] && honk_lifecycle_start 20; then
 		rm -rf "$backup_dir"
-		emit_result_notes true config_applied
+		emit_result true config_applied
 		return 0
 	fi
 	[ "$apply_failed" = 1 ] || honk_lifecycle_stop 30 >/dev/null 2>&1 || :
@@ -1188,19 +954,15 @@ config_apply() {
 	else
 		rollback_ok=0
 	fi
-	if [ "$rollback_ok" = 1 ]; then
-		system_rollback=$(mktemp /etc/honk/.system-rollback.XXXXXX) || rollback_ok=0
-		[ "$rollback_ok" = 0 ] || { cp -p "$backup_dir/system.dae" "$system_rollback" && mv -f "$system_rollback" /etc/honk/system.dae || rollback_ok=0; }
-	fi
 	uci_tmp=$(mktemp /etc/config/.honk-rollback.XXXXXX) || rollback_ok=0
 	[ "$rollback_ok" = 0 ] || { cp -p "$backup_dir/honk.uci" "$uci_tmp" && mv -f "$uci_tmp" /etc/config/honk || rollback_ok=0; }
 	[ "$rollback_ok" = 0 ] || [ "$(sha256sum /etc/config/honk 2>/dev/null | awk '{print $1}')" = "$(sha256sum "$backup_dir/honk.uci" | awk '{print $1}')" ] || rollback_ok=0
 	uci revert honk 2>/dev/null || :
 	if [ "$rollback_ok" = 1 ] && [ "$old_running" = 1 ]; then honk_lifecycle_start 10 || rollback_ok=0; fi
-	rm -f "$rollback_tmp" "$uci_tmp" "${system_rollback:-}"
+	rm -f "$rollback_tmp" "$uci_tmp"
 	if [ "$rollback_ok" = 1 ]; then
 		rm -rf "$backup_dir"
-		emit_result_notes false config_apply_failed_rolled_back
+		emit_result false config_apply_failed_rolled_back
 	else
 		emit_result false config_apply_rollback_failed_snapshot_retained
 	fi

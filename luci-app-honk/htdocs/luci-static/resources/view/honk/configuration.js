@@ -269,33 +269,52 @@ return view.extend({
 			return runtimeFacts;
 		}
 
-		/* 保存时后端会替用户做的本机适配。LuCI 的 rpc 会过滤未知字段，
-		   所以这里按同样的规则重算一遍，好在点保存之前就告诉用户。 */
-		function adaptationNotes(text) {
-			const notes = [];
-			if (/^[ \t]*ui[ \t]*:[ \t]*['"]?embedded/m.test(text))
-				notes.push('ui → /usr/share/doona');
-			if (!/^[ \t]*include[ \t]*\{/m.test(text) &&
-				(/^[ \t]*global[ \t]*\{/m.test(text) || /^[ \t]*experimental[ \t]*\{/m.test(text)))
-				notes.push('global / experimental → system.dae');
-			const lan = /^[ \t]*lan_interface[ \t]*:[ \t]*([^\n]+)$/m.exec(text);
-			if (!lan)
-				return Promise.resolve(notes);
+		/* 本机适配计划：算出「要改哪几处」和「改完的文本」，但**不落盘**。
+		   改的是编辑器里的同一份配置，用户看得见、可以再手动调。 */
+		function planAdaptations(text) {
 			return runtimeContext().then(function(ctx) {
-				const named = lan[1].replace(/#.*$/, '').split(',').map(function(item) {
-					return item.trim().replace(/^['"]|['"]$/g, '');
-				}).filter(Boolean);
-				if (ctx.devices.length && named.length && !named.some(function(name) { return ctx.devices.indexOf(name) >= 0; }))
-					notes.push('lan_interface → ' + ctx.devices[0]);
-				return notes;
+				const notes = [];
+				let next = text;
+
+				if (/^[ \t]*ui[ \t]*:[ \t]*['"]?embedded/m.test(next)) {
+					next = next.replace(/^([ \t]*ui[ \t]*:).*$/m, "$1 '/usr/share/doona'");
+					notes.push('ui: embedded → /usr/share/doona');
+				}
+
+				const lan = /^([ \t]*)lan_interface[ \t]*:[ \t]*([^\n#]+)(.*)$/m.exec(next);
+				if (lan && ctx.devices.length) {
+					const named = lan[2].split(',').map(function(item) {
+						return item.trim().replace(/^['"]|['"]$/g, '');
+					}).filter(Boolean);
+					if (named.length && !named.some(function(name) { return ctx.devices.indexOf(name) >= 0; })) {
+						next = next.replace(lan[0], lan[1] + "lan_interface: '" + ctx.devices[0] + "'" + (lan[3] || ''));
+						notes.push('lan_interface: ' + named.join(',') + ' → ' + ctx.devices[0]);
+					}
+				}
+
+				return { notes: notes, text: next };
+			});
+		}
+
+		/* 保存前把适配写进编辑器。返回 false 表示用户拒绝，调用方应中止。 */
+		function adaptEditor() {
+			return planAdaptations(editor.value).then(function(plan) {
+				if (!plan.notes.length)
+					return true;
+				if (!confirm(_('This configuration needs fixes for this router:') + '\n\n' + plan.notes.join('\n') + '\n\n' + _('Apply them in the editor now?')))
+					return false;
+				editor.value = plan.text;
+				editor.dispatchEvent(new Event('input'));
+				editorStatus.textContent = _('Adapted in the editor: %s').format(plan.notes.join('; '));
+				return true;
 			});
 		}
 
 		function withNotes(text) {
-			return adaptationNotes(editor.value).then(function(notes) {
-				if (!notes.length)
+			return planAdaptations(editor.value).then(function(plan) {
+				if (!plan.notes.length)
 					return text;
-				return text + ' ' + _('(will adapt for this router: %s)').format(notes.join(', '));
+				return text + ' ' + _('Saving will adapt for this router: %s').format(plan.notes.join(', '));
 			});
 		}
 
@@ -318,12 +337,8 @@ return view.extend({
 					target.textContent = validationText(result);
 					return;
 				}
-				return adaptationNotes(content).then(function(adapted) {
-					const blocks = [];
-					if (adapted.length)
-						blocks.push(_('Saving will adapt for this router: %s').format(adapted.join(', ')));
-					blocks.push(_('Write this configuration to /etc/honk/config.dae and start Honk? The previous file is restored if startup fails.'));
-					const question = blocks.join('\n\n');
+				return Promise.resolve().then(function() {
+					const question = _('Write this configuration to /etc/honk/config.dae and start Honk? The previous file is restored if startup fails.');
 					if (!confirm(question))
 						return;
 					return commitContent(content, target);
@@ -413,9 +428,17 @@ return view.extend({
 				if (!String(content || '').trim())
 					throw new Error(_('The file is empty.'));
 				fileInput.value = '';
-				return applyContent(content, importStatus).then(function() {
-					if (importStatus.textContent === _('Configuration applied and Honk is running.'))
-						importStatus.textContent = _('%s imported and Honk is running.').format(file.name);
+				setEditorContent(content, _('Loaded %s into the editor.').format(file.name));
+				return planAdaptations(content).then(function(plan) {
+					if (plan.notes.length) {
+						if (!confirm(_('This configuration needs fixes for this router:') + '\n\n' + plan.notes.join('\n') + '\n\n' + _('Apply them in the editor now?')))
+							return null;
+						setEditorContent(plan.text, _('Adapted in the editor: %s').format(plan.notes.join('; ')));
+					}
+					return applyContent(editor.value, importStatus).then(function() {
+						if (importStatus.textContent === _('Configuration applied and Honk is running.'))
+							importStatus.textContent = _('%s imported and Honk is running.').format(file.name);
+					});
 				});
 			}).catch(function(error) {
 				importStatus.textContent = honk.errorMessage(error, _('Could not read the configuration file.'));
@@ -447,7 +470,10 @@ return view.extend({
 			ev.preventDefault();
 			if (!editor.value.trim()) { editorStatus.textContent = _('The editor is empty.'); return; }
 			saveBtn.disabled = true;
-			applyContent(editor.value, editorStatus).finally(function() { saveBtn.disabled = false; });
+			adaptEditor().then(function(proceed) {
+				if (!proceed) { editorStatus.textContent = _('Save cancelled.'); return null; }
+				return applyContent(editor.value, editorStatus);
+			}).finally(function() { saveBtn.disabled = false; });
 		});
 
 		managedBtn.addEventListener('click', function(ev) {
