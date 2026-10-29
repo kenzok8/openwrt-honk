@@ -120,13 +120,19 @@ return view.extend({
 			if (!name) { subStatus.textContent = _('Name is required.'); nameInput.focus(); return; }
 			if (!isHttpUrl(url)) { subStatus.textContent = _('A valid HTTP or HTTPS URL is required.'); urlInput.focus(); return; }
 			subBtn.disabled = true;
-			subStatus.textContent = _('Adding subscription…');
-			honk.addSubscription(name, url).then(honk.ensureOk).then(function(result) {
-				subStatus.textContent = honk.resultMessage(result, _('Subscription saved with usable nodes.'));
-				nameInput.value = '';
-				urlInput.value = '';
-			}).catch(function(error) {
-				subStatus.textContent = honk.errorMessage(error, _('Could not add the subscription.'));
+			preflightSubscription(url, subStatus).then(function(proceed) {
+				if (!proceed)
+					return null;
+				subStatus.textContent = _('Adding subscription…');
+				return withLongTimeout(function() {
+					return honk.addSubscription(name, url).then(honk.ensureOk);
+				}).then(function(result) {
+					subStatus.textContent = honk.resultMessage(result, _('Subscription saved with usable nodes.'));
+					nameInput.value = '';
+					urlInput.value = '';
+				}).catch(function(error) {
+					subStatus.textContent = honk.errorMessage(error, _('Could not add the subscription.'));
+				});
 			}).finally(function() { subBtn.disabled = false; });
 		});
 
@@ -139,6 +145,102 @@ return view.extend({
 			E('div', { 'class': 'honk-subscription-add' }, [ nameInput, urlInput, subBtn ]),
 			subStatus
 		]);
+
+		/* LuCI 的 rpc 默认 20s 超时；核心校验节点、重启服务都可能超过它，
+		   期间客户端一断，服务端处理器会被杀掉（留下半完成状态）。 */
+		function withLongTimeout(fn) {
+			const previous = L.env.rpctimeout;
+			L.env.rpctimeout = 180;
+			return Promise.resolve().then(fn).finally(function() {
+				L.env.rpctimeout = previous;
+			});
+		}
+
+		/* honk 内核支持的节点类型（见 core 的 clash.rs protocol_from_name）：
+		   ssr / snell / 带插件的 ss / 小众协议都会被内核判为不支持。 */
+		const SUPPORTED_PROTOCOLS = {
+			'socks': 1, 'socks5': 1, 'ss': 1, 'shadowsocks': 1, 'trojan': 1,
+			'vmess': 1, 'vless': 1, 'hysteria': 1, 'hysteria2': 1, 'hy2': 1,
+			'tuic': 1, 'juicity': 1, 'anytls': 1
+		};
+		/* JSON 订阅里 outbounds 会混进这些非节点类型，不能算作节点。 */
+		const NON_NODE_TYPES = {
+			'direct': 1, 'block': 1, 'dns': 1, 'selector': 1, 'urltest': 1,
+			'url-test': 1, 'fallback': 1, 'load-balance': 1, 'relay': 1, 'reject': 1
+		};
+
+		function analyzeProbe(probe) {
+			const counts = {};
+			let total = 0;
+			let usable = 0;
+			let unsupported = 0;
+			const bump = function(type) {
+				const name = String(type || '').toLowerCase();
+				if (!name || NON_NODE_TYPES[name])
+					return;
+				counts[name] = (counts[name] || 0) + 1;
+				total++;
+				if (SUPPORTED_PROTOCOLS[name])
+					usable++;
+				else
+					unsupported++;
+			};
+
+			if (probe.format === 'base64' && probe.content) {
+				const decoded = converter.tryBase64Decode(probe.content) || '';
+				(decoded.match(/^[A-Za-z0-9+.-]+:\/\//gim) || []).forEach(function(scheme) {
+					bump(scheme.replace(/:\/\/$/, ''));
+				});
+			}
+			else if (probe.types) {
+				String(probe.types).trim().split(/\s+/).forEach(function(pair) {
+					const parts = pair.split(':');
+					if (parts.length === 2) {
+						const n = parseInt(parts[1], 10);
+						for (let i = 0; i < (isNaN(n) ? 0 : n); i++)
+							bump(parts[0]);
+					}
+				});
+			}
+
+			const labels = {
+				clash: 'Clash / mihomo YAML',
+				json: 'JSON（sing-box 等）',
+				records: 'Surge / Loon 记录式 INI',
+				uri: 'URI 列表',
+				base64: 'Base64'
+			};
+			const label = labels[probe.format] || _('unknown format');
+			const detail = Object.keys(counts).sort().map(function(type) {
+				return type + ' ×' + counts[type] + (SUPPORTED_PROTOCOLS[type] ? '' : ' ' + _('unsupported'));
+			}).join(', ');
+			const text = total
+				? _('Detected %s · %d node(s): %s').format(label, total, detail)
+				: _('Detected %s.').format(label);
+
+			return { text: text, total: total, usable: usable, unsupported: unsupported };
+		}
+
+		/* 保存前预检：能全部用就直接保存；全不可用就拦下；部分可用问一句。
+		   预检本身失败（网络抖动等）不拦保存，退回原来的行为。 */
+		function preflightSubscription(url, status) {
+			status.textContent = _('Checking the subscription before saving…');
+			return honk.probeSubscription(url).then(function(probe) {
+				const verdict = analyzeProbe(probe);
+				if (!verdict.total)
+					return true;
+				status.textContent = verdict.text;
+				if (verdict.usable === 0) {
+					status.textContent = verdict.text + ' ' + _('This core cannot use any of these nodes, so the subscription was not saved.');
+					return false;
+				}
+				if (verdict.unsupported && !confirm(verdict.text + '\n\n' + _('Save the subscription anyway?')))
+					return false;
+				return true;
+			}).catch(function() {
+				return true;
+			});
+		}
 
 		/* --- Paste nodes --- */
 		const pasteStatus = E('p', { 'class': 'honk-note', 'role': 'status', 'aria-live': 'polite' }, '');
@@ -474,10 +576,8 @@ return view.extend({
 		}
 
 		function commitContent(content, target) {
-			const previousTimeout = L.env.rpctimeout;
-			L.env.rpctimeout = 180;
 			target.textContent = _('Writing the configuration…');
-			return honk.configSave(content).then(function(result) {
+			return withLongTimeout(function() { return honk.configSave(content); }).then(function(result) {
 				if (!isOk(result)) {
 					target.textContent = validationText(result);
 					return;
@@ -485,7 +585,7 @@ return view.extend({
 				if (content === editor.value)
 					editorBaseline = editor.value;
 				target.textContent = _('Starting Honk…');
-				return honk.configApply().then(honk.ensureOk).then(function(applied) {
+				return withLongTimeout(function() { return honk.configApply().then(honk.ensureOk); }).then(function(applied) {
 					target.textContent = honk.resultMessage(applied, _('Configuration applied.'));
 					return pollStatus().then(function(status) {
 						if (status && status.running)
@@ -506,8 +606,6 @@ return view.extend({
 				return refreshMode().then(function() {
 					return loadCurrent(outcome === editorStatus.textContent ? outcome : '', true).catch(function() {});
 				});
-			}).finally(function() {
-				L.env.rpctimeout = previousTimeout;
 			});
 		}
 
@@ -622,7 +720,7 @@ return view.extend({
 			if (!confirm(_('Restore the managed configuration and return to the subscription tools? Honk restarts if it is running.'))) return;
 			managedBtn.disabled = true;
 			editorStatus.textContent = _('Restoring the managed configuration…');
-			honk.configUseManaged().then(honk.ensureOk).then(function(result) {
+			withLongTimeout(function() { return honk.configUseManaged().then(honk.ensureOk); }).then(function(result) {
 				editorStatus.textContent = honk.resultMessage(result, _('Managed mode restored.'));
 				return refreshMode().then(function() { return loadCurrent(null, true); });
 			}).catch(function(error) {

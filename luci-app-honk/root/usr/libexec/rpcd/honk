@@ -461,6 +461,92 @@ commit_validated_candidate() {
 	return 3
 }
 
+# 添加订阅前的预检：把 URL 抓下来，判断格式并统计节点类型，交给前端判可用性。
+# 不能交给内核去做——内核只在保存后才拉，失败了用户只能翻日志。
+probe_subscription() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	json_get_var url url
+	case "$url" in
+		http://*|https://*) ;;
+		*) emit_result false subscription_invalid; return 1 ;;
+	esac
+	# 只允许普通的 URL 字符，避免把奇怪的参数塞进 curl
+	case "$url" in
+		*[!A-Za-z0-9._~:/?#@\!\$\&\(\)\*+,\;=%-]*) emit_result false subscription_invalid; return 1 ;;
+	esac
+
+	probe_file=$(mktemp /tmp/honk-probe.XXXXXX) || { emit_result false probe_failed; return 1; }
+	chmod 0600 "$probe_file" || { rm -f "$probe_file"; emit_result false probe_failed; return 1; }
+	if ! curl -fsSL --max-time 25 --connect-timeout 8 -A 'clash.meta/1.19.30' -o "$probe_file" "$url" 2>/dev/null; then
+		if ! curl -fsSL --max-time 25 -o "$probe_file" "$url" 2>/dev/null; then
+			rm -f "$probe_file"
+			emit_result false subscription_unreachable
+			return 1
+		fi
+	fi
+
+	probe_bytes=$(wc -c < "$probe_file" 2>/dev/null | tr -d ' ')
+	case "$probe_bytes" in ''|*[!0-9]*) probe_bytes=0 ;; esac
+	if [ "$probe_bytes" -eq 0 ]; then
+		rm -f "$probe_file"
+		emit_result false subscription_empty
+		return 1
+	fi
+
+	# 超过 4 MiB 直接拒绝：订阅不该这么大，继续读只会拖垮路由器
+	if [ "$probe_bytes" -gt 4194304 ]; then
+		rm -f "$probe_file"
+		emit_result false subscription_too_large
+		return 1
+	fi
+
+	probe_format=unknown
+	probe_types=
+	if grep -qE '^proxies:[[:space:]]*$' "$probe_file" 2>/dev/null; then
+		probe_format=clash
+		probe_types=$(awk '
+			/^proxies:[[:space:]]*$/ { inside = 1; next }
+			inside && /^[A-Za-z0-9_-]+:/ { inside = 0 }
+			inside {
+				if (match($0, /type:[[:space:]]*["'"'"']?[A-Za-z0-9_-]+/)) {
+					t = substr($0, RSTART, RLENGTH)
+					sub(/^type:[[:space:]]*["'"'"']?/, "", t)
+					print t
+				}
+			}
+		' "$probe_file" | sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }')
+	elif head -c 1 "$probe_file" 2>/dev/null | grep -qE '[\{\[]'; then
+		probe_format=json
+		probe_types=$(grep -oE '"type"[[:space:]]*:[[:space:]]*"[A-Za-z0-9_-]+"' "$probe_file" 2>/dev/null \
+			| sed 's/.*"\([A-Za-z0-9_-]*\)"$/\1/' | sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }')
+	elif grep -qE '^\[[A-Za-z ]+\]' "$probe_file" 2>/dev/null; then
+		probe_format=records
+		probe_types=$(sed -n 's/^[^=][^=]*=[[:space:]]*\([A-Za-z0-9_-]*\),.*/\1/p' "$probe_file" 2>/dev/null \
+			| sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }')
+	elif grep -qE '://' "$probe_file" 2>/dev/null; then
+		probe_format=uri
+		probe_types=$(grep -oE '^[A-Za-z0-9+.-]+://' "$probe_file" 2>/dev/null \
+			| sed 's|://$||' | sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }')
+	elif tr -d '\r\n' < "$probe_file" | grep -qE '^[A-Za-z0-9+/=]+$'; then
+		# 整份是 base64：本机没有 base64 解码工具，把小样本交给前端解
+		probe_format=base64
+	fi
+
+	json_init
+	json_add_boolean ok 1
+	json_add_string message probe_ok
+	json_add_string format "$probe_format"
+	json_add_number bytes "$probe_bytes"
+	json_add_string types "$probe_types"
+	if [ "$probe_format" = base64 ] && [ "$probe_bytes" -le 262144 ]; then
+		probe_body=$(cat "$probe_file")
+		json_add_string content "$probe_body"
+	fi
+	rm -f "$probe_file"
+	json_dump
+}
+
 add_subscription() {
 	request=$(cat)
 	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
@@ -1023,7 +1109,7 @@ config_use_managed() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_use_managed":{},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_use_managed":{},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -1038,6 +1124,9 @@ list)
 				;;
 			settings)
 				exec "$CONTROL" settings
+				;;
+			probe_subscription)
+				probe_subscription
 				;;
 			add_subscription)
 				add_subscription

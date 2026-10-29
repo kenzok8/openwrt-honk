@@ -1547,3 +1547,24 @@ msgstr "检查期间编辑器内容被改动了，没有应用任何修改，请
 
 msgid "Import cancelled."
 msgstr "已取消导入。"
+
+msgid "Checking the subscription before saving…"
+msgstr "保存前先检查订阅…"
+
+msgid "Detected %s · %d node(s): %s"
+msgstr "识别为 %s · %d 个节点：%s"
+
+msgid "Detected %s."
+msgstr "识别为 %s。"
+
+msgid "unknown format"
+msgstr "未知格式"
+
+msgid "This core cannot use any of these nodes, so the subscription was not saved."
+msgstr "这份订阅里的节点本内核一个都用不了，所以没有保存。"
+
+msgid "Save the subscription anyway?"
+msgstr "仍然保存这份订阅吗？"
+
+msgid "unsupported"
+msgstr "不支持"

@@ -66,6 +66,7 @@
 					"stop",
 					"restart",
 					"settings",
+					"probe_subscription",
 					"add_subscription",
 					"add_nodes",
 					"import_dae",

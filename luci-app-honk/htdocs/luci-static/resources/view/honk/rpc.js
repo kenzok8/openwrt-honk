@@ -34,6 +34,12 @@ const callSettings = rpc.declare({
 	expect: { '': {} }
 });
 
+const callProbeSubscription = rpc.declare({
+	object: 'honk',
+	method: 'probe_subscription',
+	params: [ 'url' ],
+	expect: { '': {} }
+});
 const callAddSubscription = rpc.declare({
 	object: 'honk',
 	method: 'add_subscription',
@@ -369,6 +375,7 @@ return baseclass.extend({
 	stop: callStop,
 	restart: callRestart,
 	settings: callSettings,
+	probeSubscription: callProbeSubscription,
 	addSubscription: callAddSubscription,
 	addNodes: callAddNodes,
 	importDae: callImportDae,
