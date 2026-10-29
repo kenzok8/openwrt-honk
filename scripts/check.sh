@@ -64,7 +64,7 @@ const fs = require('fs');
 const rpcSource = fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/rpc.js', 'utf8');
 const backend = fs.readFileSync('luci-app-honk/root/usr/libexec/rpcd/honk', 'utf8');
 const acl = JSON.parse(fs.readFileSync('luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json', 'utf8'))['luci-app-honk'];
-const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'add_subscription', 'add_nodes', 'import_dae', 'repair', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
+const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'add_subscription', 'add_nodes', 'import_dae', 'config_read', 'config_draft_read', 'lan_candidates', 'config_validate', 'config_save', 'config_apply', 'config_use_managed', 'repair', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
 const frontend = [...rpcSource.matchAll(/method:\s*'([^']+)'/g)].map(match => match[1]);
 const list = backend.match(/echo '([^']+)'/);
 if (!list) throw new Error('RPC backend has no list method declaration');
@@ -151,7 +151,7 @@ grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
 grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
 grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
 grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
-grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
+node -e 'const acl=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))["luci-app-honk"]; if (!(acl.write.file["/tmp/honk-maintenance/restore.tar.gz"] || []).includes("write")) process.exit(1)' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
 grep -Fq 'HONK_ASSET_X86_64?=' honk/Makefile
 grep -Fq 'HONK_ASSET_AARCH64?=' honk/Makefile

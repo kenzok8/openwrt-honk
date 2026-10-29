@@ -43,6 +43,11 @@ git -C "$WORK_DIR/source" checkout --quiet "$CORE_COMMIT"
 test "$(git -C "$WORK_DIR/source" rev-parse HEAD)" = "$CORE_COMMIT"
 test -f "$WORK_DIR/source/Cargo.lock"
 
+CORE_PATCH="$ROOT/ci/patches/honk-core-config-validate.patch"
+git -C "$WORK_DIR/source" apply --check "$CORE_PATCH"
+git -C "$WORK_DIR/source" apply "$CORE_PATCH"
+git -C "$WORK_DIR/source" diff --check
+
 TOOLCHAIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$WORK_DIR/source/rust-toolchain.toml")
 test -n "$TOOLCHAIN"
 rustup toolchain install "$TOOLCHAIN" --profile minimal --component rust-src
