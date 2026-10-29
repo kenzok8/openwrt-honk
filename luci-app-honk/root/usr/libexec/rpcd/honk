@@ -813,6 +813,34 @@ restore_prepare() {
 	emit_result true prepared
 }
 
+# 忘记密码：清掉核心里的管理员记录，并让 LuCI 重新显示首次设置。
+# 只删管理员，不动订阅/分组/路由；需要先停服务（内核自己也会拒绝运行中的 reset）。
+reset_admin() {
+	begin_mutation
+	if pidof honk-core >/dev/null 2>&1; then
+		honk_lifecycle_stop 30 || { emit_result false service_stop_failed_rolled_back; return 1; }
+	fi
+	reset_data_dir=$(sed -n "s/^[[:space:]]*data_dir:[[:space:]]*'\([^']*\)'.*/\1/p" /etc/honk/system.dae 2>/dev/null | head -n 1)
+	[ -n "$reset_data_dir" ] || reset_data_dir=/etc/honk
+	case "$reset_data_dir" in /*) ;; *) reset_data_dir=/etc/honk ;; esac
+	if [ -f "$reset_data_dir/state/honk.db" ]; then
+		reset_backup=$(mktemp /etc/honk/.state-backup.XXXXXX) || { emit_result false config_write_failed; return 1; }
+		cp -p "$reset_data_dir/state/honk.db" "$reset_backup" || { rm -f "$reset_backup"; emit_result false config_write_failed; return 1; }
+	fi
+	if ! reset_output=$("$CORE" --config /etc/honk/config.dae --data-dir "$reset_data_dir" admin reset 2>&1); then
+		[ -n "${reset_backup:-}" ] && rm -f "$reset_backup"
+		logger -t honk "administrator reset failed: $reset_output" 2>/dev/null || :
+		emit_result false administrator_reset_failed
+		return 1
+	fi
+	if ! uci set honk.main.initialized=0 || ! uci set honk.main.enabled=0 || ! uci commit honk || ! chmod 0600 /etc/config/honk; then
+		emit_result false config_write_failed
+		return 1
+	fi
+	rm -f "${reset_backup:-}"
+	emit_result true administrator_reset
+}
+
 config_read() {
 	[ -f /etc/honk/config.dae ] && [ ! -L /etc/honk/config.dae ] || { emit_result false config_missing; return 1; }
 	config_size=$(wc -c < /etc/honk/config.dae)
@@ -1109,7 +1137,7 @@ config_use_managed() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_use_managed":{},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_use_managed":{},"repair":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -1127,6 +1155,9 @@ list)
 				;;
 			probe_subscription)
 				probe_subscription
+				;;
+			reset_admin)
+				reset_admin
 				;;
 			add_subscription)
 				add_subscription

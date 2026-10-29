@@ -68,6 +68,7 @@ const callRepair = rpc.declare({ object: 'honk', method: 'repair', expect: { '':
 const callBackup = rpc.declare({ object: 'honk', method: 'backup', expect: { '': {} } });
 const callRestore = rpc.declare({ object: 'honk', method: 'restore', expect: { '': {} } });
 const callRestorePrepare = rpc.declare({ object: 'honk', method: 'restore_prepare', expect: { '': {} } });
+const callResetAdmin = rpc.declare({ object: 'honk', method: 'reset_admin', expect: { '': {} } });
 const callReset = rpc.declare({ object: 'honk', method: 'reset', expect: { '': {} } });
 const callJobStatus = rpc.declare({
 	object: 'honk',
@@ -253,7 +254,7 @@ function tokenMessage(token) {
 		service_stop_unconfirmed_snapshot_retained: _('Could not confirm that Honk stopped. The operation was aborted and the snapshot was kept.'),
 		manual_mode_required: _('Manual mode is active. Restore managed mode before using the subscription tools.'),
 		managed_edit_unavailable: _('Manual mode is active, so this tool cannot edit the configuration. Select Restore managed mode first.'),
-		administrator_exists_reuse_credentials_or_reset_state: _('已经初始化过了，请用原来的账号登录 Doona。忘记密码的处理方式：先停止 Honk，再执行 honk-core admin reset（只删除管理员记录、重新开放首次设置，不动订阅和规则），然后回到本页重新初始化。'),
+		administrator_exists_reuse_credentials_or_reset_state: _('已经初始化过了，请用原来的账号登录 Doona。忘记密码：到「维护 → 重置管理员」清掉管理员记录（不动订阅和规则），再回到本页重新初始化。'),
 		administrator_setup_failed: _('创建 Doona 管理员失败，请到「维护 → 日志」查看核心日志。'),
 		invalid_credentials: _('用户名只能包含字母、数字、下划线、点、连字符（不超过 64 个字符）；密码长度必须是 8 到 128 个字符，可以包含空格。'),
 		disable_service_before_initialization: _('请先停止 Honk 服务再初始化。'),
@@ -471,6 +472,7 @@ return baseclass.extend({
 	backup: callBackup,
 	restore: callRestore,
 	restorePrepare: callRestorePrepare,
+	resetAdmin: callResetAdmin,
 	reset: callReset,
 	logs: callLogs,
 	updateCheck: callUpdateCheck,

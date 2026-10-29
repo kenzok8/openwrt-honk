@@ -1871,3 +1871,27 @@ msgstr "系统检查没有跑完（接口超时或出错），请重试；或到
 
 msgid "系统检查没有发现问题。若反复失败，请到「维护 → 日志」查看核心日志并把提示里的错误码发给维护者。"
 msgstr "系统检查通过。若反复失败，请到「维护 → 日志」查看核心日志并把上面的错误码发给维护者。"
+
+msgid "Reset administrator"
+msgstr "重置管理员"
+
+msgid "Clear the Honk administrator account so the first-setup page opens again? Subscriptions, nodes and routing are kept. Honk will be stopped."
+msgstr "清掉 Honk 管理员账号、让首次设置页面重新出现？订阅、节点与路由都会保留；Honk 会被停止。"
+
+msgid "Resetting the administrator…"
+msgstr "正在重置管理员…"
+
+msgid "Administrator cleared. Open the Overview page and run the first setup again."
+msgstr "管理员已清空，请到「概览」页重新完成首次设置。"
+
+msgid "Could not reset the administrator."
+msgstr "无法重置管理员。"
+
+msgid "Administrator reset."
+msgstr "管理员已重置。"
+
+msgid "administrator_reset_failed"
+msgstr "重置管理员失败，请查看核心日志。"
+
+msgid "Core is running; stop Honk before resetting the administrator."
+msgstr "核心正在运行，请先停止 Honk 再重置管理员。"
