@@ -30,19 +30,24 @@
 ## 一键安装
 
 ```bash
+# 大陆推荐：jsDelivr 镜像，比 ghfast 之类的加速站稳定
+wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/install.sh | ash
+```
+
+```bash
+# 直连 GitHub（镜像还没同步到最新脚本时用）
 wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash
 ```
 
-大陆网络加速：
-
-```bash
-wget --no-check-certificate -O - https://ghfast.top/https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash
-```
+> jsDelivr 对 `@main` 有缓存（最长约 12 小时），刚改过的脚本可能延迟生效；
+> 脚本执行时仍会自己去 GitHub 取最新 Release，装到的版本不受影响。
+> 安装包下载默认走 `GH_PROXY`（默认 `https://ghfast.top/`），失败会自动回落到直连 GitHub；
+> 想换加速站可以 `GH_PROXY=https://你的加速站/ wget -O - ... | ash`。
 
 卸载：
 
 ```bash
-wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/uninstall.sh | ash
+wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/uninstall.sh | ash
 ```
 
 > 一键脚本会复用设备已有的 Geo 数据包；缺少时从聚合源下载，下载失败则尝试设备现有软件源。

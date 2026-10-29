@@ -30,6 +30,21 @@ proxy_url() {
 	esac
 }
 
+# 先走镜像，失败再直连 GitHub：镜像（ghfast 之类的加速站）经常抖，
+# 单次尝试会让用户以为"脚本坏了"。
+download_github() {
+	_dl_url="$1"; _dl_out="$2"
+	if download_file "$(proxy_url "$_dl_url")" "$_dl_out"; then
+		return 0
+	fi
+	if [ -n "$GH_PROXY" ]; then
+		echo "镜像下载失败，改用直连 GitHub 重试" >&2
+		download_file "$_dl_url" "$_dl_out"
+		return $?
+	fi
+	return 1
+}
+
 detect_sdk() {
 	[ -r /etc/openwrt_release ] || return 1
 	release="$(sed -n "s/^DISTRIB_RELEASE=['\"]\([^'\"]*\)['\"].*/\1/p" /etc/openwrt_release | head -n 1)"
@@ -133,9 +148,9 @@ main() {
 	luci_file="$TMP_DIR/$(basename "$luci_asset")"
 
 	echo "下载 $honk_asset"
-	download_file "$(proxy_url "$honk_asset")" "$honk_file"
+	download_github "$honk_asset" "$honk_file"
 	echo "下载 $luci_asset"
-	download_file "$(proxy_url "$luci_asset")" "$luci_file"
+	download_github "$luci_asset" "$luci_file"
 
 	set -- "$honk_file" "$luci_file"
 	if geodata_installed; then
