@@ -59,7 +59,7 @@ lock_owner_invalid() {
 }
 
 status() {
-	local enabled initialized boot_enabled running api_url api_ready core_version doona_version kernel lan_network listen_port errors listen clash_api_enabled clash_api_port clash_api_secret clash_api_url clash_api_ready clash_ui_ready clash_secret_set config_mode api_enabled core_ready config_pending manual_runtime clash_listen_addr
+	local enabled initialized boot_enabled running api_url api_ready core_version core_commit doona_version kernel lan_network listen_port errors listen clash_api_enabled clash_api_port clash_api_secret clash_api_url clash_api_ready clash_ui_ready clash_secret_set config_mode api_enabled core_ready config_pending manual_runtime clash_listen_addr
 	config_load honk
 	config_get_bool enabled main enabled 0
 	config_get_bool initialized main initialized 0
@@ -146,6 +146,8 @@ status() {
 	if [ "$running" = 1 ] && honk_lifecycle_api_owned "$managed_pid"; then api_ready=1; else api_ready=0; fi
 	core_version=$($CORE --version 2>/dev/null | sed -n '1p')
 	[ -n "$core_version" ] || core_version=unknown
+	# --version 只是构建时注入的版本串，真正的上游代码看 provenance.json
+	core_commit=$(jsonfilter -i /usr/share/honk/provenance.json -e '@.core.commit' 2>/dev/null)
 	doona_version=$(sed -n 's/^Version: //p' /usr/share/doona/SOURCE 2>/dev/null | head -n 1)
 	[ -n "$doona_version" ] || doona_version=unknown
 	kernel=$(uname -r)
@@ -178,6 +180,7 @@ status() {
 	json_add_boolean clash_ui_ready "$clash_ui_ready"
 	json_add_string clash_api_url "$clash_api_url"
 	json_add_string core_version "$core_version"
+	json_add_string core_commit "$core_commit"
 	json_add_string doona_version "$doona_version"
 	json_add_string kernel "$kernel"
 	json_add_string lan_network "$lan_network"

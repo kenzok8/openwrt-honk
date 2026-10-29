@@ -172,18 +172,15 @@ return view.extend({
 					E('div', { 'class': 'honk-actions' }, actions)
 				]),
 				E('div', { 'class': 'honk-meta' }, [
-					metaItem(_('Core version'), status.core_version),
+					/* 版本串是构建时注入的，看不出具体代码；带上 commit 短号才好定位 */
+					metaItem(_('Core version'), status.core_commit
+						? '%s (%s)'.format(status.core_version, status.core_commit.slice(0, 8))
+						: status.core_version),
 					metaItem(_('Doona version'), status.doona_version),
-					metaItem(_('Kernel'), status.kernel),
-					metaItem(_('Clash API'), status.clash_api_enabled ? status.clash_api_url : _('Off'))
+					metaItem(_('Kernel'), status.kernel)
 				])
 			]);
 
-			if (!webUi) {
-				const reason = !status.initialized ? _('Complete initial setup before opening Doona.') :
-					!running ? _('Start Honk to open Doona.') : _('Doona is not ready yet. Check the service status.');
-				statusCard.appendChild(E('p', { 'class': 'honk-note', 'role': 'status' }, reason));
-			}
 			if (status.clash_api_enabled && running && !clashUi)
 				statusCard.appendChild(E('p', { 'class': 'honk-note', 'role': 'status' }, status.clash_api_ready ? _('Zashboard is still downloading or unavailable.') : _('The Clash API listener is unavailable. Check the service logs.')));
 

@@ -1907,3 +1907,6 @@ msgstr "编辑配置"
 
 msgid "Paste Clash YAML, Surge INI, Base64 or share links. They are parsed locally into nodes and appended to /etc/honk/config.dae."
 msgstr "粘贴 Clash YAML、Surge INI、Base64 或分享链接，会在本地解析成节点并追加到 /etc/honk/config.dae。"
+
+msgid "Doona opens after Honk starts."
+msgstr "启动 Honk 后即可打开 Doona。"
