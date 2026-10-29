@@ -1898,3 +1898,12 @@ msgstr "核心正在运行，请先停止 Honk 再重置管理员。"
 
 msgid "The subscription could not be added: the name must be 1-64 characters without single quotes, and the URL must be a valid http(s) link."
 msgstr "无法添加订阅：名称 1-64 个字符且不能含单引号；链接必须是有效的 http(s) 地址。"
+
+msgid "Import config"
+msgstr "导入配置"
+
+msgid "Edit config"
+msgstr "编辑配置"
+
+msgid "Paste Clash YAML, Surge INI, Base64 or share links. They are parsed locally into nodes and appended to /etc/honk/config.dae."
+msgstr "粘贴 Clash YAML、Surge INI、Base64 或分享链接，会在本地解析成节点并追加到 /etc/honk/config.dae。"

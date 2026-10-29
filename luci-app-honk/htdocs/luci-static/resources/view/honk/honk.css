@@ -452,6 +452,22 @@
 	white-space: nowrap;
 }
 
+/* 配置页的标签栏：一排切换，只显示当前板块 */
+.honk-tabs-wrap {
+	margin: 4px 0 14px;
+}
+
+.honk-page .honk-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	max-width: 100%;
+}
+
+.honk-page .honk-tabs .honk-seg-btn:disabled {
+	opacity: 0.32;
+	cursor: not-allowed;
+}
+
 /* ---------- iOS toggle switch (boot-enabled checkbox) ---------- */
 
 .honk-page input[type="checkbox"] {
