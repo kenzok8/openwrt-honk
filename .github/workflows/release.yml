@@ -225,8 +225,16 @@ jobs:
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: false
           INDEX: 0
+          # Stream the make output so a failure here is readable in the job log
+          # instead of being buried in the container's own log file.
+          BUILD_LOG: 0
           KEY_BUILD: ${{ secrets.OPKG_KEY_BUILD }}
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+
+      - name: Show what the build produced
+        if: always()
+        run: |
+          find bin/packages/x86_64 -maxdepth 2 -type f \( -name '*.apk' -o -name '*.ipk' \) -print 2>/dev/null | head -50 || true
 
       - name: Require the package build to pass
         env:
