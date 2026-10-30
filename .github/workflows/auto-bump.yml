@@ -203,6 +203,8 @@ jobs:
       - name: Commit candidate with pinned download metadata
         id: commit
         if: steps.detect.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name kenzok8
