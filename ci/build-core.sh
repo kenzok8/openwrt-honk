@@ -43,10 +43,16 @@ git -C "$WORK_DIR/source" checkout --quiet "$CORE_COMMIT"
 test "$(git -C "$WORK_DIR/source" rev-parse HEAD)" = "$CORE_COMMIT"
 test -f "$WORK_DIR/source/Cargo.lock"
 
-# mydist: hand direct-classified flows back to the classic TC chain so a packet
-# accelerator (dpd) can keep accelerating direct traffic while honk proxies the
-# rest. Kept as a script, like the vendor patches below, so a context drift in
-# the pinned commit fails loudly instead of silently shipping an unpatched core.
+CORE_PATCH="$ROOT/ci/patches/honk-core-config-validate.patch"
+git -C "$WORK_DIR/source" apply --check "$CORE_PATCH"
+git -C "$WORK_DIR/source" apply "$CORE_PATCH"
+git -C "$WORK_DIR/source" diff --check
+
+# p1: hand direct-classified flows back to the classic TC chain so a packet
+# accelerator (dpd on x86/rockchip, the kernel flowtable on IPQ) keeps seeing
+# them while honk proxies the rest. Kept as a script, like the vendor patches
+# above, so a context drift in the pinned commit fails loudly instead of
+# silently shipping an unpatched core.
 python3 "$ROOT/ci/patches/honk-direct-unspec.py" "$WORK_DIR/source"
 
 TOOLCHAIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$WORK_DIR/source/rust-toolchain.toml")

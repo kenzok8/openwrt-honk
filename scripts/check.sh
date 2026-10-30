@@ -8,7 +8,7 @@ for tool in bash sh node sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
-for script in ci/build-doona.sh scripts/check.sh; do
+for script in ci/build-doona.sh scripts/check.sh scripts/verify-source-assets.sh; do
 	bash -n "$script"
 done
 for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
@@ -31,6 +31,35 @@ source ci/pins.env
 test "$CORE_COMMIT" = "$(sed -n 's/^CORE_COMMIT:=//p' honk/Makefile)"
 test "$DOONA_ARCHIVE" = "$(sed -n 's/^PKG_SOURCE:=//p' luci-app-honk/Makefile)"
 grep -q '^PKG_HASH:=[0-9a-f]\{64\}$' luci-app-honk/Makefile
+
+# Download metadata must be complete and immutable enough for a plain feed
+# build, i.e. a build without honk/generated-stage.mk. Any missing hash or a
+# mutable download location breaks everyone who compiles the feed themselves.
+for makefile in honk/Makefile luci-app-honk/Makefile; do
+	grep -q '^HONK_SOURCE_TAG?=source-[0-9A-Za-z._-]\+$' "$makefile" || {
+		echo "$makefile: missing or malformed HONK_SOURCE_TAG" >&2
+		exit 1
+	}
+	! grep -q 'releases/download/staging' "$makefile" || {
+		echo "$makefile: download URL points at the mutable staging release" >&2
+		exit 1
+	}
+done
+test "$(sed -n 's/^HONK_SOURCE_TAG?=//p' honk/Makefile)" = \
+	"$(sed -n 's/^HONK_SOURCE_TAG?=//p' luci-app-honk/Makefile)" || {
+	echo 'honk and luci-app-honk must reference the same source tag' >&2
+	exit 1
+}
+for arch in X86_64 AARCH64 ARMV7; do
+	grep -q "^HONK_HASH_${arch}?=[0-9a-f]\{64\}$" honk/Makefile || {
+		echo "honk/Makefile: HONK_HASH_${arch} is missing or not a SHA-256" >&2
+		exit 1
+	}
+done
+! grep -n 'SKIP' honk/Makefile luci-app-honk/Makefile || {
+	echo 'package Makefiles must not fall back to a skipped hash' >&2
+	exit 1
+}
 
 node <<'NODE'
 const fs = require('fs');
@@ -64,7 +93,7 @@ const fs = require('fs');
 const rpcSource = fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/rpc.js', 'utf8');
 const backend = fs.readFileSync('luci-app-honk/root/usr/libexec/rpcd/honk', 'utf8');
 const acl = JSON.parse(fs.readFileSync('luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json', 'utf8'))['luci-app-honk'];
-const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'add_subscription', 'add_nodes', 'import_dae', 'repair', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
+const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'add_subscription', 'probe_subscription', 'add_nodes', 'import_dae', 'config_read', 'config_draft_read', 'lan_candidates', 'config_validate', 'config_save', 'config_apply', 'config_use_managed', 'reset_admin', 'repair', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
 const frontend = [...rpcSource.matchAll(/method:\s*'([^']+)'/g)].map(match => match[1]);
 const list = backend.match(/echo '([^']+)'/);
 if (!list) throw new Error('RPC backend has no list method declaration');
@@ -79,7 +108,7 @@ for (const method of expected) {
 	if (!block || !block[1].trim() || /unknown_method/.test(block[1]))
 		throw new Error(`RPC method ${method} has no concrete backend case`);
 }
-if (!/params:\s*\[\s*'lan_network',\s*'listen_port',\s*'boot_enabled',\s*'clash_api_enabled',\s*'clash_api_port',\s*'clash_api_secret'\s*\]/.test(rpcSource))
+if (!/params:\s*\[\s*'lan_network',\s*'listen_port',\s*'clash_api_enabled',\s*'clash_api_port',\s*'clash_api_secret'\s*\]/.test(rpcSource))
 	throw new Error('settings RPC parameters do not include Clash API settings');
 NODE
 
@@ -151,7 +180,7 @@ grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
 grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
 grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
 grep -Fq 'view/honk/vendor' luci-app-honk/Makefile
-grep -Fq '"/tmp/honk-maintenance/restore.tar.gz": [ "write" ]' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
+node -e 'const acl=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))["luci-app-honk"]; if (!(acl.write.file["/tmp/honk-maintenance/restore.tar.gz"] || []).includes("write")) process.exit(1)' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
 grep -Fq 'HONK_ASSET_X86_64?=' honk/Makefile
 grep -Fq 'HONK_ASSET_AARCH64?=' honk/Makefile
@@ -173,7 +202,7 @@ grep -Fq 'UPDATE_LOCK_OWNED=1' honk/files/update.sh
 grep -Fq 'checking_feed' honk/files/job.sh
 
 
-grep -Fq "honk.settings(networkSelect.value, port, bootEnabledInput.checked, clashEnabledInput.checked, clashPort, clashSecret)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
+grep -Fq "honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
 git diff --check
 echo 'Static checks passed.'

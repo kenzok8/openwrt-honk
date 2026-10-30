@@ -25,118 +25,34 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  HONK_SOURCE_TAG: source-${{ github.run_id }}
 
 concurrency:
   group: honk-release-pipeline
   cancel-in-progress: false
 
 jobs:
-  doona:
-    name: Build and publish Doona
+  verify_source:
+    name: Verify pinned source assets
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Check package metadata and scripts
         run: bash scripts/check.sh
-      - name: Build Doona interface
-        run: ci/build-doona.sh
-      - name: Verify pinned Doona archive hash
-        run: bash scripts/check.sh
-      - uses: actions/upload-artifact@v6
-        with:
-          name: doona-source
-          path: |
-            artifacts/cache/doona-*.tar.gz
-            luci-app-honk/generated-doona-stage.mk
-          if-no-files-found: error
 
-  build-core:
-    name: Build honk-core (multi-arch)
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        with:
-          version: 0.14.1
-
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep zstd
-
-      - name: Build honk-core (multi-arch)
-        run: ci/build-core.sh
-
-      - uses: actions/upload-artifact@v6
-        with:
-          name: core-source
-          path: |
-            artifacts/cache/honk-core-*.tar.gz
-            honk/generated-stage.mk
-            honk/generated-provenance.json
-          if-no-files-found: error
-
-  publish_source:
-    name: Publish isolated source assets
-    needs: [doona, build-core]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v6
-        with:
-          path: source-artifacts
-          pattern: '*-source'
-      - name: Publish source assets for this run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          files=(source-artifacts/doona-source/artifacts/cache/*.tar.gz
-                 source-artifacts/doona-source/luci-app-honk/generated-doona-stage.mk
-                 source-artifacts/core-source/artifacts/cache/*.tar.gz
-                 source-artifacts/core-source/honk/generated-stage.mk
-                 source-artifacts/core-source/honk/generated-provenance.json)
-          for file in "${files[@]}"; do test -s "$file"; done
-          if ! gh release view "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release create "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
-              --target "${{ github.sha }}" --title "Source assets $HONK_SOURCE_TAG" \
-              --prerelease --latest=false
-          fi
-          test "$(gh api "repos/${{ github.repository }}/git/ref/tags/$HONK_SOURCE_TAG" --jq .object.sha)" = "${{ github.sha }}"
-          mkdir -p existing-source
-          for file in "${files[@]}"; do
-            name=${file##*/}
-            if gh release view "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
-              --json assets --jq '.assets[].name' 2>/dev/null | grep -Fxq "$name"; then
-              gh release download "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
-                --pattern "$name" --dir existing-source --clobber
-              cmp "$file" "existing-source/$name"
-            else
-              gh release upload "$HONK_SOURCE_TAG" "$file" --repo "${{ github.repository }}"
-            fi
-          done
+      - name: Download and hash every pinned asset
+        # The committed Makefiles name an immutable source-<run_id> tag, so this
+        # is exactly the download a plain feed build performs. No generated file
+        # may substitute for it.
+        run: bash scripts/verify-source-assets.sh --download
 
   build:
     name: ${{ matrix.arch }} · SDK ${{ matrix.sdk }}
-    needs: publish_source
+    needs: verify_source
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -167,20 +83,18 @@ jobs:
           path: .github/actions/gh-action-sdk
           persist-credentials: false
 
-      - name: Fetch core stage manifest
+      - name: Fetch core provenance
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # The manifest carries per-arch SHA256 hashes; building without it
-          # silently disables hash verification (Makefile falls back to SKIP).
-          gh release download "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
-            --pattern 'generated-stage.mk' --dir honk --clobber
-          # Provenance is installed as /usr/share/honk/provenance.json.
-          gh release download "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
+          # Packages download their archives straight from the source tag named
+          # in the Makefiles, hashes included, exactly like a feed build. Only
+          # provenance metadata still comes from the tag; it is installed as
+          # /usr/share/honk/provenance.json.
+          tag=$(sed -n 's/^HONK_SOURCE_TAG?=//p' honk/Makefile)
+          gh release download "$tag" --repo "${{ github.repository }}" \
             --pattern 'generated-provenance.json' --dir honk --clobber
-          gh release download "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
-            --pattern 'generated-doona-stage.mk' --dir luci-app-honk --clobber
 
       - name: Build packages
         id: sdk
@@ -267,9 +181,94 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  feed-check:
+    name: Feed build without generated files
+    needs: verify_source
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Refuse generated override files
+        # A plain feed build has no honk/generated-*.mk. If one appears here the
+        # check would silently mirror the CI override and prove nothing.
+        run: |
+          set -euo pipefail
+          for file in honk/generated-stage.mk luci-app-honk/generated-doona-stage.mk; do
+            [ ! -e "$file" ] || { echo "::error::$file must not exist in this check"; exit 1; }
+          done
+
+      - name: Check metadata
+        run: bash scripts/check.sh
+
+      - name: Prepare SDK action
+        uses: actions/checkout@v6
+        with:
+          repository: kenzok8/gh-action-sdk
+          ref: 44f98c51d04aebd1aa79fe4f603559c1ec2085da
+          path: .github/actions/gh-action-sdk
+          persist-credentials: false
+
+      - name: Build x86_64 from committed metadata only
+        id: sdk
+        continue-on-error: true
+        uses: ./.github/actions/gh-action-sdk
+        env:
+          CONTAINER: immortalwrt/sdk
+          ARCH: x86_64-openwrt-25.12
+          FEEDNAME: honk
+          PACKAGES: honk luci-app-honk
+          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
+          NO_REFRESH_CHECK: true
+          IGNORE_ERRORS: false
+          # Same indexing as the release matrix so this build differs from it in
+          # exactly one way: no generated override files.
+          INDEX: 1
+          KEY_BUILD: ${{ secrets.OPKG_KEY_BUILD }}
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+
+      - name: Show the build log
+        if: always()
+        run: |
+          set -euo pipefail
+          echo '===== downloads'
+          ls -l dl/honk-core-* dl/doona-* 2>/dev/null || true
+          sha256sum dl/honk-core-*.tar.gz dl/doona-*.tar.gz 2>/dev/null || true
+          echo '===== container logs'
+          find logs -name '*.txt' 2>/dev/null | tail -5 || true
+          for log in logs/package/feeds/honk/*/*.txt logs/feeds/honk/*/*.txt; do
+            [ -f "$log" ] || continue
+            echo "===== $log"
+            tail -80 "$log"
+          done || true
+          echo '===== packages'
+          find bin/packages/x86_64 -maxdepth 2 -type f \( -name '*.apk' -o -name '*.ipk' \) -print 2>/dev/null | head -20 || true
+
+      - name: Require the package build to pass
+        env:
+          SDK_OUTCOME: ${{ steps.sdk.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$SDK_OUTCOME" = success ] || {
+            echo "::error::plain feed build concluded $SDK_OUTCOME"
+            exit 1
+          }
+          for package in honk luci-app-honk; do
+            find bin/packages/x86_64/honk -maxdepth 1 -type f \
+              \( -name "$package-*.apk" -o -name "${package}_*.apk" \
+                 -o -name "$package-*.ipk" -o -name "${package}_*.ipk" \) \
+              -print -quit | grep -q . || {
+              echo "::error::$package missing from the plain feed build"
+              exit 1
+            }
+          done
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, feed-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -297,19 +296,9 @@ jobs:
           test "$(find dist -maxdepth 1 -type f \( -name '*.apk' -o -name '*.ipk' \) | wc -l)" -ge 19
           (cd dist && sha256sum ./*.apk ./*.ipk > SHA256SUMS)
 
-      - name: Read source asset hashes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p source-meta
-          gh release download "$HONK_SOURCE_TAG" --repo "${{ github.repository }}" \
-            --pattern 'generated-stage.mk' --dir source-meta
-
       - name: Record candidate and package manifest
         env:
           BASE_SHA: ${{ inputs.base_sha }}
-          SOURCE_TAG: ${{ env.HONK_SOURCE_TAG }}
           CANDIDATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -317,26 +306,34 @@ jobs:
           import hashlib
           import json
           import os
+          import re
           from pathlib import Path
 
           def assignments(path, separator):
               return dict(line.split(separator, 1) for line in Path(path).read_text().splitlines() if separator in line and not line.startswith('#'))
 
+          def assignment_any(path, name):
+              """Read NAME=..., NAME:=... or NAME?=... the way make would."""
+              for line in Path(path).read_text().splitlines():
+                  match = re.match(rf'^{re.escape(name)}[?:]?=', line)
+                  if match:
+                      return line[match.end():].strip()
+              raise SystemExit(f'{name} missing from {path}')
+
           pins = assignments('ci/pins.env', '=')
           core = assignments('honk/Makefile', ':=')
           doona = assignments('luci-app-honk/Makefile', ':=')
-          source = assignments('source-meta/generated-stage.mk', ':=')
           packages = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                       for path in sorted(Path('dist').iterdir()) if path.suffix in ('.apk', '.ipk')}
           manifest = {
               'candidate_sha': os.environ['CANDIDATE_SHA'],
               'base_sha': os.environ['BASE_SHA'],
-              'source_tag': os.environ['SOURCE_TAG'],
+              'source_tag': assignment_any('honk/Makefile', 'HONK_SOURCE_TAG'),
               'core_commit': pins['CORE_COMMIT'],
               'doona_commit': pins['DOONA_COMMIT'],
               'doona_archive': pins['DOONA_ARCHIVE'],
               'doona_archive_sha256': doona['PKG_HASH'],
-              'core_archives_sha256': {key: value for key, value in source.items() if key.startswith('HONK_HASH_')},
+              'core_archives_sha256': {key: value for key, value in core.items() if key.startswith('HONK_HASH_')},
               'honk_version': core['PKG_VERSION'] + '-r' + core['PKG_RELEASE'],
               'luci_version': doona['PKG_VERSION'] + '-r' + doona['PKG_RELEASE'],
               'sdk_sets': sorted(path.name for path in Path('all-artifacts').iterdir() if path.is_dir()),
@@ -509,7 +506,14 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          test "$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq .object.sha)" = "${{ github.sha }}"
+          # 轻量 tag 的 .object.sha 就是提交 SHA；带注释的 tag（git tag -a）这里
+          # 指向 tag 对象，真正的提交在 .object.object.sha，两种都要能过。
+          tag_ref_sha="$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.sha')"
+          tag_commit_sha="$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.object.sha // .object.sha')"
+          test "$tag_commit_sha" = "${{ github.sha }}" || {
+            echo "::error::tag $TAG resolves to $tag_commit_sha (ref $tag_ref_sha), expected ${{ github.sha }}"
+            exit 1
+          }
           mkdir -p published
           gh release download "$TAG" --repo "${{ github.repository }}" --dir published
           cp dist/SHA256SUMS published/SHA256SUMS.expected
