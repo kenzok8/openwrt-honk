@@ -132,31 +132,89 @@ jobs:
             bump_package luci-app-honk/Makefile
           fi
           bash scripts/check.sh
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Install core build tools
+        if: steps.detect.outputs.changed == 'true'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep zstd
+
+      - name: Install Rust
+        if: steps.detect.outputs.changed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Zig
+        if: steps.detect.outputs.changed == 'true'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.14.1
+
+      - name: Publish immutable source assets
+        id: assets
+        if: steps.detect.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HONK_SOURCE_TAG: source-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          . ci/pins.env
+          # Assets are built and published before the candidate commit exists,
+          # so the commit can carry their final tag and SHA-256 values. Tag names
+          # use the run id and are never overwritten: every version keeps its
+          # own verified set.
+          ci/build-doona.sh
+          ci/build-core.sh
+
+          tag="$HONK_SOURCE_TAG"
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --target "$(git rev-parse HEAD)" \
+              --title "Source assets $tag" --prerelease --latest=false
+          for file in \
+            "artifacts/cache/honk-core-$CORE_COMMIT-x86_64.tar.gz" \
+            "artifacts/cache/honk-core-$CORE_COMMIT-aarch64.tar.gz" \
+            "artifacts/cache/honk-core-$CORE_COMMIT-armv7.tar.gz" \
+            "artifacts/cache/$DOONA_ARCHIVE" \
+            honk/generated-stage.mk \
+            honk/generated-provenance.json \
+            luci-app-honk/generated-doona-stage.mk; do
+            test -s "$file" || { echo "::error::missing source asset $file"; exit 1; }
+            gh release upload "$tag" "$file"
+          done
+
+          # Write the tag and the real hashes into the package Makefiles; the
+          # commit below therefore describes exactly what a feed build downloads.
+          sed -i "s|^HONK_SOURCE_TAG?=.*|HONK_SOURCE_TAG?=$tag|" honk/Makefile luci-app-honk/Makefile
+          for arch in X86_64 AARCH64 ARMV7; do
+            hash=$(sed -n "s/^HONK_HASH_${arch}:=//p" honk/generated-stage.mk)
+            [ "${#hash}" -eq 64 ] || { echo "::error::missing HONK_HASH_${arch}"; exit 1; }
+            sed -i "s|^HONK_HASH_${arch}?=.*|HONK_HASH_${arch}?=$hash|" honk/Makefile
+          done
+          echo "source_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Verify committed metadata against the published assets
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          # Uses the committed (not generated) values, i.e. the download a plain
+          # feed build performs.
+          rm -f honk/generated-stage.mk luci-app-honk/generated-doona-stage.mk
+          bash scripts/check.sh
+          bash scripts/verify-source-assets.sh --download --tag '${{ steps.assets.outputs.source_tag }}'
+
+      - name: Commit candidate with pinned download metadata
+        id: commit
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
           git config user.name kenzok8
           git config user.email kenzok8@gmail.com
           git checkout -B "$STAGING"
           git add ci/pins.env honk/Makefile luci-app-honk/Makefile
-          git commit -m "Update Honk upstream pins" \
-            -m "改动：写入上游 pin，honk $(sed -n 's/^PKG_VERSION:=//p' honk/Makefile)-r$(sed -n 's/^PKG_RELEASE:=//p' honk/Makefile)，luci-app-honk $(sed -n 's/^PKG_VERSION:=//p' luci-app-honk/Makefile)-r$(sed -n 's/^PKG_RELEASE:=//p' luci-app-honk/Makefile)。" \
-            -m "原因：将上游变更固定到可验证的候选包。"
-          echo "staging_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
-
-      - name: Publish candidate branch and immutable Doona source
-        if: steps.detect.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          . ci/pins.env
+          git commit -m "Pin Honk and Doona source assets" \
+            -m "改动：写入上游 pin 与固定资产，honk $(sed -n 's/^PKG_VERSION:=//p' honk/Makefile)-r$(sed -n 's/^PKG_RELEASE:=//p' honk/Makefile)，luci-app-honk $(sed -n 's/^PKG_VERSION:=//p' luci-app-honk/Makefile)-r$(sed -n 's/^PKG_RELEASE:=//p' luci-app-honk/Makefile)，来源 ${{ steps.assets.outputs.source_tag }}。" \
+            -m "原因：让候选提交自带完整下载地址与校验值，普通 feed 编译不依赖生成文件。"
           git -c credential.helper='!gh auth git-credential' \
             push origin "HEAD:refs/heads/$STAGING"
-          if [ -s "artifacts/cache/$DOONA_ARCHIVE" ]; then
-            gh release view staging >/dev/null 2>&1 || \
-              gh release create staging --title 'staging assets' --prerelease --latest=false
-            gh release upload staging "artifacts/cache/$DOONA_ARCHIVE" --clobber
-          fi
+          echo "staging_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build, promote and verify full release
         id: verify
@@ -171,7 +229,7 @@ jobs:
             -f auto_publish=true -f base_sha='${{ steps.stage.outputs.base_sha }}')
           run_id=$(printf '%s\n' "$output" | sed -nE 's|.*actions/runs/([0-9]+).*|\1|p' | tail -1)
           case "$run_id" in ''|*[!0-9]*) echo "::error::cannot read release run ID: $output"; exit 1 ;; esac
-          expected_sha='${{ steps.stage.outputs.staging_sha }}'
+          expected_sha='${{ steps.commit.outputs.staging_sha }}'
           actual_sha=
           for _ in $(seq 1 60); do
             actual_sha=$(gh run view "$run_id" --json headSha --jq .headSha 2>/dev/null || true)
@@ -200,7 +258,7 @@ jobs:
             echo "## Honk upstream update published"
             echo ""
             echo "Staging branch: \`$STAGING\`"
-            echo "Validated commit: \`${{ steps.stage.outputs.staging_sha }}\`"
+            echo "Validated commit: \`${{ steps.commit.outputs.staging_sha }}\`"
             echo "Formal release: \`$release_tag\`"
             echo ""
             echo "Doona, Honk core and all 12 SDK package sets passed; main, Release and R2 were updated."

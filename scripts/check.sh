@@ -8,7 +8,7 @@ for tool in bash sh node sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
-for script in ci/build-doona.sh scripts/check.sh; do
+for script in ci/build-doona.sh scripts/check.sh scripts/verify-source-assets.sh; do
 	bash -n "$script"
 done
 for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
