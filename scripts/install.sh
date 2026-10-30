@@ -3,10 +3,10 @@
 set -eu
 
 REPO="kenzok8/openwrt-honk"
-# 取最近 10 个 release 再过滤，而不是 /releases?per_page=1 或 /releases/latest：
+# 取最近 30 个 release 再过滤，而不是 /releases?per_page=1 或 /releases/latest：
 # 前者会抓到 CI 的 source-*/candidate-* 预发布（只有源码包、没有安装包），
 # 后者在全部为预发布时返回 404。这里只要非预发布、且 tag 形如 v2026.xx… 的正式版。
-GH_API_LIST="https://api.github.com/repos/${REPO}/releases?per_page=10"
+GH_API_LIST="https://api.github.com/repos/${REPO}/releases?per_page=30"
 GH_API_TAG="https://api.github.com/repos/${REPO}/releases/tags"
 GH_PROXY="${GH_PROXY:-https://ghfast.top/}"
 GEO_FEED="https://down.dllkids.xyz/openwrt-feed"
@@ -131,7 +131,7 @@ main() {
 		                tag = (line ~ /^v[0-9][0-9][0-9][0-9]\./) ? line : "" }
 		tag != "" && /"prerelease":/ { if ($0 ~ /:[[:space:]]*false/) { print tag; exit }; tag = "" }
 	')"
-	[ -n "$stable_tag" ] || { echo "未找到正式版 Release（最近 10 个全是预发布）。" >&2; exit 1; }
+	[ -n "$stable_tag" ] || { echo "未找到正式版 Release（最近 30 个全是预发布）。" >&2; exit 1; }
 	echo "使用正式版：$stable_tag"
 
 	release_json="$(fetch_text "$GH_API_TAG/$stable_tag")"
