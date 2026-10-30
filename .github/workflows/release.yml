@@ -258,8 +258,8 @@ jobs:
           }
           for package in honk luci-app-honk; do
             find bin/packages/x86_64/honk -maxdepth 1 -type f \
-              \( -name "$package-*.apk" -o -name "$package_*.apk" \
-                 -o -name "$package-*.ipk" -o -name "$package_*.ipk" \) \
+              \( -name "$package-*.apk" -o -name "${package}_*.apk" \
+                 -o -name "$package-*.ipk" -o -name "${package}_*.ipk" \) \
               -print -quit | grep -q . || {
               echo "::error::$package missing from the plain feed build"
               exit 1
