@@ -32,6 +32,35 @@ test "$CORE_COMMIT" = "$(sed -n 's/^CORE_COMMIT:=//p' honk/Makefile)"
 test "$DOONA_ARCHIVE" = "$(sed -n 's/^PKG_SOURCE:=//p' luci-app-honk/Makefile)"
 grep -q '^PKG_HASH:=[0-9a-f]\{64\}$' luci-app-honk/Makefile
 
+# Download metadata must be complete and immutable enough for a plain feed
+# build, i.e. a build without honk/generated-stage.mk. Any missing hash or a
+# mutable download location breaks everyone who compiles the feed themselves.
+for makefile in honk/Makefile luci-app-honk/Makefile; do
+	grep -q '^HONK_SOURCE_TAG?=source-[0-9A-Za-z._-]\+$' "$makefile" || {
+		echo "$makefile: missing or malformed HONK_SOURCE_TAG" >&2
+		exit 1
+	}
+	! grep -q 'releases/download/staging' "$makefile" || {
+		echo "$makefile: download URL points at the mutable staging release" >&2
+		exit 1
+	}
+done
+test "$(sed -n 's/^HONK_SOURCE_TAG?=//p' honk/Makefile)" = \
+	"$(sed -n 's/^HONK_SOURCE_TAG?=//p' luci-app-honk/Makefile)" || {
+	echo 'honk and luci-app-honk must reference the same source tag' >&2
+	exit 1
+}
+for arch in X86_64 AARCH64 ARMV7; do
+	grep -q "^HONK_HASH_${arch}?=[0-9a-f]\{64\}$" honk/Makefile || {
+		echo "honk/Makefile: HONK_HASH_${arch} is missing or not a SHA-256" >&2
+		exit 1
+	}
+done
+! grep -n 'SKIP' honk/Makefile luci-app-honk/Makefile || {
+	echo 'package Makefiles must not fall back to a skipped hash' >&2
+	exit 1
+}
+
 node <<'NODE'
 const fs = require('fs');
 const lines = fs.readFileSync('ci/patches/doona-openwrt.patch', 'utf8').split('\n');
