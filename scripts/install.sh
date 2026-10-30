@@ -3,9 +3,11 @@
 set -eu
 
 REPO="kenzok8/openwrt-honk"
-# 用 /releases?per_page=1 而不是 /releases/latest：后者在全部为
-# pre-release 时返回 404。
-GH_API="https://api.github.com/repos/${REPO}/releases?per_page=1"
+# 取最近 10 个 release 再过滤，而不是 /releases?per_page=1 或 /releases/latest：
+# 前者会抓到 CI 的 source-*/candidate-* 预发布（只有源码包、没有安装包），
+# 后者在全部为预发布时返回 404。这里只要非预发布、且 tag 形如 v2026.xx… 的正式版。
+GH_API_LIST="https://api.github.com/repos/${REPO}/releases?per_page=10"
+GH_API_TAG="https://api.github.com/repos/${REPO}/releases/tags"
 GH_PROXY="${GH_PROXY:-https://ghfast.top/}"
 GEO_FEED="https://down.dllkids.xyz/openwrt-feed"
 TMP_DIR="/tmp/honk-install"
@@ -119,8 +121,21 @@ main() {
 
 	echo "检测到：架构 $ARCH · SDK $SDK · $PM"
 
-	release_json="$(fetch_text "$GH_API")"
-	[ -n "$release_json" ] || { echo "无法获取最新 Release 信息。" >&2; exit 1; }
+	release_list="$(fetch_text "$GH_API_LIST")"
+	[ -n "$release_list" ] || { echo "无法获取 Release 列表。" >&2; exit 1; }
+
+	# 从列表里挑第一个正式版：非预发布，且 tag 形如 v2026.xx…。
+	# 不用 jq（设备上不一定有），只用 awk 按 tag_name/prerelease 配对挑。
+	stable_tag="$(printf '%s' "$release_list" | awk '
+		/"tag_name":/ { line=$0; sub(/^.*"tag_name": *"/, "", line); sub(/".*$/, "", line);
+		                tag = (line ~ /^v[0-9][0-9][0-9][0-9]\./) ? line : "" }
+		tag != "" && /"prerelease":/ { if ($0 ~ /:[[:space:]]*false/) { print tag; exit }; tag = "" }
+	')"
+	[ -n "$stable_tag" ] || { echo "未找到正式版 Release（最近 10 个全是预发布）。" >&2; exit 1; }
+	echo "使用正式版：$stable_tag"
+
+	release_json="$(fetch_text "$GH_API_TAG/$stable_tag")"
+	[ -n "$release_json" ] || { echo "无法获取 Release $stable_tag 的信息。" >&2; exit 1; }
 
 	# 从 release assets 里挑出本机架构的 honk 与 luci-app-honk。
 	# 注意：honk 模式必须排除 luci-app-honk，否则 head -n 1 可能抓错包。
