@@ -224,17 +224,23 @@ jobs:
           EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: false
-          INDEX: 0
-          # Stream the make output so a failure here is readable in the job log
-          # instead of being buried in the container's own log file.
-          BUILD_LOG: 0
+          # Same indexing as the release matrix so this build differs from it in
+          # exactly one way: no generated override files.
+          INDEX: 1
           KEY_BUILD: ${{ secrets.OPKG_KEY_BUILD }}
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
 
-      - name: Show what the build produced
-        if: always()
+      - name: Show the build log on failure
+        if: failure()
         run: |
-          find bin/packages/x86_64 -maxdepth 2 -type f \( -name '*.apk' -o -name '*.ipk' \) -print 2>/dev/null | head -50 || true
+          set -euo pipefail
+          find logs -name '*.txt' 2>/dev/null | tail -5
+          for log in logs/package/feeds/honk/*/*.txt logs/feeds/honk/*/*.txt; do
+            [ -f "$log" ] || continue
+            echo "===== $log"
+            tail -60 "$log"
+          done || true
+          find bin/packages/x86_64 -maxdepth 2 -type f \( -name '*.apk' -o -name '*.ipk' \) -print 2>/dev/null | head -20 || true
 
       - name: Require the package build to pass
         env:
