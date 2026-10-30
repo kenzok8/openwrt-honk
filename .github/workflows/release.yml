@@ -230,16 +230,21 @@ jobs:
           KEY_BUILD: ${{ secrets.OPKG_KEY_BUILD }}
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
 
-      - name: Show the build log on failure
-        if: failure()
+      - name: Show the build log
+        if: always()
         run: |
           set -euo pipefail
-          find logs -name '*.txt' 2>/dev/null | tail -5
+          echo '===== downloads'
+          ls -l dl/honk-core-* dl/doona-* 2>/dev/null || true
+          sha256sum dl/honk-core-*.tar.gz dl/doona-*.tar.gz 2>/dev/null || true
+          echo '===== container logs'
+          find logs -name '*.txt' 2>/dev/null | tail -5 || true
           for log in logs/package/feeds/honk/*/*.txt logs/feeds/honk/*/*.txt; do
             [ -f "$log" ] || continue
             echo "===== $log"
-            tail -60 "$log"
+            tail -80 "$log"
           done || true
+          echo '===== packages'
           find bin/packages/x86_64 -maxdepth 2 -type f \( -name '*.apk' -o -name '*.ipk' \) -print 2>/dev/null | head -20 || true
 
       - name: Require the package build to pass
