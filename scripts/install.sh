@@ -116,7 +116,25 @@ print_install_hint() {
 	fi
 }
 
+# honk-core 的 eBPF 数据面启动时硬校验内核版本（低于 6.12 直接拒绝），所以
+# 低内核固件装上也跑不起来；这里提前说清楚，别让人装完才发现。
+kernel_ok() {
+	release="$(uname -r)"
+	major="${release%%.*}"
+	minor="${release#*.}"
+	minor="${minor%%.*}"
+	case "$major" in ''|*[!0-9]*) return 1 ;; esac
+	case "$minor" in ''|*[!0-9]*) return 1 ;; esac
+	[ "$major" -gt 6 ] || { [ "$major" -eq 6 ] && [ "$minor" -ge 12 ]; }
+}
+
 main() {
+	if ! kernel_ok; then
+		echo "当前内核 $(uname -r) 低于 honk 的要求：eBPF 数据面需要 Linux 6.12 及以上" >&2
+		echo "（OpenWrt / ImmortalWrt 25.12 分支起）。请先升级固件再安装。" >&2
+		exit 1
+	fi
+
 	PM="$(detect_manager)"
 	[ "$PM" = unsupported ] && { echo "无法识别包管理器（opkg/apk）。" >&2; exit 1; }
 

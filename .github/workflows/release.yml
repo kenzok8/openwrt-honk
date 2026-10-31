@@ -62,12 +62,14 @@ jobs:
         arch:
           - aarch64_cortex-a53
           - aarch64_cortex-a72
+          - aarch64_cortex-a76
           - aarch64_generic
           - arm_cortex-a7_neon-vfpv4
           - arm_cortex-a9
           - x86_64
+        # 只发 SDK 25.12（内核 6.12）：honk-core 的 eBPF 数据面在启动时硬校验
+        # Linux 6.12+，24.10 的 6.6 内核装上也跑不起来，不再出 IPK。
         sdk:
-          - "24.10"
           - "25.12"
 
     steps:
@@ -290,11 +292,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           count=$(find all-artifacts -mindepth 1 -maxdepth 1 -type d -name 'packages-sdk*' | wc -l)
-          test "$count" -eq 12 || { echo "::error::expected 12 SDK artifacts, got $count"; exit 1; }
+          test "$count" -eq 7 || { echo "::error::expected 7 SDK artifacts, got $count"; exit 1; }
           find all-artifacts -path "*/release/*" -type f -exec cp -v {} dist/ \;
-          # LuCI's SDK 24.10 _all.ipk is shared by all six architectures.
-          test "$(find dist -maxdepth 1 -type f \( -name '*.apk' -o -name '*.ipk' \) | wc -l)" -ge 19
-          (cd dist && sha256sum ./*.apk ./*.ipk > SHA256SUMS)
+          # 7 archs x 2 packages, all APK (SDK 25.12 only).
+          test "$(find dist -maxdepth 1 -type f -name '*.apk' | wc -l)" -ge 14
+          (cd dist && sha256sum ./*.apk > SHA256SUMS)
 
       - name: Record candidate and package manifest
         env:
@@ -373,7 +375,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
-          ARCHS="aarch64_cortex-a53 aarch64_cortex-a72 aarch64_generic arm_cortex-a7_neon-vfpv4 arm_cortex-a9 x86_64"
+          ARCHS="aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76 aarch64_generic arm_cortex-a7_neon-vfpv4 arm_cortex-a9 x86_64"
           PREVIOUS_TAG="$(git tag --sort=-creatordate | grep '^v' | grep -v "^${TAG}$" | head -1 || true)"
 
           if [ -n "$PREVIOUS_TAG" ]; then
@@ -423,32 +425,12 @@ jobs:
 
             echo "## Packages / 安装包"
             echo ""
-            cell_ipk() {
-              pkg="$1"; arch="$2"; fallback="$3"
-              f=$(ls dist/${pkg}_*_${arch}.ipk 2>/dev/null | head -1)
-              [ -n "$f" ] && echo "[$(basename $f)](${BASE}/$(basename $f))" || echo "$fallback"
-            }
             cell_apk() {
               pkg="$1"; arch="$2"
               f=$(ls dist/${pkg}-*-${arch}.apk 2>/dev/null | head -1)
               [ -n "$f" ] && echo "[$(basename $f)](${BASE}/$(basename $f))" || echo "—"
             }
-            noarch_ipk() {
-              pkg="$1"
-              f=$(ls dist/${pkg}_*_all.ipk 2>/dev/null | head -1)
-              [ -n "$f" ] && echo "[$(basename $f)](${BASE}/$(basename $f))" || echo "—"
-            }
 
-            echo "## 📦 SDK 24.10 · 稳定版 (IPK)"
-            echo ""
-            echo "| 架构 | honk | luci-app-honk |"
-            echo "| :--- | :--- | :--- |"
-            luci_fallback=$(noarch_ipk luci-app-honk)
-            for arch in $ARCHS; do
-              echo "| \`${arch}\` | $(cell_ipk honk $arch —) | $(cell_ipk luci-app-honk $arch "$luci_fallback") |"
-            done
-
-            echo ""
             echo "## 📦 SDK 25.12 · 稳定版 (APK)"
             echo ""
             echo "| 架构 | honk | luci-app-honk |"

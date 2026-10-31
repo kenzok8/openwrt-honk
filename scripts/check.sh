@@ -196,6 +196,15 @@ if sed -n 's/^[[:space:]]*DEPENDS:=//p' honk/Makefile luci-app-honk/Makefile | g
 	echo 'DEPENDS must not name libubox directly; rely on jshn instead' >&2
 	exit 1
 fi
+# honk-core 的 eBPF 数据面启动时硬校验 Linux 6.12+，所以只发 SDK 25.12（内核 6.12）；
+# 24.10 的 6.6 内核装上也跑不起来，矩阵里不能再加回来。
+grep -Fq '          - "25.12"' .github/workflows/release.yml
+! grep -Fq '          - "24.10"' .github/workflows/release.yml || {
+	echo 'release.yml must not build SDK 24.10 packages: honk needs kernel 6.12+' >&2
+	exit 1
+}
+grep -Fq 'aarch64_cortex-a76' .github/workflows/release.yml
+grep -Fq 'kernel_ok' scripts/install.sh
 grep -Fq "! rg -n 'MockBackend|mockBackend|mock-backend' dist" ci/build-doona.sh
 ! grep -Fq "! rg -n 'mock backend|MockBackend|mockBackend' dist" ci/build-doona.sh
 grep -Fq 'node tools/notices.mjs "$STAGE"' ci/build-doona.sh

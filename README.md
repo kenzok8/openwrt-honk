@@ -21,6 +21,18 @@
 - **luci-app-honk** —— LuCI 管理界面：概览、配置（订阅 / 粘贴节点 / dae 导入）、日志、维护（Geo 数据更新、软件包升级、配置备份、系统检查）。
 - **Doona** —— 核心自带 Web 界面（随 LuCI 包安装到 `/usr/share/doona`），管理节点、分组、路由、DNS 与订阅，不另起服务。
 
+## 支持范围
+
+honk 的 eBPF 数据面要求 **Linux 6.12+**：24.10 及更早（内核 6.6 / 5.15）装上也起不来，所以只发 **OpenWrt / ImmortalWrt 25.12** 的包，安装脚本会先查内核版本，低于 6.12 直接退出。
+
+| 架构 | 状态 |
+| :--- | :--- |
+| `x86_64` | 主力支持（软路由） |
+| `aarch64_cortex-a53` · `aarch64_cortex-a72` · `aarch64_cortex-a76` · `aarch64_generic` | 支持，ARM64 设备（含树莓派 5 等 a76 设备） |
+| `arm_cortex-a7_neon-vfpv4` · `arm_cortex-a9` | 实验性：25.12 内核满足 6.12，但上游只发 x86_64/aarch64，这两个由源码交叉编译，尚未做真机验证 |
+
+安装包只提供 `.apk`（25.12 起 OpenWrt 换用 apk），不再提供 `.ipk`。
+
 ## 包含什么
 
 - `honk` —— honk-core 二进制 + 服务脚本 + 默认配置
@@ -76,7 +88,7 @@ ci/build-doona.sh
 ci/build-core.sh
 ```
 
-脚本将源码归档写入被 Git 忽略的 `artifacts/cache/`。12 组 SDK 安装包由 `release.yml` 构建；它从本次运行独立的源码资产 tag 下载带 SHA256 的阶段文件，任一散列不匹配或安装包缺失都会使构建失败。
+脚本将源码归档写入被 Git 忽略的 `artifacts/cache/`。7 组 SDK 安装包（7 架构 × SDK 25.12）由 `release.yml` 构建；它从本次运行独立的源码资产 tag 下载带 SHA256 的阶段文件，任一散列不匹配或安装包缺失都会使构建失败。
 
 ## 依赖
 
