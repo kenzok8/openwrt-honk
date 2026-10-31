@@ -198,6 +198,9 @@ grep -Fq '@(x86_64||aarch64||arm)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
 grep -Fq '+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
+# 管理口自保护规则由启动时按本机地址重写，标记块与同步函数必须都在
+grep -qxF '    # honk:local-direct-begin' honk/files/config.dae
+grep -Fq 'sync_local_direct()' honk/files/control.sh
 if sed -n 's/^[[:space:]]*DEPENDS:=//p' honk/Makefile luci-app-honk/Makefile | grep -Fq '+libubox'; then
 	echo 'DEPENDS must not name libubox directly; rely on jshn instead' >&2
 	exit 1
