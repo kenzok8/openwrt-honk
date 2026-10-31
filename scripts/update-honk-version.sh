@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
-# Manually advance the pinned honk-core revision (Glassyiris/honk feat/native-api).
+# Manually advance the pinned honk-core revision (upstream daeuniverse/honk main).
 # The per-architecture tarballs and hashes are produced by the release workflow's
 # ci/build-core.sh, so this script only moves the source pin and bumps the version.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UPSTREAM="${HONK_UPSTREAM_REPO:-https://github.com/Glassyiris/honk.git}"
-BRANCH="${HONK_UPSTREAM_BRANCH:-feat/native-api}"
-
-command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
 
 # shellcheck disable=SC1091
 . "$REPO_DIR/ci/pins.env"
+
+UPSTREAM="${HONK_UPSTREAM_REPO:-$CORE_REPOSITORY}"
+BRANCH="${HONK_UPSTREAM_BRANCH:-$CORE_BRANCH}"
+
+command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
 
 core_new="$(git ls-remote "$UPSTREAM" "refs/heads/$BRANCH" | cut -f1)"
 if ! [[ "$core_new" =~ ^[0-9a-f]{40}$ ]]; then

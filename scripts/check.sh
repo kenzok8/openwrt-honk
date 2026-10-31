@@ -22,6 +22,16 @@ done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
+# 核心跟随上游 daeuniverse/honk 的 main。曾经跟着一条 fork 的 feat/native-api
+# 分支，那条分支冻结 11 天，pin 落后上游 111 个 commit 都没人察觉。
+grep -q '^CORE_REPOSITORY=https://github.com/daeuniverse/honk.git$' ci/pins.env
+grep -q '^CORE_BRANCH=main$' ci/pins.env
+# 拼一下名字，免得 grep 扫到本文件里的字面量而误报。
+fork_owner="Glassy""iris"
+! grep -rIq "$fork_owner" --exclude-dir=.git --exclude-dir=.codegraph --exclude-dir=artifacts . || {
+	echo 'honk-core must track upstream daeuniverse/honk, not a fork mirror' >&2
+	exit 1
+}
 grep -q '^CORE_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_PATCH_SHA256=[0-9a-f]\{64\}$' ci/pins.env

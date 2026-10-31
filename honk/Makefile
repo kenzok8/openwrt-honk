@@ -8,7 +8,7 @@ PKG_NAME:=honk
 PKG_VERSION:=2026.10.24
 PKG_RELEASE:=3
 
-# Pinned honk-core revision (Glassyiris/honk feat/native-api), cross-compiled by
+# Pinned honk-core revision (upstream daeuniverse/honk main), cross-compiled by
 # ci/build-core.sh. Every release run publishes its core archives under an
 # immutable source-<run_id> tag; the tag and SHA-256 values below are the exact
 # assets behind CORE_COMMIT, so a plain feed build downloads and verifies them
@@ -59,7 +59,7 @@ define Package/honk
   CATEGORY:=Network
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
-  URL:=https://github.com/Glassyiris/honk
+  URL:=https://github.com/daeuniverse/honk
   # No +libubox: its package name carries an ABI version stamp (libubox20260213),
   # so depending on it directly locks the apk to one firmware ABI. The scripts
   # only need /usr/share/libubox/jshn.sh, which jshn provides, and honk-core is

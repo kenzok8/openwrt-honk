@@ -109,7 +109,7 @@ ci/build-core.sh
 
 ## 致谢
 
-- [honk](https://github.com/Glassyiris/honk) — eBPF 透明代理核心
+- [honk](https://github.com/daeuniverse/honk) — eBPF 透明代理核心
 - [doona](https://github.com/Zakkaus/doona) — 核心 Web 界面
 
 ## 许可证

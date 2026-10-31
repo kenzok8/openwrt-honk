@@ -43,7 +43,7 @@ jobs:
             fi
           }
 
-          core_new=$(git ls-remote https://github.com/Glassyiris/honk.git refs/heads/feat/native-api | cut -f1)
+          core_new=$(git ls-remote "$CORE_REPOSITORY" "refs/heads/$CORE_BRANCH" | cut -f1)
           doona_new=$(git ls-remote https://github.com/Zakkaus/doona.git HEAD | cut -f1)
           require_sha "$core_new" core
           require_sha "$doona_new" doona
