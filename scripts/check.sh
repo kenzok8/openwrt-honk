@@ -22,13 +22,12 @@ done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
-# 核心跟随上游 daeuniverse/honk 的 main。曾经跟着一条 fork 的 feat/native-api
-# 分支，那条分支冻结 11 天，pin 落后上游 111 个 commit 都没人察觉。
+# 核心必须跟上游 daeuniverse/honk main：跟 fork 分支曾让 pin 冻了 11 天。
 grep -q '^CORE_REPOSITORY=https://github.com/daeuniverse/honk.git$' ci/pins.env
 grep -q '^CORE_BRANCH=main$' ci/pins.env
-# 拼一下名字，免得 grep 扫到本文件里的字面量而误报。
+# 名字拆开避免自匹配；只扫 pin 与脚本，Doona 源码里提到这个 fork 是正常的。
 fork_owner="Glassy""iris"
-! grep -rIq "$fork_owner" --exclude-dir=.git --exclude-dir=.codegraph --exclude-dir=artifacts . || {
+! grep -rIq "$fork_owner" ci/pins.env honk/Makefile luci-app-honk/Makefile README.md scripts .github/workflows || {
 	echo 'honk-core must track upstream daeuniverse/honk, not a fork mirror' >&2
 	exit 1
 }
@@ -199,15 +198,10 @@ grep -Fq '@(x86_64||aarch64||arm)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
 grep -Fq '+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
-# libubox is packaged under an ABI-versioned name (libubox20260213), so listing it
-# in DEPENDS pins the apk to one firmware ABI. The scripts only need jshn.sh, which
-# the jshn package provides together with the device's own libubox.
 if sed -n 's/^[[:space:]]*DEPENDS:=//p' honk/Makefile luci-app-honk/Makefile | grep -Fq '+libubox'; then
 	echo 'DEPENDS must not name libubox directly; rely on jshn instead' >&2
 	exit 1
 fi
-# honk-core 的 eBPF 数据面启动时硬校验 Linux 6.12+，所以只发 SDK 25.12（内核 6.12）；
-# 24.10 的 6.6 内核装上也跑不起来，矩阵里不能再加回来。
 grep -Fq '          - "25.12"' .github/workflows/release.yml
 ! grep -Fq '          - "24.10"' .github/workflows/release.yml || {
 	echo 'release.yml must not build SDK 24.10 packages: honk needs kernel 6.12+' >&2

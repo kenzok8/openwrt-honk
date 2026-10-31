@@ -29,9 +29,6 @@ define Package/luci-app-honk
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI support for Honk
-  # +honk already brings jshn, which ships /usr/share/libubox/jshn.sh. Depending
-  # on libubox directly would pin the ABI-versioned package name (libubox20260213)
-  # to one firmware build.
   DEPENDS:=+honk +rpcd +luci-base +cgi-io +jsonfilter
   PKGARCH:=all
   URL:=https://github.com/kenzok8/openwrt-honk

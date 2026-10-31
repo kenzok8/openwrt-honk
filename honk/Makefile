@@ -60,10 +60,7 @@ define Package/honk
   SUBMENU:=Web Servers/Proxies
   TITLE:=Honk transparent proxy core
   URL:=https://github.com/daeuniverse/honk
-  # No +libubox: its package name carries an ABI version stamp (libubox20260213),
-  # so depending on it directly locks the apk to one firmware ABI. The scripts
-  # only need /usr/share/libubox/jshn.sh, which jshn provides, and honk-core is
-  # a static binary - so let jshn pull in the device's own libubox.
+  # 不直接依赖 libubox：包名带 ABI 日期戳，会锁死固件；脚本只用 jshn 提供的 jshn.sh。
   DEPENDS:=@(x86_64||aarch64||arm) +ca-bundle +ip-full +ubus +kmod-sched-core +kmod-sched-bpf +kmod-veth +kmod-nft-queue +jsonfilter +jshn +sqlite3-cli +usign +coreutils-stat +v2ray-geoip +v2ray-geosite +@KERNEL_DEBUG_INFO_BTF
 endef
 

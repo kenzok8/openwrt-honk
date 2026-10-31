@@ -103,8 +103,6 @@ apk_installed_version() {
 	apk list --installed "$1" | awk -v expected="$1-$2" '$1 == expected { found = 1 } END { exit !found }'
 }
 
-# 原始报错本身信息量最大，这里只补一句「接下来做什么」，不针对具体包名做
-# 匹配——依赖名带 ABI 日期戳、kmod 绑定内核版本，都会走到这里。
 print_install_hint() {
 	_output="$1"
 	echo "安装失败（$PM 退出码 ${install_rc}）。上面几行就是原始报错，请完整贴到" >&2
@@ -116,8 +114,6 @@ print_install_hint() {
 	fi
 }
 
-# honk-core 的 eBPF 数据面启动时硬校验内核版本（低于 6.12 直接拒绝），所以
-# 低内核固件装上也跑不起来；这里提前说清楚，别让人装完才发现。
 kernel_ok() {
 	release="$(uname -r)"
 	major="${release%%.*}"

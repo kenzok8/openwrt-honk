@@ -67,8 +67,7 @@ jobs:
           - arm_cortex-a7_neon-vfpv4
           - arm_cortex-a9
           - x86_64
-        # 只发 SDK 25.12（内核 6.12）：honk-core 的 eBPF 数据面在启动时硬校验
-        # Linux 6.12+，24.10 的 6.6 内核装上也跑不起来，不再出 IPK。
+        # 只发 SDK 25.12：honk 要求内核 6.12+。
         sdk:
           - "25.12"
 
