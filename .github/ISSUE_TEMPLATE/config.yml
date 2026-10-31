@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安装与配置文档
+    url: https://github.com/kenzok8/openwrt-honk#readme
+    about: 初始化、订阅写法、内核要求（6.12+）先看这里
+  - name: 上游协议与内核实现
+    url: https://github.com/daeuniverse/honk/issues
+    about: QUIC 协议实现、eBPF 数据面行为这类问题，上游仓库更合适

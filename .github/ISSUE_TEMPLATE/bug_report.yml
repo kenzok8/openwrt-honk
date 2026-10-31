@@ -1,0 +1,95 @@
+name: 问题反馈
+description: 节点不通、订阅导不进来、启动异常或 LuCI 界面问题
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前先跑一次 `logread -e honk | tail -100`，多数问题日志里已经写清楚原因。
+        订阅地址、UUID、密码请打码，配置里不要留着真实凭据。
+
+        > 可以用 AI 辅助撰写，但提交前须逐条核实全部内容。
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 问题类型
+      options:
+        - 节点或订阅不可用
+        - 启动、重载或崩溃
+        - LuCI 界面
+        - 性能与资源占用
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: honk 版本
+      description: 执行 `honk-core --version`，或看 LuCI 概览页
+      placeholder: v0.1.0-beta.4 · 包 2026.10.31-r2
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 设备与架构
+      description: 机型、架构、内核版本，内核低于 6.12 直接装不起来
+      placeholder: N100 · x86_64 · 6.12.55
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: 固件
+      description: 系统与版本
+      placeholder: ImmortalWrt 25.12 / OpenWrt 25.12
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象
+      description: 出了什么问题，期望是什么
+      placeholder: 订阅导入后 17 个节点测速全部不可用，但同一份订阅在 dae 上正常
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 服务 → Honk → 配置 → 添加订阅
+        2. 保存并重载
+        3. 打开 Doona 测试全部节点
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: |
+        粘贴 `logread -e honk | tail -100`。
+        节点问题请附上出错节点的分享链接（口令可打码），并说明订阅是链接列表还是 Clash YAML。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 相关配置
+      description: 看 /etc/honk/config.dae 的相关片段，订阅地址和密码删掉
+      render: ini
+
+  - type: checkboxes
+    id: self-check
+    attributes:
+      label: 自查
+      options:
+        - label: 已搜索过现有 issue
+        - label: 已脱敏，没贴订阅地址、UUID 和密码
+        - label: 内容已核实（含 AI 辅助撰写的部分）

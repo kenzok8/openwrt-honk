@@ -385,45 +385,97 @@ jobs:
 
           git log --format='%s%x1f%b%x1e' "$RANGE" > commits.raw
 
-          write_section() {
-            title="$1"
-            pattern="$2"
-            awk -v title="$title" -v pattern="$pattern" '
-              BEGIN { RS = "\036"; FS = "\037"; count = 0 }
-              {
-                subject = $1; body = $2
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", subject)
-                if (subject == "" || subject ~ /^Merge /) next
-                if (subject ~ pattern) {
-                  item = subject
-                  sub(/^[a-z]+([(][^)]+[)])?!?:[[:space:]]*/, "", item)
-                  lines[++count] = "- " item
-                }
-              }
-              END {
-                if (count > 0) { print "## " title; print ""; for (i = 1; i <= count; i++) print lines[i]; print "" }
-              }
-            ' commits.raw
-          }
-
+          # 提交正文的「改动：」就是中文摘要；没有英文前缀时按关键词归类，免得整篇说明空着。
           {
             echo "# openwrt-honk ${TAG}"
             echo ""
             if [ -n "$PREVIOUS_TAG" ]; then
-              echo "_Changes since ${PREVIOUS_TAG} / 自 ${PREVIOUS_TAG} 以来的更新。_"
+              echo "_自 ${PREVIOUS_TAG} 以来的更新。_"
             else
-              echo "_Initial release notes / 初始发布说明。_"
+              echo "_初始发布说明。_"
             fi
             echo ""
-            write_section "New Features / 新功能" '^feat([(][^)]+[)])?!?:'
-            write_section "Improvements / 改进" '^(perf|refactor)([(][^)]+[)])?!?:'
-            write_section "Bug Fixes / 问题修复" '^fix([(][^)]+[)])?!?:'
-            write_section "Build & Release / 构建与发布" '^(ci|build)([(][^)]+[)])?!?:'
-            write_section "Documentation / 文档" '^docs([(][^)]+[)])?!?:'
-            write_section "Maintenance / 维护" '^(chore|test)([(][^)]+[)])?!?:'
+            awk '
+              BEGIN {
+                RS = "\036"; FS = "\037"
+                order = "feat fix improve build docs chore change"
+              }
+              {
+                subject = $1; body = $2
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", subject)
+                if (subject == "" || subject ~ /^Merge /) next
 
-            echo "## Packages / 安装包"
-            echo ""
+                summary = ""
+                cnt = split(body, bl, "\n")
+                for (i = 1; i <= cnt; i++) {
+                  if (bl[i] ~ /^改动[：:]/) {
+                    line = bl[i]
+                    sub(/^改动[：:][[:space:]]*/, "", line)
+                    summary = line
+                    break
+                  }
+                }
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", summary)
+
+                if (subject ~ /^(feat|feature)([(][^)]+[)])?!?:/) cat = "feat"
+                else if (subject ~ /^fix([(][^)]+[)])?!?:/) cat = "fix"
+                else if (subject ~ /^(perf|refactor)([(][^)]+[)])?!?:/) cat = "improve"
+                else if (subject ~ /^(ci|build|deps)([(][^)]+[)])?!?:/) cat = "build"
+                else if (subject ~ /^docs([(][^)]+[)])?!?:/) cat = "docs"
+                else if (subject ~ /^(chore|test)([(][^)]+[)])?!?:/) cat = "chore"
+                else if (summary ~ /修复|修正|避免|不再|防止|回滚|还原|解决/) cat = "fix"
+                else if (summary ~ /README|文档|注释|翻译/) cat = "docs"
+                else if (summary ~ /pin|nightly|构建|编译|打包|workflow|依赖/) cat = "build"
+                else if (summary ~ /新增|支持|加入|引入|加上|增加/) cat = "feat"
+                else cat = "change"
+
+                item = (summary != "" ? summary : subject)
+                if (summary == "") sub(/^[a-z]+([(][^)]+[)])?!?:[[:space:]]*/, "", item)
+                gsub(/[。.]$/, "", item)
+
+                # 提交里出现的 #123 当引用号附在句末，跟示范文本的（#363）一致
+                ref = ""
+                if (match(subject, /#[0-9]+/)) ref = substr(subject, RSTART, RLENGTH)
+                else if (match(body, /#[0-9]+/)) ref = substr(body, RSTART, RLENGTH)
+                if (item ~ /[^ -~]/) item = item "。"
+                if (ref != "" && index(item, ref) == 0) item = item "（" ref "）"
+
+                items[cat, ++n[cat]] = item
+                total++
+                tally[cat]++
+              }
+              END {
+                label["feat"] = "✨ 新增"; label["fix"] = "🩹 修复"
+                label["improve"] = "🔧 改进"; label["build"] = "📦 构建与发布"
+                label["docs"] = "📝 文档"; label["chore"] = "🧹 维护"
+                label["change"] = "♻️ 其他改动"
+
+                if (total > 0) {
+                  printf "_共 %d 项：", total
+                  split(order, ord, " ")
+                  first = 1
+                  for (k = 1; k <= 7; k++) {
+                    c = ord[k]
+                    if (!tally[c]) continue
+                    printf "%s%s %d", (first ? "" : " · "), label[c], tally[c]
+                    first = 0
+                  }
+                  print "。_"
+                  print ""
+                }
+
+                split(order, ord, " ")
+                for (k = 1; k <= 7; k++) {
+                  c = ord[k]
+                  if (!n[c]) continue
+                  print "## " label[c]
+                  print ""
+                  for (i = 1; i <= n[c]; i++) print "- " items[c, i]
+                  print ""
+                }
+              }
+            ' commits.raw
+
             cell_apk() {
               pkg="$1"; arch="$2"
               f=$(ls dist/${pkg}-*-${arch}.apk 2>/dev/null | head -1)
