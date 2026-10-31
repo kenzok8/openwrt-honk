@@ -138,7 +138,8 @@ main() {
 	[ -n "$ARCH" ] || { echo "无法识别架构。" >&2; exit 1; }
 
 	SDK="$(detect_sdk || true)"
-	[ -n "$SDK" ] || SDK="24.10"
+	# 版本号里没有 X.Y（SNAPSHOT 之类）时按 25.12 处理：我们只发 25.12 的包
+	[ -n "$SDK" ] || SDK="25.12"
 
 	if [ "$PM" = apk ]; then
 		EXT=apk
