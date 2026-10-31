@@ -3,10 +3,10 @@
 set -eu
 
 REPO="kenzok8/openwrt-honk"
-# 取最近 30 个 release 再过滤，而不是 /releases?per_page=1 或 /releases/latest：
+# 取最近 10 个 release 再过滤，而不是 /releases?per_page=1 或 /releases/latest：
 # 前者会抓到 CI 的 source-*/candidate-* 预发布（只有源码包、没有安装包），
 # 后者在全部为预发布时返回 404。这里只要非预发布、且 tag 形如 v2026.xx… 的正式版。
-GH_API_LIST="https://api.github.com/repos/${REPO}/releases?per_page=30"
+GH_API_LIST="https://api.github.com/repos/${REPO}/releases?per_page=10"
 GH_API_TAG="https://api.github.com/repos/${REPO}/releases/tags"
 GH_PROXY="${GH_PROXY:-https://ghfast.top/}"
 GEO_FEED="https://down.dllkids.xyz/openwrt-feed"
@@ -103,6 +103,19 @@ apk_installed_version() {
 	apk list --installed "$1" | awk -v expected="$1-$2" '$1 == expected { found = 1 } END { exit !found }'
 }
 
+# 原始报错本身信息量最大，这里只补一句「接下来做什么」，不针对具体包名做
+# 匹配——依赖名带 ABI 日期戳、kmod 绑定内核版本，都会走到这里。
+print_install_hint() {
+	_output="$1"
+	echo "安装失败（$PM 退出码 ${install_rc}）。上面几行就是原始报错，请完整贴到" >&2
+	echo "https://github.com/${REPO}/issues ，我们照着报错看。" >&2
+	if printf '%s\n' "$_output" | grep -qE 'unable to select packages|satisfy_dependencies_for|kernel'; then
+		echo "这类报错通常不是固件坏了，而是插件的依赖版本和设备固件对不上：" >&2
+		echo "依赖包名与内核版本都会随固件分支（24.10 / 25.12 …）变化，附上" >&2
+		echo "cat /etc/openwrt_release 的输出会更容易对照。" >&2
+	fi
+}
+
 main() {
 	PM="$(detect_manager)"
 	[ "$PM" = unsupported ] && { echo "无法识别包管理器（opkg/apk）。" >&2; exit 1; }
@@ -131,7 +144,7 @@ main() {
 		                tag = (line ~ /^v[0-9][0-9][0-9][0-9]\./) ? line : "" }
 		tag != "" && /"prerelease":/ { if ($0 ~ /:[[:space:]]*false/) { print tag; exit }; tag = "" }
 	')"
-	[ -n "$stable_tag" ] || { echo "未找到正式版 Release（最近 30 个全是预发布）。" >&2; exit 1; }
+	[ -n "$stable_tag" ] || { echo "未找到正式版 Release（最近 10 个全是预发布）。" >&2; exit 1; }
 	echo "使用正式版：$stable_tag"
 
 	release_json="$(fetch_text "$GH_API_TAG/$stable_tag")"
@@ -150,7 +163,7 @@ main() {
 	if [ -z "$honk_asset" ] && [ "$PM" = apk ]; then
 		alt="$(fallback_arch "$ARCH" || true)"
 		if [ -n "$alt" ]; then
-			echo "架构 $ARCH 无独立包，回退到 $alt。"
+			echo "架构 $ARCH 无独立包，回退到 ${alt}。"
 			honk_asset="$(printf '%s' "$release_json" | grep -oE "\"browser_download_url\": *\"[^\"]*honk[^\"]*${alt}\.apk\"" | grep -v "luci-app-honk" | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)"
 		fi
 	fi
@@ -195,26 +208,31 @@ main() {
 	fi
 
 	echo "安装 honk、luci-app-honk 及所需 geo 数据"
+	install_rc=0
 	if [ "$PM" = apk ]; then
 		apk --allow-untrusted verify "$honk_file" "$luci_file" || exit 1
 		honk_version="$(apk_file_version "$honk_file" honk)" || exit 1
 		luci_version="$(apk_file_version "$luci_file" luci-app-honk)" || exit 1
-		install_rc=0
 		install_output="$(apk add --allow-untrusted "$@" 2>&1)" || install_rc=$?
-		printf '%s\n' "$install_output"
 	else
-		opkg install "$@"
+		install_output="$(opkg install "$@" 2>&1)" || install_rc=$?
+	fi
+	printf '%s\n' "$install_output"
+	if [ "$install_rc" -ne 0 ]; then
+		print_install_hint "$install_output"
 	fi
 
 	if [ "$PM" = apk ]; then
 		apk_installed_version honk "$honk_version" && apk_installed_version luci-app-honk "$luci_version" || {
-			echo "apk 安装失败：目标版本未全部装入（退出码 $install_rc）。" >&2
+			echo "apk 安装失败：目标版本未全部装入（退出码 ${install_rc}）。" >&2
 			exit 1
 		}
 		if [ "$install_rc" -ne 0 ] && printf '%s\n' "$install_output" | grep -q '^ERROR:'; then
-			echo "apk 安装脚本或依赖报错（退出码 $install_rc），请检查上方错误。" >&2
+			echo "apk 安装脚本或依赖报错（退出码 ${install_rc}），请检查上方错误。" >&2
 			exit "$install_rc"
 		fi
+	else
+		[ "$install_rc" -eq 0 ] || exit "$install_rc"
 	fi
 	[ -x /usr/bin/honk-core ] && /usr/bin/honk-core --version >/dev/null 2>&1 &&
 		[ -x /etc/init.d/honk ] && [ -x /usr/libexec/rpcd/honk ] &&
@@ -227,7 +245,7 @@ main() {
 		}
 	geodata_installed || { echo "安装后缺少 v2ray-geoip/geosite 数据。" >&2; exit 1; }
 	if [ "$PM" = apk ] && [ "$install_rc" -ne 0 ]; then
-		echo "目标包已核对安装完成；但 apk 仍报告 $install_rc 个错误，请另行检查设备的包管理器状态。" >&2
+		echo "目标包已核对安装完成；但 apk 仍返回退出码 ${install_rc}，请另行检查设备的包管理器状态。" >&2
 	fi
 
 	echo "完成。"

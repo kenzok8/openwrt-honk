@@ -189,6 +189,13 @@ grep -Fq '@(x86_64||aarch64||arm)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
 grep -Fq '+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
+# libubox is packaged under an ABI-versioned name (libubox20260213), so listing it
+# in DEPENDS pins the apk to one firmware ABI. The scripts only need jshn.sh, which
+# the jshn package provides together with the device's own libubox.
+if sed -n 's/^[[:space:]]*DEPENDS:=//p' honk/Makefile luci-app-honk/Makefile | grep -Fq '+libubox'; then
+	echo 'DEPENDS must not name libubox directly; rely on jshn instead' >&2
+	exit 1
+fi
 grep -Fq "! rg -n 'MockBackend|mockBackend|mock-backend' dist" ci/build-doona.sh
 ! grep -Fq "! rg -n 'mock backend|MockBackend|mockBackend' dist" ci/build-doona.sh
 grep -Fq 'node tools/notices.mjs "$STAGE"' ci/build-doona.sh
