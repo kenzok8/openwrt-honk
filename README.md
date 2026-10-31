@@ -1,6 +1,6 @@
 <h1 align="center">openwrt-honk</h1>
 
-<p align="center">OpenWrt 25.12 透明代理一体包（内核 6.12+，7 架构 APK）：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
+<p align="center">OpenWrt / ImmortalWrt 25.12 透明代理一体包（内核 6.12+，7 架构 APK）：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
 
 ## 界面预览
 
@@ -23,7 +23,7 @@
 
 ## 支持范围
 
-honk 的 eBPF 数据面要求 **Linux 6.12+**：24.10 及更早（内核 6.6 / 5.15）装上也起不来，所以只发 **OpenWrt 25.12** 的包，安装脚本会先查内核版本，低于 6.12 直接退出。
+honk 的 eBPF 数据面要求 **Linux 6.12+**：24.10 及更早（内核 6.6 / 5.15）装上也起不来，所以只发 **OpenWrt / ImmortalWrt 25.12** 的包，安装脚本会先查内核版本，低于 6.12 直接退出。
 
 | 架构 | 状态 |
 | :--- | :--- |

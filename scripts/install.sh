@@ -131,7 +131,7 @@ kernel_ok() {
 main() {
 	if ! kernel_ok; then
 		echo "当前内核 $(uname -r) 低于 honk 的要求：eBPF 数据面需要 Linux 6.12 及以上" >&2
-		echo "（OpenWrt 25.12 分支起）。请先升级固件再安装。" >&2
+		echo "（OpenWrt / ImmortalWrt 25.12 分支起）。请先升级固件再安装。" >&2
 		exit 1
 	fi
 
