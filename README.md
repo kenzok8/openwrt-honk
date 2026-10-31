@@ -1,6 +1,6 @@
 <h1 align="center">openwrt-honk</h1>
 
-<p align="center">OpenWrt x86_64 透明代理一体包：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
+<p align="center">OpenWrt / ImmortalWrt 25.12 透明代理一体包（内核 6.12+，7 架构 APK）：<b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面。</p>
 
 ## 界面预览
 
