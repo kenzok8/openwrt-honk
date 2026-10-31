@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
-# Manually advance the pinned honk-core revision (upstream daeuniverse/honk main).
+# Manually advance the pinned honk-core revision to an official release tag.
 # The per-architecture tarballs and hashes are produced by the release workflow's
 # ci/build-core.sh, so this script only moves the source pin and bumps the version.
 set -euo pipefail
@@ -11,28 +11,28 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$REPO_DIR/ci/pins.env"
 
 UPSTREAM="${HONK_UPSTREAM_REPO:-$CORE_REPOSITORY}"
-BRANCH="${HONK_UPSTREAM_BRANCH:-$CORE_BRANCH}"
+TAG="${1:-${HONK_UPSTREAM_TAG:-$CORE_TAG}}"
 
 command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
 
-core_new="$(git ls-remote "$UPSTREAM" "refs/heads/$BRANCH" | cut -f1)"
+core_new="$(git ls-remote --tags --refs "$UPSTREAM" "refs/tags/$TAG" | cut -f1)"
 if ! [[ "$core_new" =~ ^[0-9a-f]{40}$ ]]; then
-	echo "error: cannot resolve $BRANCH head from $UPSTREAM" >&2
+	echo "error: cannot resolve tag $TAG from $UPSTREAM" >&2
 	exit 1
 fi
 
 if [ "$core_new" = "$CORE_COMMIT" ]; then
-	echo "No upstream change: already at $CORE_COMMIT"
+	echo "Already at $TAG ($CORE_COMMIT)"
 	exit 0
 fi
 
 version="$(TZ=Asia/Shanghai date +%Y.%m.%d)"
 
 echo "Advancing core pin:"
-echo "  $(printf '%s' "$CORE_COMMIT" | cut -c1-7) -> $(printf '%s' "$core_new" | cut -c1-7)"
+echo "  $CORE_TAG -> $TAG ($(printf '%s' "$CORE_COMMIT" | cut -c1-7) -> $(printf '%s' "$core_new" | cut -c1-7))"
 echo "  PKG_VERSION -> $version"
 
-sed -i "s|^CORE_COMMIT=.*|CORE_COMMIT=$core_new|" "$REPO_DIR/ci/pins.env"
+sed -i -e "s|^CORE_TAG=.*|CORE_TAG=$TAG|" -e "s|^CORE_COMMIT=.*|CORE_COMMIT=$core_new|" "$REPO_DIR/ci/pins.env"
 sed -i "s|^CORE_COMMIT:=.*|CORE_COMMIT:=$core_new|" "$REPO_DIR/honk/Makefile"
 sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=$version|" "$REPO_DIR/honk/Makefile"
 sed -i "s|^PKG_RELEASE:=.*|PKG_RELEASE:=1|" "$REPO_DIR/honk/Makefile"

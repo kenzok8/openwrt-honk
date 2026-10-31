@@ -43,12 +43,17 @@ jobs:
             fi
           }
 
-          core_new=$(git ls-remote "$CORE_REPOSITORY" "refs/heads/$CORE_BRANCH" | cut -f1)
-          doona_new=$(git ls-remote https://github.com/Zakkaus/doona.git HEAD | cut -f1)
+          # 只评估官方 release tag，不跟 main 最新提交：tag 可复现，main 是移动靶。
+          core_tags=$(git ls-remote --tags --refs "$CORE_REPOSITORY" 'refs/tags/v*' |
+            awk '{sub("refs/tags/", "", $2); print $2" "$1}')
+          core_tag=$(printf '%s\n' "$core_tags" | sort -V | tail -1 | cut -d' ' -f1)
+          core_new=$(printf '%s\n' "$core_tags" | awk -v t="$core_tag" '$1 == t {print $2}')
+          doona_new=$(git ls-remote "$DOONA_REPOSITORY" HEAD | cut -f1)
           require_sha "$core_new" core
           require_sha "$doona_new" doona
 
-          if [ "$core_new" = "$CORE_COMMIT" ] && [ "$doona_new" = "$DOONA_COMMIT" ]; then
+          # tag 与 sha 任一不一致都算需要重新评估（pin 可能停在 tag 之外的提交上）。
+          if [ "$core_tag" = "$CORE_TAG" ] && [ "$core_new" = "$CORE_COMMIT" ] && [ "$doona_new" = "$DOONA_COMMIT" ]; then
             echo "No upstream change."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -62,7 +67,7 @@ jobs:
 
           changes=""
           if [ "$core_new" != "$CORE_COMMIT" ]; then
-            changes="core $(printf '%s' "$CORE_COMMIT" | cut -c1-7)→$(printf '%s' "$core_new" | cut -c1-7)"
+            changes="core $CORE_TAG→$core_tag"
           fi
           if [ "$doona_new" != "$DOONA_COMMIT" ]; then
             changes="${changes:+$changes, }doona $(printf '%s' "$DOONA_COMMIT" | cut -c1-7)→$(printf '%s' "$doona_new" | cut -c1-7)"
@@ -70,6 +75,7 @@ jobs:
 
           {
             echo "changed=true"
+            echo "core_tag=$core_tag"
             echo "core_new=$core_new"
             echo "doona_new=$doona_new"
             echo "doona_version_new=$doona_version_new"
@@ -92,6 +98,7 @@ jobs:
           set -euo pipefail
           base_sha=$(git rev-parse HEAD)
           . ci/pins.env
+          core_tag='${{ steps.detect.outputs.core_tag }}'
           core_new='${{ steps.detect.outputs.core_new }}'
           doona_new='${{ steps.detect.outputs.doona_new }}'
           today=$(TZ=Asia/Shanghai date +%Y.%m.%d)
@@ -111,6 +118,7 @@ jobs:
           }
 
           sed -i \
+            -e "s/^CORE_TAG=.*/CORE_TAG=$core_tag/" \
             -e "s/^CORE_COMMIT=.*/CORE_COMMIT=$core_new/" \
             -e "s/^DOONA_COMMIT=.*/DOONA_COMMIT=$doona_new/" \
             -e "s/^DOONA_VERSION=.*/DOONA_VERSION=${{ steps.detect.outputs.doona_version_new }}/" \
@@ -225,10 +233,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # GITHUB_TOKEN branch pushes do not trigger push workflows. This
-          # dispatch builds all source assets and SDK packages before promotion.
+          # 只出候选：正式推进要等 252 真机复测通过后手工触发 auto_publish。
           output=$(gh workflow run release.yml --ref "$STAGING" \
-            -f auto_publish=true -f base_sha='${{ steps.stage.outputs.base_sha }}')
+            -f candidate=true -f prerelease=true)
           run_id=$(printf '%s\n' "$output" | sed -nE 's|.*actions/runs/([0-9]+).*|\1|p' | tail -1)
           case "$run_id" in ''|*[!0-9]*) echo "::error::cannot read release run ID: $output"; exit 1 ;; esac
           expected_sha='${{ steps.commit.outputs.staging_sha }}'
@@ -252,16 +259,16 @@ jobs:
             sleep 30
           done
           [ "${result%% *}" = completed ] || { echo "::error::release run $run_id timed out"; exit 1; }
-          release_tag=$(gh release list --limit 100 --json tagName --jq ".[].tagName | select(endswith(\"-r$run_id\"))" | head -1)
-          [ -n "$release_tag" ] || { echo "::error::formal release for run $run_id is missing"; exit 1; }
-          test "$(gh release view "$release_tag" --json isPrerelease --jq .isPrerelease)" = false
+          candidate_tag=$(gh release list --limit 100 --json tagName --jq ".[].tagName | select(endswith(\"-r$run_id\"))" | head -1)
+          [ -n "$candidate_tag" ] || { echo "::error::candidate release for run $run_id is missing"; exit 1; }
 
           {
-            echo "## Honk upstream update published"
+            echo "## Honk upstream candidate ready"
             echo ""
             echo "Staging branch: \`$STAGING\`"
-            echo "Validated commit: \`${{ steps.commit.outputs.staging_sha }}\`"
-            echo "Formal release: \`$release_tag\`"
+            echo "Candidate commit: \`${{ steps.commit.outputs.staging_sha }}\`"
+            echo "Candidate release: \`$candidate_tag\`"
             echo ""
-            echo "Doona, Honk core and all 12 SDK package sets passed; main, Release and R2 were updated."
+            echo "Next: deploy to 252, then promote with"
+            echo "\`gh workflow run release.yml --ref $STAGING -f auto_publish=true -f base_sha=${{ steps.stage.outputs.base_sha }}\`."
           } >> "$GITHUB_STEP_SUMMARY"

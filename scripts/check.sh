@@ -22,9 +22,10 @@ done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 
-# 核心必须跟上游 daeuniverse/honk main：跟 fork 分支曾让 pin 冻了 11 天。
+# 只跟官方 tag，不跟 main 最新提交，也不再跟 fork 分支。
 grep -q '^CORE_REPOSITORY=https://github.com/daeuniverse/honk.git$' ci/pins.env
-grep -q '^CORE_BRANCH=main$' ci/pins.env
+grep -q '^CORE_TAG=v[0-9][0-9.]*' ci/pins.env
+! grep -q '^CORE_BRANCH=' ci/pins.env || { echo 'core pin must be a tag, not a branch' >&2; exit 1; }
 # 名字拆开避免自匹配；只扫 pin 与脚本，Doona 源码里提到这个 fork 是正常的。
 fork_owner="Glassy""iris"
 ! grep -rIq "$fork_owner" ci/pins.env honk/Makefile luci-app-honk/Makefile README.md scripts .github/workflows || {
