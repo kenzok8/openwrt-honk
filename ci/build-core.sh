@@ -51,7 +51,10 @@ git -C "$WORK_DIR/source" diff --check
 TOOLCHAIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$WORK_DIR/source/rust-toolchain.toml")
 test -n "$TOOLCHAIN"
 rustup toolchain install "$TOOLCHAIN" --profile minimal --component rust-src
-rustup toolchain install "$NIGHTLY" --profile minimal --component rust-src --component llvm-tools
+# eBPF nightly 以上游源码为准（追 main 时它常变），pins 里的值只做兜底。
+EBPF_NIGHTLY=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$WORK_DIR/source/crates/honk-ebpf/rust-toolchain.toml")
+EBPF_NIGHTLY=${EBPF_NIGHTLY:-$NIGHTLY}
+rustup toolchain install "$EBPF_NIGHTLY" --profile minimal --component rust-src --component llvm-tools
 for t in "${TARGETS[@]}"; do
 	rustup target add --toolchain "$TOOLCHAIN" "$t"
 done
@@ -77,7 +80,7 @@ esac
 
 # The eBPF object is target-independent; build it once and let build.rs reuse it.
 cd "$WORK_DIR/source/crates/honk-ebpf"
-cargo +"$NIGHTLY" build --locked --release -Zbuild-std=core --target bpfel-unknown-none
+cargo +"$EBPF_NIGHTLY" build --locked --release -Zbuild-std=core --target bpfel-unknown-none
 readelf -S target/bpfel-unknown-none/release/honk-ebpf | rg -q '\.BTF'
 
 # Doona stays on disk (/usr/share/doona) and is served by luci-app-honk, so the

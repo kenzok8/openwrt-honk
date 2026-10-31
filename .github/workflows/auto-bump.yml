@@ -43,17 +43,12 @@ jobs:
             fi
           }
 
-          # 只评估官方 release tag，不跟 main 最新提交：tag 可复现，main 是移动靶。
-          core_tags=$(git ls-remote --tags --refs "$CORE_REPOSITORY" 'refs/tags/v*' |
-            awk '{sub("refs/tags/", "", $2); print $2" "$1}')
-          core_tag=$(printf '%s\n' "$core_tags" | sort -V | tail -1 | cut -d' ' -f1)
-          core_new=$(printf '%s\n' "$core_tags" | awk -v t="$core_tag" '$1 == t {print $2}')
+          core_new=$(git ls-remote "$CORE_REPOSITORY" "refs/heads/$CORE_BRANCH" | cut -f1)
           doona_new=$(git ls-remote "$DOONA_REPOSITORY" HEAD | cut -f1)
           require_sha "$core_new" core
           require_sha "$doona_new" doona
 
-          # tag 与 sha 任一不一致都算需要重新评估（pin 可能停在 tag 之外的提交上）。
-          if [ "$core_tag" = "$CORE_TAG" ] && [ "$core_new" = "$CORE_COMMIT" ] && [ "$doona_new" = "$DOONA_COMMIT" ]; then
+          if [ "$core_new" = "$CORE_COMMIT" ] && [ "$doona_new" = "$DOONA_COMMIT" ]; then
             echo "No upstream change."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -67,7 +62,7 @@ jobs:
 
           changes=""
           if [ "$core_new" != "$CORE_COMMIT" ]; then
-            changes="core $CORE_TAG→$core_tag"
+            changes="core $(printf '%s' "$CORE_COMMIT" | cut -c1-7)→$(printf '%s' "$core_new" | cut -c1-7)"
           fi
           if [ "$doona_new" != "$DOONA_COMMIT" ]; then
             changes="${changes:+$changes, }doona $(printf '%s' "$DOONA_COMMIT" | cut -c1-7)→$(printf '%s' "$doona_new" | cut -c1-7)"
@@ -75,7 +70,6 @@ jobs:
 
           {
             echo "changed=true"
-            echo "core_tag=$core_tag"
             echo "core_new=$core_new"
             echo "doona_new=$doona_new"
             echo "doona_version_new=$doona_version_new"
@@ -98,7 +92,6 @@ jobs:
           set -euo pipefail
           base_sha=$(git rev-parse HEAD)
           . ci/pins.env
-          core_tag='${{ steps.detect.outputs.core_tag }}'
           core_new='${{ steps.detect.outputs.core_new }}'
           doona_new='${{ steps.detect.outputs.doona_new }}'
           today=$(TZ=Asia/Shanghai date +%Y.%m.%d)
@@ -118,7 +111,6 @@ jobs:
           }
 
           sed -i \
-            -e "s/^CORE_TAG=.*/CORE_TAG=$core_tag/" \
             -e "s/^CORE_COMMIT=.*/CORE_COMMIT=$core_new/" \
             -e "s/^DOONA_COMMIT=.*/DOONA_COMMIT=$doona_new/" \
             -e "s/^DOONA_VERSION=.*/DOONA_VERSION=${{ steps.detect.outputs.doona_version_new }}/" \

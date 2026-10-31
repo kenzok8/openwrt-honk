@@ -76,7 +76,7 @@ wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/uninstal
 
 核心和 Doona 的完整提交、Doona OpenWrt 补丁摘要，以及 OpenWrt 25.12.4 x86/64 官方 SDK 地址和 SHA256 均固定在 `ci/pins.env`。Doona 从源码构建，保留 OpenWrt 同源 API 补丁；归档不含可选中文字体，浏览器使用系统字体。构建脚本从固定输入生成静态 UI、stock musl 核心和安装包。
 
-核心只跟官方 release tag（`CORE_TAG`），不跟 `main` 最新提交：tag 可复现，`main` 是移动靶。`auto-bump.yml` 每 6 小时检查官方新 tag 与 Doona 更新，在独立分支写入 pin、包版本和归档哈希，构建核心、Doona 与全部 7 组 SDK 安装包，**只产出候选 Release**。部署到真机复测通过后，再以 `auto_publish` 推进：原子更新 `main`、正式 tag、Release 与 R2 软件源。
+核心跟官方 `main` 的最新提交（eBPF nightly 从上游源码读，不是我们写死的）。`auto-bump.yml` 每 6 小时检查官方 `main` 与 Doona 更新，在独立分支写入 pin、包版本和归档哈希，构建核心、Doona 与全部 7 组 SDK 安装包，**只产出候选 Release**。部署到真机复测通过后，再以 `auto_publish` 推进：原子更新 `main`、正式 tag、Release 与 R2 软件源。
 
 完整构建（包括核心构建）需在大小写敏感的 Linux 文件系统上运行（Doona 上游同时有仅大小写不同的文件）。需要 Rust/rustup、Zig 0.14.1、Node.js 22.13 或更新版本与 Corepack、Git、curl、ripgrep、GNU tar、zstd、`readelf`，以及 `build-essential`、clang、LLVM、libbpf、libelf、pkg-config、CMake、libclang 和 OpenWrt SDK 所需工具。核心交叉编译脚本会核对 Rust/Doona/SDK 输入和 Zig、bpf-linker 版本；SDK 阶段限定 Linux x86_64。
 
