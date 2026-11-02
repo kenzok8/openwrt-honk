@@ -64,6 +64,21 @@ wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/uninstal
 
 > 一键脚本会复用设备已有的 Geo 数据包；缺少时从聚合源下载，下载失败则尝试设备现有软件源。
 
+## 升级
+
+```bash
+# 1) 直接装最新 Release（不需要软件源，最稳）
+wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/install.sh | ash
+```
+
+```bash
+# 2) 加软件源，之后可在 LuCI「服务 → Honk → 维护 → 软件包更新」里升级
+wget -qO- https://down.dllkids.xyz/openwrt-feed/openwrt-feed-setup.sh | sh
+```
+
+> 「软件包更新」卡片只查本机 apk/opkg 源，不查 GitHub。用 `install.sh` 装的机器没有把 feed 写进源，卡片会一直显示「已是最新」；先跑上面的软件源脚本（装 feed 公钥 + 写源 + 刷索引）卡片才有用。
+> 刚发布的版本要等 feed 同步过去才会出现在索引里，急着升级直接重跑 `install.sh`。
+
 ## 使用
 
 安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。核心 Web 界面（Doona）仅在已初始化、正在运行且 API 就绪时开放。
