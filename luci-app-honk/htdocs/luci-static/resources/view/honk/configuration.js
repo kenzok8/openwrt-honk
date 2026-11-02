@@ -112,8 +112,7 @@ return view.extend({
 
 		const page = E('div', { 'class': 'cbi-map honk-page' });
 		page.appendChild(E('div', { 'class': 'honk-header' }, [
-			E('h2', {}, _('Configuration')),
-			E('p', { 'class': 'honk-header-sub' }, _('Honk reads its nodes, subscriptions and routing from /etc/honk/config.dae.'))
+			E('h2', {}, _('Configuration'))
 		]));
 
 		const draftNote = E('div', { 'class': 'honk-note honk-draft-note' });
@@ -172,17 +171,13 @@ return view.extend({
 		nameInput.id = 'honk-sub-name';
 		urlInput.id = 'honk-sub-url';
 		const subSection = E('section', { 'class': 'honk-card' }, [
-			E('h3', { 'class': 'honk-card-title' }, _('Add subscription')),
 			E('div', { 'class': 'honk-form-row' }, [
 				E('label', { 'class': 'honk-form-label', 'for': 'honk-sub-name' }, _('Name')),
 				E('div', { 'class': 'honk-form-field' }, [ nameInput ])
 			]),
 			E('div', { 'class': 'honk-form-row' }, [
 				E('label', { 'class': 'honk-form-label', 'for': 'honk-sub-url' }, _('Subscription URL')),
-				E('div', { 'class': 'honk-form-field' }, [
-					urlInput,
-					E('p', { 'class': 'honk-form-hint' }, _('Use an HTTP or HTTPS subscription address.'))
-				])
+				E('div', { 'class': 'honk-form-field' }, [ urlInput ])
 			]),
 			E('div', { 'class': 'honk-form-actions' }, [ subBtn ]),
 			subStatus
@@ -317,7 +312,6 @@ return view.extend({
 		});
 
 		const pasteSection = E('section', { 'class': 'honk-card' }, [
-			E('h3', { 'class': 'honk-card-title' }, _('Add nodes')),
 			pasteInput,
 			E('div', { 'class': 'honk-actions' }, [ pasteBtn ]),
 			pasteStatus
@@ -759,7 +753,6 @@ return view.extend({
 		});
 
 		const editorSection = E('section', { 'class': 'honk-card' }, [
-			E('h3', { 'class': 'honk-card-title' }, _('Edit configuration')),
 			E('div', { 'class': 'honk-actions' }, [ saveBtn, draftBtn, reloadBtn, validateBtn ]),
 			editor,
 			editorStatus
