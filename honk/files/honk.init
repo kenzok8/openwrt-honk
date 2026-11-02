@@ -33,8 +33,7 @@ start_service() {
 	"$HONK_CONTROL" local-direct || logger -t honk "local-direct sync skipped"
 	unset HONK_MAINT_CAP
 
-	# 所有配置走同一条就绪通道：静态校验通过后写入 token/hash 与运行期 API 信息，
-	# 核心就绪时回写标记，状态页据此判断实际就绪而非只看进程在不在。
+	# 所有配置都走 readiness 标记：状态页据此判断真正就绪，而不是只看进程在不在。
 	ready_token=$(cat /proc/sys/kernel/random/uuid 2>/dev/null) || return 1
 	case "$ready_token" in *[!0-9a-f-]*|'') return 1 ;; esac
 	ready_hash=$(sha256sum "$HONK_CONFIG" 2>/dev/null | awk '{print $1}') || return 1

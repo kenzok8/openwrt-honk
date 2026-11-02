@@ -25,7 +25,6 @@ if [ "${HONK_MAINT_LIBRARY:-0}" != 1 ]; then
 	. /usr/share/honk/lock.sh || exit 1
 	. /usr/share/honk/lifecycle.sh || exit 1
 	. /usr/share/libubox/jshn.sh || exit 1
-	# lifecycle.sh 用 config_load/config_get 读模式，job 路径没有 rc.common 帮它加载。
 	[ -r /lib/functions.sh ] && . /lib/functions.sh
 fi
 

@@ -69,8 +69,7 @@ return view.extend({
 
 		section.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Honk settings')));
 
-		/* 字段归属由当前配置决定：配置自己定义 global/experimental 时这些值属于文件，
-		   后端会拒绝写入，这里同步置为只读并说明去哪里改。 */
+		/* 配置自带 global/experimental 时这些值归文件，后端会拒绝写入。 */
 		const owner = (data.status && data.status.settings_owner) || 'unknown';
 		if (owner !== 'system') {
 			[ networkSelect, portInput, clashEnabledInput, clashPortInput, clashSecretInput ].forEach(function(input) {

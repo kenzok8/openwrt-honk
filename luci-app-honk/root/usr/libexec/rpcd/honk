@@ -316,8 +316,7 @@ logs() {
 	rm -f "$log_file"
 }
 
-# 剥掉本机直连区块内部的行，仅供判定使用；候选配置写回时区块原样保留。
-# 出厂默认本来就是 fallback: direct，启动脚本往里写本机地址后逐字比较必然失败。
+# 判出厂配置时忽略本机直连区块：启动脚本写入本机地址后逐字比较必然失败。
 strip_local_direct() {
 	awk -v begin='    # honk:local-direct-begin' -v end='    # honk:local-direct-end' '
 		$0 == begin {
@@ -382,36 +381,6 @@ promote_default_route() {
 	mv "$candidate.route" "$candidate" || return 1
 }
 
-# 校验用的影子配置：候选自带 global/experimental 时（完整配置），把 API 端口和鉴权改成
-# 临时值，否则不是和正在运行的核心抢端口，就是校验器连不上、一律判候选无效。
-sandbox_candidate_api() {
-	awk -v api_port="$2" -v clash_port="$3" '
-		{
-			line = $0
-			if (line ~ /^[[:space:]]*native_api[[:space:]]*\{/) { in_api = 1; base = depth }
-			else if (line ~ /^[[:space:]]*clash_api[[:space:]]*\{/) { in_clash = 1; base = depth }
-			if (in_api && line ~ /^[[:space:]]*listen[[:space:]]*:/)
-				sub(/listen[[:space:]]*:.*/, "listen: \047127.0.0.1:" api_port "\047", line)
-			else if (in_api && line ~ /^[[:space:]]*enabled[[:space:]]*:/)
-				sub(/enabled[[:space:]]*:.*/, "enabled: true", line)
-			else if (in_api && line ~ /^[[:space:]]*password_auth[[:space:]]*:/)
-				sub(/password_auth[[:space:]]*:.*/, "password_auth: false", line)
-			else if (in_api && line ~ /^[[:space:]]*allow_anonymous_loopback[[:space:]]*:/)
-				sub(/allow_anonymous_loopback[[:space:]]*:.*/, "allow_anonymous_loopback: true", line)
-			else if (in_api && line ~ /^[[:space:]]*config_write[[:space:]]*:/)
-				sub(/config_write[[:space:]]*:.*/, "config_write: false", line)
-			else if (in_clash && line ~ /^[[:space:]]*external_controller[[:space:]]*:/)
-				sub(/external_controller[[:space:]]*:.*/, "external_controller: \047127.0.0.1:" clash_port "\047", line)
-			print line
-			opens = gsub(/\{/, "{", line)
-			closes = gsub(/\}/, "}", line)
-			depth += opens - closes
-			if (in_api && depth <= base) in_api = 0
-			if (in_clash && depth <= base) in_clash = 0
-		}
-	' "$1"
-}
-
 validate_proxy_nodes() (
 	local candidate=$1 provider_name=${2:-} node_prefix=${3:-} expected_nodes=${4:-0} temp port core_pid= attempt ready node_count group_count result provider
 	temp=$(mktemp -d /tmp/honk-onboard.XXXXXX) || return 1
@@ -442,11 +411,18 @@ validate_proxy_nodes() (
 	trap 'validator_cleanup' EXIT
 	trap 'exit 1' HUP INT TERM
 	port=$((20000 + $(hexdump -n 2 -e '1/2 "%u"' /dev/urandom) % 20000))
-	if ! cp -p /etc/honk/*.dae "$temp/"; then
+	# 先带完整文件树校验原始候选（候选名不是 .dae 结尾，复制成 candidate-original.dae）。
+	if ! cp -p /etc/honk/*.dae "$temp/" || ! cp -p "$candidate" "$temp/candidate-original.dae"; then
+		rm -rf "$temp"
 		return 1
 	fi
-	sandbox_candidate_api "$candidate" "$port" "$((port + 1))" > "$temp/config.dae" || return 1
-	chmod 0600 "$temp/config.dae" || return 1
+	if ! "$CORE" config validate --config "$temp/candidate-original.dae" >/dev/null 2>&1; then
+		rm -rf "$temp"
+		return 2
+	fi
+	# 候选原样作为被测配置，落盘路径与 API 由我们写的 system.dae 提供。
+	cp -p "$candidate" "$temp/config.dae" || { rm -rf "$temp"; return 1; }
+	chmod 0600 "$temp/config.dae" || { rm -rf "$temp"; return 1; }
 	cat > "$temp/system.dae" <<EOF
 global {
     wan_interface: auto
@@ -466,7 +442,8 @@ experimental {
     }
 }
 EOF
-	DAE_LOCATION_ASSET=/usr/share/v2ray "$CORE" --config "$temp/config.dae" --mock-ebpf > "$temp/core.log" 2>&1 &
+	DAE_LOCATION_ASSET=/usr/share/v2ray "$CORE" --config "$temp/config.dae" --mock-ebpf \
+		--data-dir "$temp" --log-file "$temp/core.log" > "$temp/core.console" 2>&1 &
 	core_pid=$!
 	ready=0
 	result=2
@@ -633,6 +610,8 @@ add_subscription() {
 	cfg=/etc/honk/config.dae
 	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
 	begin_mutation
+	# 快捷追加只支持系统托管结构；自带 global/experimental 或 include 其他文件一律拒绝。
+	[ "$(config_owner "$cfg")" = system ] || { emit_result false quick_add_unsupported; return 1; }
 	original_hash=$(sha256sum "$cfg" | awk '{print $1}')
 
 	if grep -qF "$sub_tag:" "$cfg" || grep -qF "'$sub_name':" "$cfg"; then
@@ -690,6 +669,8 @@ add_nodes() {
 	cfg=/etc/honk/config.dae
 	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
 	begin_mutation
+	# 快捷追加只支持系统托管结构；自带 global/experimental 或 include 其他文件一律拒绝。
+	[ "$(config_owner "$cfg")" = system ] || { emit_result false quick_add_unsupported; return 1; }
 	original_hash=$(sha256sum "$cfg" | awk '{print $1}')
 
 	node_prefix="node_$(hexdump -n 4 -e '4/1 "%02x"' /dev/urandom)_"

@@ -338,6 +338,7 @@ function tokenMessage(token) {
 		config_valid: _('配置通过校验。'),
 		config_invalid: _('配置没有通过校验。'),
 		config_saved_pending_apply: _('Configuration saved. The running service is unchanged until you apply it.'),
+		quick_add_unsupported: _('当前配置不支持快捷追加，请在「编辑配置」中修改。'),
 		config_loaded: _('Configuration loaded.'),
 		dae_loaded: _('Configuration file loaded into the editor.'),
 		upload_ready: _('Upload location ready.'),

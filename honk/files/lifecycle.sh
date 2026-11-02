@@ -2,25 +2,49 @@
 
 HONK_LIFECYCLE_CORE=/usr/bin/honk-core
 
-# 配置字段归属：文件自己定义 global/experimental 时由文件负责（file）；
-# 只 include system.dae 时由 system.dae 负责（system）；两者并存或都没有时无法判定（unknown）。
-# 归属不明时宁可不写，也不猜测后重写用户的完整配置。
+# 字段归属：自带 global/experimental → file；只 include system.dae（且写法规范）→ system；
+# 其余一律 unknown。写法不规范时不猜，直接拒绝。
 config_owner() {
 	config_owner_file=${1:-/etc/honk/config.dae}
 	[ -f "$config_owner_file" ] && [ ! -L "$config_owner_file" ] || { echo unknown; return 0; }
 	own=$(awk '/^[[:space:]]*(global|experimental)[[:space:]]*\{/ { print "1"; exit }' "$config_owner_file")
 	inc=$(awk '
-		/^include[[:space:]]*\{/ { in_block = 1; next }
-		in_block && /^\}/ { in_block = 0; next }
-		in_block && /system\.dae/ { print "1"; exit }
+		{
+			line = $0
+			sub(/\r$/, "", line)
+			if (!in_block) {
+				# 只接受「include {」独占一行；同行带内容一律算不规范
+				if (line ~ /^[[:space:]]*include[[:space:]]*\{[[:space:]]*$/) { in_block = 1; next }
+				if (line ~ /^[[:space:]]*include[[:space:]]*\{/) { print "irregular"; next }
+				next
+			}
+			if (line ~ /^[[:space:]]*\}[[:space:]]*$/) { in_block = 0; next }
+			if (line ~ /^[[:space:]]*\}/ || line ~ /\{/) { print "irregular"; next }
+			entry = line
+			sub(/#.*/, "", entry)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", entry)
+			gsub(/["\047]/, "", entry)
+			if (entry == "") next
+			if (entry == "system.dae") print "system"
+			else if (entry ~ /^[A-Za-z0-9._-]+$/) print "other"
+			else print "irregular"
+		}
+		END { if (in_block) print "irregular" }
 	' "$config_owner_file")
-	if [ -n "$own" ] && [ -n "$inc" ]; then echo unknown
-	elif [ -n "$own" ]; then echo file
-	elif [ -n "$inc" ]; then echo system
-	else echo unknown
+	has_system=
+	has_bad=
+	case "$inc" in *system*) has_system=1 ;; esac
+	case "$inc" in *other*|*irregular*) has_bad=1 ;; esac
+	if [ -n "$own" ]; then
+		[ -z "$inc" ] && echo file || echo unknown
+	elif [ -n "$has_bad" ]; then
+		echo unknown
+	elif [ -n "$has_system" ]; then
+		echo system
+	else
+		echo unknown
 	fi
 }
-
 
 honk_lifecycle_procd_pid() {	ubus call service list '{"name":"honk"}' 2>/dev/null | jsonfilter -e '@.honk.instances.main.pid' 2>/dev/null
 }
@@ -190,7 +214,6 @@ honk_lifecycle_start() {
 	honk_lifecycle_parse_listen || { echo "honk lifecycle: invalid configured listener" >&2; return 1; }
 	hlp_listen=$HONK_LIFECYCLE_LISTEN
 	hlp_port=$HONK_LIFECYCLE_PORT
-	config_load honk
 	if [ -n "${HONK_MAINT_CAP:-}" ]; then export HONK_MAINT_CAP; fi
 	/etc/init.d/honk start >/dev/null 2>&1
 	hlp_start_status=$?
