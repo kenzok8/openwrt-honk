@@ -1358,8 +1358,6 @@ msgstr "第 %d 行"
 msgid "Reading %s…"
 msgstr "正在读取 %s…"
 
-msgid "Reload from disk"
-msgstr "从磁盘重新载入"
 
 msgid "Save and apply"
 msgstr "保存并应用"

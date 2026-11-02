@@ -343,7 +343,6 @@ return view.extend({
 		});
 		const saveBtn = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, [ _('Save and apply') ]);
 		const draftBtn = E('button', { 'class': 'cbi-button', 'type': 'button' }, [ _('Save draft') ]);
-		const reloadBtn = E('button', { 'class': 'cbi-button', 'type': 'button' }, [ _('Reload from disk') ]);
 		const validateBtn = E('button', { 'class': 'cbi-button cbi-button-link', 'type': 'button' }, [ _('Check configuration') ]);
 
 		let editorBaseline = '';
@@ -702,15 +701,6 @@ return view.extend({
 			}).finally(function() { importBtn.disabled = false; });
 		});
 
-		reloadBtn.addEventListener('click', function(ev) {
-			ev.preventDefault();
-			if (!confirmEditorReplace()) return;
-			reloadBtn.disabled = true;
-			loadCurrent(null, true).catch(function(error) {
-				editorStatus.textContent = honk.errorMessage(error, _('Could not read the saved configuration.'));
-			}).finally(function() { reloadBtn.disabled = false; });
-		});
-
 		validateBtn.addEventListener('click', function(ev) {
 			ev.preventDefault();
 			if (!editor.value.trim()) { editorStatus.textContent = _('The editor is empty.'); return; }
@@ -753,7 +743,7 @@ return view.extend({
 		});
 
 		const editorSection = E('section', { 'class': 'honk-card' }, [
-			E('div', { 'class': 'honk-actions' }, [ saveBtn, draftBtn, reloadBtn, validateBtn ]),
+			E('div', { 'class': 'honk-actions' }, [ saveBtn, draftBtn, validateBtn ]),
 			editor,
 			editorStatus
 		]);
