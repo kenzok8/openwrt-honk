@@ -237,7 +237,6 @@ return view.extend({
 					input.disabled = true;
 				});
 				save.disabled = true;
-				card.appendChild(E('p', { 'class': 'honk-note honk-mode-hint' }, _('These settings come from your configuration file. Change them under Configuration → Edit configuration.')));
 			}
 			if (!(data.networks || []).length)
 				networkSelect.appendChild(E('option', { 'value': '' }, _('No network interfaces found')));

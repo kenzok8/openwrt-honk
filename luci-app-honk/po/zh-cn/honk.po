@@ -1960,8 +1960,6 @@ msgstr "被 include 的文件"
 msgid "no recognised sections"
 msgstr "未识别到段落"
 
-msgid "These settings come from your configuration file. Change them under Configuration → Edit configuration."
-msgstr "这些设置来自当前配置文件，请到「配置 → 编辑配置」里修改。"
 
 msgid "Importing a complete configuration replaces the current one; back it up first, startup failures roll back."
 msgstr "导入完整配置会替换当前配置，先备份；启动失败自动回滚。"

@@ -77,7 +77,6 @@ return view.extend({
 				input.disabled = true;
 			});
 			save.disabled = true;
-			section.appendChild(E('p', { 'class': 'honk-note honk-mode-hint' }, _('These settings come from your configuration file. Change them under Configuration → Edit configuration.')));
 		}
 		if (data.statusError)
 			section.appendChild(E('div', { 'class': 'alert-message' }, _('Could not read current settings: %s').format(data.statusError)));
