@@ -127,7 +127,8 @@ return view.extend({
 				E('ul', {}, [
 					E('li', {}, _('Subscriptions and nodes must use a protocol Honk supports; SSR is not supported.')),
 					E('li', {}, _('For a complete configuration, check lan_interface and the group names against your nodes.')),
-					E('li', {}, _('Importing a complete configuration replaces the current one. Back it up before applying.'))
+					E('li', {}, _('Importing a complete configuration replaces the current one; back it up first, startup failures roll back.')),
+					E('li', {}, _('In the editor, checking only parses; a draft stays inactive until you save and apply.'))
 				])
 			]),
 			draftNote
@@ -317,7 +318,6 @@ return view.extend({
 
 		const pasteSection = E('section', { 'class': 'honk-card' }, [
 			E('h3', { 'class': 'honk-card-title' }, _('Add nodes')),
-			E('p', { 'class': 'honk-note' }, _('Paste Clash YAML, Surge INI, Base64 or share links. They are parsed locally into nodes and appended to the current configuration.')),
 			pasteInput,
 			E('div', { 'class': 'honk-actions' }, [ pasteBtn ]),
 			pasteStatus
@@ -337,7 +337,6 @@ return view.extend({
 		const importBtn = E('button', { 'class': 'cbi-button cbi-button-apply', 'type': 'button' }, [ _('Import and start') ]);
 
 		const importSection = E('section', { 'class': 'honk-card' }, [
-			E('p', { 'class': 'honk-note' }, _('Upload a complete dae file (subscriptions, nodes and routing included) and Honk starts with it: the file is validated, written to /etc/honk/config.dae and the service is restarted. To hand-edit or paste instead, use the editor below.')),
 			E('div', { 'class': 'honk-file-row' }, [ filePick, fileName, importBtn ]),
 			importStatus
 		]);
@@ -761,7 +760,6 @@ return view.extend({
 
 		const editorSection = E('section', { 'class': 'honk-card' }, [
 			E('h3', { 'class': 'honk-card-title' }, _('Edit configuration')),
-			E('p', { 'class': 'honk-note' }, _('Check configuration only parses the text. Save draft keeps it off the live file; Save and apply writes /etc/honk/config.dae, restarts Honk and rolls back if startup fails.')),
 			E('div', { 'class': 'honk-actions' }, [ saveBtn, draftBtn, reloadBtn, validateBtn ]),
 			editor,
 			editorStatus
