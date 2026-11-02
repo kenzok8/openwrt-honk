@@ -1413,8 +1413,6 @@ msgstr "无法写入配置，快照已保留。"
 msgid "Could not confirm that Honk stopped. The operation was aborted and the snapshot was kept."
 msgstr "无法确认 Honk 已停止，操作已中止，快照已保留。"
 
-msgid "Manual mode is active. Restore managed mode before using the subscription tools."
-msgstr "当前是手动模式，请先恢复托管模式再使用订阅工具。"
 
 msgid "There is no saved managed configuration to restore."
 msgstr "没有可恢复的托管配置快照。"
@@ -1437,14 +1435,8 @@ msgstr "导入配置"
 msgid "Import and start"
 msgstr "导入并启动"
 
-msgid "Manual mode is active, so this tool cannot edit the configuration. Select Restore managed mode first."
-msgstr "当前是手动模式，这个工具不会改动配置。请先点「恢复托管模式」。"
 
-msgid "Could not switch back to managed mode. The previous configuration was restored."
-msgstr "切回托管模式失败，已恢复上一版配置。"
 
-msgid "Switching back to managed mode failed and the rollback did not finish. The snapshot was kept."
-msgstr "切回托管模式失败且回滚未完成，快照已保留，请到「维护」执行系统恢复。"
 
 msgid "The saved managed configuration is not a valid regular file."
 msgstr "保存的托管配置不是普通文件，无法恢复。"
@@ -1455,8 +1447,6 @@ msgstr "没有可应用的已保存草稿。"
 msgid "The saved draft is not a valid regular file."
 msgstr "保存的草稿不是普通文件。"
 
-msgid "Manual mode is active, so these settings cannot be saved. Restore managed mode on the Configuration page first."
-msgstr "当前是手动模式，设置无法保存。请先到「配置」页恢复托管模式。"
 
 msgid "(adapted for this router: %s)"
 msgstr "（已按本机适配：%s）"
@@ -1599,14 +1589,8 @@ msgstr "luci-app-honk 的软件包配置不完整，请重新安装。"
 msgid "配置路径不是 /etc/honk/config.dae，拒绝操作。"
 msgstr "配置路径不是 /etc/honk/config.dae，拒绝操作。"
 
-msgid "手动模式配置有效。"
-msgstr "手动模式配置有效。"
 
-msgid "手动模式配置无效，请先修正 config.dae。"
-msgstr "手动模式配置无效，请先修正 config.dae。"
 
-msgid "手动模式的配置缺少 include { system.dae }，无法修复托管设置。"
-msgstr "手动模式的配置缺少 include { system.dae }，无法修复托管设置。"
 
 msgid "读不到核心的 API 状态，请查看日志。"
 msgstr "读不到核心的 API 状态，请查看日志。"
@@ -1650,8 +1634,6 @@ msgstr "选中的 LAN 网络没有 IPv4 地址。"
 msgid "创建目录失败，请检查磁盘空间与权限。"
 msgstr "创建目录失败，请检查磁盘空间与权限。"
 
-msgid "手动模式下这些设置由 config.dae 决定，无法保存。"
-msgstr "手动模式下这些设置由 config.dae 决定，无法保存。"
 
 msgid "提交的设置数据过大。"
 msgstr "提交的设置数据过大。"
@@ -1960,3 +1942,15 @@ msgstr "导入完整配置会替换当前配置，先备份；启动失败自动
 
 msgid "In the editor, checking only parses; a draft stays inactive until you save and apply."
 msgstr "编辑器里：校验只查语法，草稿不生效，保存并应用才写入。"
+
+msgid "A secret is required when enabling Clash API. Use 6–128 letters, numbers, dots, underscores or hyphens."
+msgstr "启用 Clash API 必须设置密钥，6–128 位字母、数字、点、下划线或连字符。"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Required when enabling. Use 6–128 letters, numbers, dots, underscores or hyphens."
+msgstr "启用时必填，6–128 位字母、数字、点、下划线或连字符。"
+
+msgid "Saving draft…"
+msgstr "正在保存草稿…"

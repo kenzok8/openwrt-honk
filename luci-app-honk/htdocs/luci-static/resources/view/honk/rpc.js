@@ -273,7 +273,7 @@ function tokenMessage(token) {
 		main_config_changed_concurrently: _('操作期间 config.dae 被其他进程改动，已中止。'),
 		invalid_package_config: _('luci-app-honk 的软件包配置不完整，请重新安装。'),
 		invalid_config_path: _('配置路径不是 /etc/honk/config.dae，拒绝操作。'),
-		required_system_include_missing_manual_repair: _('手动模式的配置缺少 include { system.dae }，无法修复托管设置。'),
+		required_system_include_missing: _('当前配置没有 include { system.dae }，这些设置请到「编辑配置」里修改。'),
 		native_api_setup_state_unavailable: _('读不到核心的 API 状态，请查看日志。'),
 		ui_assets_missing: _('缺少 Doona 静态文件（/usr/share/doona），请重新安装 luci-app-honk。'),
 		mock_core_start_failed: _('测试用核心启动失败：通常是内核缺 BTF（/sys/kernel/btf/vmlinux）或 eBPF 依赖模块。'),
