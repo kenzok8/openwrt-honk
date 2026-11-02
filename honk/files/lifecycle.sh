@@ -2,8 +2,27 @@
 
 HONK_LIFECYCLE_CORE=/usr/bin/honk-core
 
-honk_lifecycle_procd_pid() {
-	ubus call service list '{"name":"honk"}' 2>/dev/null | jsonfilter -e '@.honk.instances.main.pid' 2>/dev/null
+# 配置字段归属：文件自己定义 global/experimental 时由文件负责（file）；
+# 只 include system.dae 时由 system.dae 负责（system）；两者并存或都没有时无法判定（unknown）。
+# 归属不明时宁可不写，也不猜测后重写用户的完整配置。
+config_owner() {
+	config_owner_file=${1:-/etc/honk/config.dae}
+	[ -f "$config_owner_file" ] && [ ! -L "$config_owner_file" ] || { echo unknown; return 0; }
+	own=$(awk '/^[[:space:]]*(global|experimental)[[:space:]]*\{/ { print "1"; exit }' "$config_owner_file")
+	inc=$(awk '
+		/^include[[:space:]]*\{/ { in_block = 1; next }
+		in_block && /^\}/ { in_block = 0; next }
+		in_block && /system\.dae/ { print "1"; exit }
+	' "$config_owner_file")
+	if [ -n "$own" ] && [ -n "$inc" ]; then echo unknown
+	elif [ -n "$own" ]; then echo file
+	elif [ -n "$inc" ]; then echo system
+	else echo unknown
+	fi
+}
+
+
+honk_lifecycle_procd_pid() {	ubus call service list '{"name":"honk"}' 2>/dev/null | jsonfilter -e '@.honk.instances.main.pid' 2>/dev/null
 }
 
 honk_lifecycle_procd_running() {
@@ -29,35 +48,18 @@ honk_lifecycle_starttime() {
 }
 
 honk_lifecycle_listen() {
-	config_load honk
-	config_get config_mode main config_mode managed
-	if [ "$config_mode" = manual ]; then
-		[ -f /var/run/honk/readiness ] && [ ! -L /var/run/honk/readiness ] || return 1
-		read -r hlp_token _ < /var/run/honk/readiness || return 1
-		case "$hlp_token" in ''|*[!0-9a-f-]*) return 1 ;; esac
-		sed -n 's/^api_listen=//p' "/var/run/honk/core-ready-$hlp_token" 2>/dev/null
-		return
-	fi
-	sed -n "s/^[[:space:]]*listen:[[:space:]]*'\([^']*\)'.*/\1/p" /etc/honk/system.dae 2>/dev/null | head -n 1
+	[ -f /var/run/honk/readiness ] && [ ! -L /var/run/honk/readiness ] || return 1
+	read -r hlp_token _ < /var/run/honk/readiness || return 1
+	case "$hlp_token" in ''|*[!0-9a-f-]*) return 1 ;; esac
+	sed -n 's/^api_listen=//p' "/var/run/honk/core-ready-$hlp_token" 2>/dev/null
 }
 
 honk_lifecycle_parse_listen() {
-	config_load honk
-	config_get config_mode main config_mode managed
-	if [ "$config_mode" = manual ]; then
-		HONK_LIFECYCLE_LISTEN=$(honk_lifecycle_listen)
-		if [ -z "$HONK_LIFECYCLE_LISTEN" ]; then
-			HONK_LIFECYCLE_PORT=0
-			return 0
-		fi
-		case "$HONK_LIFECYCLE_LISTEN" in *:*) ;; *) return 1 ;; esac
-		HONK_LIFECYCLE_PORT=${HONK_LIFECYCLE_LISTEN##*:}
-		case "$HONK_LIFECYCLE_LISTEN" in ''|*[!A-Za-z0-9:._-]*) return 1 ;; esac
-		case "$HONK_LIFECYCLE_PORT" in ''|*[!0-9]*) return 1 ;; esac
-		[ "$HONK_LIFECYCLE_PORT" -ge 1024 ] && [ "$HONK_LIFECYCLE_PORT" -le 65535 ]
-		return $?
-	fi
 	HONK_LIFECYCLE_LISTEN=$(honk_lifecycle_listen)
+	if [ -z "$HONK_LIFECYCLE_LISTEN" ]; then
+		HONK_LIFECYCLE_PORT=0
+		return 0
+	fi
 	case "$HONK_LIFECYCLE_LISTEN" in *:*) ;; *) return 1 ;; esac
 	HONK_LIFECYCLE_PORT=${HONK_LIFECYCLE_LISTEN##*:}
 	case "$HONK_LIFECYCLE_LISTEN" in ''|*[!A-Za-z0-9:._-]*) return 1 ;; esac
@@ -116,14 +118,7 @@ honk_lifecycle_api_owned() {
 }
 
 honk_lifecycle_runtime_owned() {
-	hlp_pid=$1
-	config_load honk
-	config_get config_mode main config_mode managed
-	if [ "$config_mode" = manual ]; then
-		honk_lifecycle_ready_owned "$hlp_pid"
-	else
-		honk_lifecycle_api_owned "$hlp_pid"
-	fi
+	honk_lifecycle_ready_owned "$1"
 }
 
 honk_lifecycle_resources_clear() {
@@ -196,8 +191,6 @@ honk_lifecycle_start() {
 	hlp_listen=$HONK_LIFECYCLE_LISTEN
 	hlp_port=$HONK_LIFECYCLE_PORT
 	config_load honk
-	config_get config_mode main config_mode managed
-	if [ "$config_mode" != manual ] && honk_lifecycle_port_open "$hlp_port"; then echo "honk lifecycle: listener port remains occupied" >&2; return 1; fi
 	if [ -n "${HONK_MAINT_CAP:-}" ]; then export HONK_MAINT_CAP; fi
 	/etc/init.d/honk start >/dev/null 2>&1
 	hlp_start_status=$?
@@ -225,9 +218,7 @@ honk_lifecycle_start() {
 			hlp_new_starttime=$(honk_lifecycle_starttime "$hlp_new_pid") || hlp_new_starttime=
 			if [ -n "$hlp_new_starttime" ] && \
 				{ [ -z "${HONK_LIFECYCLE_STOP_PID:-}" ] || [ "$hlp_new_pid:$hlp_new_starttime" != "$HONK_LIFECYCLE_STOP_PID:$HONK_LIFECYCLE_STOP_STARTTIME" ]; } && \
-				{ [ "$config_mode" = manual ] && honk_lifecycle_ready_owned "$hlp_new_pid" || \
-					{ [ "$config_mode" != manual ] && honk_lifecycle_listener_owned "$hlp_new_pid" "$hlp_port" && \
-					curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://$hlp_listen/api" -o /dev/null 2>/dev/null; }; }; then
+				{ honk_lifecycle_ready_owned "$hlp_new_pid"; }; then
 				if [ "$hlp_pid:$hlp_starttime" = "$hlp_new_pid:$hlp_new_starttime" ]; then
 					hlp_stable=$((hlp_stable + 1))
 				else

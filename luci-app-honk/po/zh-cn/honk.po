@@ -1338,9 +1338,6 @@ msgstr "无法载入配置文件。"
 msgid "Could not read the saved configuration."
 msgstr "无法读取已保存的配置。"
 
-msgid "Could not restore managed mode."
-msgstr "无法恢复托管模式。"
-
 msgid "Could not save the configuration."
 msgstr "无法保存配置。"
 
@@ -1362,26 +1359,11 @@ msgstr "局域网接口 %s"
 msgid "Line %d"
 msgstr "第 %d 行"
 
-msgid "Managed mode restored."
-msgstr "已恢复托管模式。"
-
-msgid "Managed mode: the subscription and paste-nodes tools are active. Saving here switches Honk to manual mode."
-msgstr "托管模式：订阅与粘贴节点工具可用。在这里保存会切换为手动模式。"
-
 msgid "Reading %s…"
 msgstr "正在读取 %s…"
 
 msgid "Reload from disk"
 msgstr "从磁盘重新载入"
-
-msgid "Restore managed mode"
-msgstr "恢复托管模式"
-
-msgid "Restore the managed configuration and return to the subscription tools? Honk restarts if it is running."
-msgstr "恢复之前保存的托管配置并回到订阅工具？若 Honk 正在运行会重启。"
-
-msgid "Restoring the managed configuration…"
-msgstr "正在恢复托管配置…"
 
 msgid "Save and apply"
 msgstr "保存并应用"
@@ -1446,9 +1428,6 @@ msgstr "没有可恢复的托管配置快照。"
 msgid "Could not read the list of network interfaces."
 msgstr "无法读取当前网络接口列表。"
 
-msgid "Manual mode: the file below owns nodes, groups, routing and DNS."
-msgstr "手动模式：下面的文件决定节点、分组、路由与 DNS。"
-
 msgid "%s imported and Honk is running."
 msgstr "%s 已导入，Honk 正在运行。"
 
@@ -1467,9 +1446,6 @@ msgstr "导入配置"
 msgid "Import and start"
 msgstr "导入并启动"
 
-msgid "Manual mode: this tool is disabled until you restore managed mode (link at the top)."
-msgstr "手动模式下这个工具不可用，点页面顶部的「恢复托管模式」后再用。"
-
 msgid "Manual mode is active, so this tool cannot edit the configuration. Select Restore managed mode first."
 msgstr "当前是手动模式，这个工具不会改动配置。请先点「恢复托管模式」。"
 
@@ -1487,9 +1463,6 @@ msgstr "没有可应用的已保存草稿。"
 
 msgid "The saved draft is not a valid regular file."
 msgstr "保存的草稿不是普通文件。"
-
-msgid "Manual mode: these settings belong to config.dae, so they are read-only here. Restore managed mode on the Configuration page to change them."
-msgstr "手动模式：这些设置由 config.dae 决定，这里只读。要改的话先到「配置」页点「恢复托管模式」。"
 
 msgid "Manual mode is active, so these settings cannot be saved. Restore managed mode on the Configuration page first."
 msgstr "当前是手动模式，设置无法保存。请先到「配置」页恢复托管模式。"
@@ -1913,3 +1886,87 @@ msgstr "请先完成首次设置：没有管理员账号时 Honk 不会启动。
 
 msgid "Not initialized yet. Finish the first setup below, then Honk can be started."
 msgstr "还没完成首次设置。先做完下面的首次设置，Honk 才能启动。"
+
+msgid "Configuration management"
+msgstr "配置管理"
+
+msgid "Add subscriptions and nodes, or import and edit a complete configuration."
+msgstr "添加订阅和节点，或导入、编辑完整配置。"
+
+msgid "Append keeps your rules · validated before applying · rolled back when startup fails"
+msgstr "追加不覆盖规则 · 应用前先校验 · 启动失败自动回滚"
+
+msgid "Read before use"
+msgstr "使用前确认"
+
+msgid "Subscriptions and nodes must use a protocol Honk supports; SSR is not supported."
+msgstr "订阅与节点需使用 Honk 支持的协议，不支持 SSR。"
+
+msgid "For a complete configuration, check lan_interface and the group names against your nodes."
+msgstr "完整配置请核对 lan_interface 与分组名称是否对得上节点。"
+
+msgid "Importing a complete configuration replaces the current one. Back it up before applying."
+msgstr "导入完整配置会替换当前配置，应用前请先备份。"
+
+msgid "Save draft"
+msgstr "保存草稿"
+
+msgid "Edit configuration"
+msgstr "编辑配置"
+
+msgid "Check configuration only parses the text. Save draft keeps it off the live file; Save and apply writes /etc/honk/config.dae, restarts Honk and rolls back if startup fails."
+msgstr "「校验配置」只做语法检查；「保存草稿」不写活动文件；「保存并应用」会写入 /etc/honk/config.dae 并重启 Honk，启动失败自动回滚。"
+
+msgid "Draft saved. It is not active until you apply it."
+msgstr "草稿已保存，应用前不会生效。"
+
+msgid "Could not save the draft."
+msgstr "保存草稿失败。"
+
+msgid "An unapplied draft exists."
+msgstr "存在未应用的草稿。"
+
+msgid "Load draft"
+msgstr "载入草稿"
+
+msgid "An old manual draft from a previous version is kept on disk."
+msgstr "磁盘上保留了旧版本的手动草稿。"
+
+msgid "Load old draft"
+msgstr "载入旧草稿"
+
+msgid "Draft loaded into the editor. It is not active until you apply it."
+msgstr "草稿已载入编辑器，应用前不会生效。"
+
+msgid "Could not read the draft."
+msgstr "读取草稿失败。"
+
+msgid "This file replaces the current configuration.\n\nIt defines: %s\n\nBack up the current configuration first if you are unsure. Continue?"
+msgstr "这个文件会替换当前配置。\n\n包含：%s\n\n不确定的话先备份当前配置。继续吗？"
+
+msgid "nodes"
+msgstr "节点"
+
+msgid "subscriptions"
+msgstr "订阅"
+
+msgid "groups"
+msgstr "分组"
+
+msgid "routing"
+msgstr "路由"
+
+msgid "global settings"
+msgstr "全局设置"
+
+msgid "API and UI settings"
+msgstr "API 与界面设置"
+
+msgid "included files"
+msgstr "被 include 的文件"
+
+msgid "no recognised sections"
+msgstr "未识别到段落"
+
+msgid "These settings come from your configuration file. Change them under Configuration → Edit configuration."
+msgstr "这些设置来自当前配置文件，请到「配置 → 编辑配置」里修改。"
