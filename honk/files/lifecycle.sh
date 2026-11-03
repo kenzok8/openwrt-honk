@@ -219,6 +219,12 @@ honk_lifecycle_start() {
 	hlp_start_status=$?
 	unset HONK_MAINT_CAP
 	[ "$hlp_start_status" = 0 ] || { echo "honk lifecycle: init start failed" >&2; return 1; }
+	honk_lifecycle_wait_ready "$hlp_timeout"
+}
+
+# Also used after APK's post-install script has already started the new core.
+honk_lifecycle_wait_ready() {
+	hlp_timeout=${1:-30}
 	hlp_stable=0
 	hlp_pid=
 	hlp_starttime=

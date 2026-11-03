@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
-for tool in bash sh node sha256sum git tar; do
+for tool in bash sh node python3 sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
@@ -228,4 +228,5 @@ grep -Fq 'checking_feed' honk/files/job.sh
 grep -Fq "honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
 git diff --check
+python3 scripts/test_runtime.py
 echo 'Static checks passed.'
