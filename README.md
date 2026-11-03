@@ -79,6 +79,10 @@ wget -qO- https://down.dllkids.xyz/openwrt-feed/openwrt-feed-setup.sh | sh
 > 「软件包更新」卡片只查本机 apk/opkg 源，不查 GitHub。用 `install.sh` 装的机器没有把 feed 写进源，卡片会一直显示「已是最新」；先跑上面的软件源脚本（装 feed 公钥 + 写源 + 刷索引）卡片才有用。
 > 刚发布的版本要等 feed 同步过去才会出现在索引里，急着升级直接重跑 `install.sh`。
 
+维护页升级会先完成索引刷新、依赖预检与下载，再停止旧服务并从缓存安装目标版本。
+任一步骤失败都会报告失败，不跳过预检或忽略 APK 错误。安装完成后核对目标版本，
+恢复升级前的运行状态，并等待新核心就绪。
+
 ## 使用
 
 安装 `honk` 和 `luci-app-honk` 后，在 LuCI「服务 → Honk」中初始化服务，运行系统检查并启动。核心 Web 界面（Doona）仅在已初始化、正在运行且 API 就绪时开放。
@@ -116,11 +120,14 @@ ci/build-core.sh
 | `v2ray-geoip` / `v2ray-geosite` | 路由 GeoIP/GeoSite 数据 |
 | `rpcd` / `luci-base` / `cgi-io` | LuCI 运行依赖 |
 
-内核需要 BTF（`/sys/kernel/btf/vmlinux`），honk-core 用 CO-RE eBPF，缺少 BTF 会启动失败。
+honk-core 用 CO-RE eBPF，需要可读的内核 BTF：优先读取 `/sys/kernel/btf/vmlinux`，
+没有内置 BTF 时自动读取 `/usr/lib/debug/boot/vmlinux`。后者由与运行内核的版本、
+架构和 ABI 匹配的 `vmlinux-btf` 软件包提供，需要随固件内核安装；Honk 升级不会替换它。
+无需修改 `/etc/init.d/honk` 或设置额外环境变量。外部 BTF 不会开启内核的 BTF/ftrace 功能。
 
 ## 系统要求
 
-- OpenWrt x86_64（推荐 25.x，需 Linux 6.12+ 且内核开启 BTF）
+- OpenWrt x86_64（推荐 25.x，需 Linux 6.12+，以及内置或匹配的外部 BTF）
 
 ## 致谢
 

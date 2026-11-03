@@ -1,136 +1,108 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
 # update-pkg.sh <honk|luci-app-honk>
-# Refresh package indexes and upgrade the named package via apk. Forks to
-# background; the result is streamed to /tmp/luci-app-honk.pkg.<name>.log.
+# Refresh, preflight and download before stopping the running service.
+# The background result is streamed to /tmp/luci-app-honk.pkg.<name>.log.
 
 PKG="$1"
 case "$PKG" in
 	honk|luci-app-honk) ;;
-	*)
-		echo "usage: $0 <honk|luci-app-honk>" >&2
-		exit 64
-		;;
+	*) echo "usage: $0 <honk|luci-app-honk>" >&2; exit 64 ;;
 esac
 
-# Run from a /tmp copy so upgrading luci-app-honk (which replaces this script)
-# cannot corrupt the in-flight upgrade.
+# Upgrading luci-app-honk replaces this file. Finish from a private copy.
+umask 077
 case "$0" in
 	/tmp/.honk-upd-*) ;;
 	*)
-		_self="/tmp/.honk-upd-$$"
-		cp "$0" "$_self" 2>/dev/null && exec sh "$_self" "$@"
+		_self=$(mktemp /tmp/.honk-upd-XXXXXX) || exit 1
+		cp "$0" "$_self" || { rm -f "$_self"; exit 1; }
+		exec sh "$_self" "$@"
 		;;
 esac
 
-LOCK="/tmp/luci-app-honk.pkg-${PKG}.lock"
 LOG="/tmp/luci-app-honk.pkg-${PKG}.log"
 
-. /usr/share/honk/lifecycle.sh 2>/dev/null || :
+# Hold the existing shared APK lock through download, installation and readiness.
+# The background child inherits fd 9; concurrent requests cannot truncate its log.
+exec 9>/tmp/luci-app-honk.apk.lock || { rm -f "$0"; exit 1; }
+flock -n 9 || { echo "Honk package update already in progress" >&2; rm -f "$0"; exit 75; }
 
-# 运行状态与恢复交给 lifecycle：它已经处理 dae0/BPF 排空、崩溃重启和就绪判定。
 service_running() {
 	honk_lifecycle_managed_pid >/dev/null 2>&1
 }
 
 restore_service_state() {
 	if [ "$was_running" = 1 ]; then
-		echo "--- 升级前为运行状态，重启加载新内核 ---"
-		if honk_lifecycle_restart 30 >/dev/null 2>&1; then
-			echo "result: 服务已恢复运行"
-			return 0
+		# OpenWrt's package post-install script may have started the new core.
+		# Wait for that instance instead of stopping and starting it again.
+		if service_running; then
+			honk_lifecycle_wait_ready 30 || return $?
+		else
+			honk_lifecycle_start 30 || return $?
 		fi
-		echo "result: 服务重启失败"
-		return 1
+		echo "result: 服务已恢复运行"
+	else
+		honk_lifecycle_stop 30 || return $?
+		echo "result: 服务保持停止"
 	fi
-	if service_running; then
-		echo "--- 升级前为停止状态，停止服务 ---"
-		honk_lifecycle_stop 30 >/dev/null 2>&1 || {
-			echo "result: 服务停止或资源排空失败"
-			return 1
-		}
-	fi
-	echo "result: 服务保持停止"
-	return 0
 }
 
-if [ -f "$LOCK" ]; then
-	mtime=$(date -r "$LOCK" +%s 2>/dev/null || echo 0)
-	age=$(( $(date +%s) - mtime ))
-	if [ "$age" -lt 300 ]; then
-		echo "${PKG} update already in progress (PID $(cat "$LOCK" 2>/dev/null), age ${age}s)" >&2
-		exit 75
-	fi
-	rm -f "$LOCK"
-fi
+upgrade_package() {
+	command -v apk >/dev/null 2>&1 || { echo "no package manager found"; return 3; }
+	[ -r /usr/share/honk/lifecycle.sh ] || return 1
+	. /usr/share/honk/lifecycle.sh || return $?
 
-if ! ( set -C; echo "$$" >"$LOCK" ) 2>/dev/null; then
-	echo "${PKG} update already in progress" >&2
-	exit 75
-fi
+	work_dir=$(mktemp -d /tmp/honk-pkg-XXXXXX) || return 1
+	cache="$work_dir/cache"
+	mkdir "$cache" || return $?
+	apk --cache-dir "$cache" update || return $?
+	available=$(apk --cache-dir "$cache" list --available "$PKG") || return $?
+	ver=$(printf '%s\n' "$available" | awk -v p="$PKG" '$1 ~ "^" p "-[0-9]" { v=$1; sub("^" p "-", "", v); print v }' | sort -V | tail -1)
+	[ -n "$ver" ] || { echo "result: 软件源中没有找到 $PKG"; return 1; }
+	constraint="$PKG=$ver"
 
-(
-	exec >"$LOG" 2>&1
-	trap 'rm -f "$LOCK"; [ "${0#/tmp/.honk-upd-}" != "$0" ] && rm -f "$0"' EXIT INT TERM
+	echo "--- 预检并下载 $constraint ---"
+	apk --cache-dir "$cache" add --simulate "$constraint" || return $?
+	apk --cache-dir "$cache" cache download "$constraint" || return $?
+	# Confirm the actual installation can finish without the proxy or network.
+	apk --cache-dir "$cache" --no-network add --simulate "$constraint" || return $?
 
-	echo "$(date '+%F %T') begin upgrade: $PKG"
 	was_running=0
 	service_running && was_running=1
 	echo "升级前服务状态: $([ "$was_running" = 1 ] && echo 运行中 || echo 已停止)"
+	# Drain even when stopped: refuse an unmanaged core or leftover resources.
+	# Replacing a live executable first makes /proc/PID/exe point to '(deleted)'.
+	honk_lifecycle_stop 30 || return $?
+	echo "--- 安装 $constraint ---"
+	apk --cache-dir "$cache" --no-network add "$constraint" || return $?
+	installed=$(apk --cache-dir "$cache" list --installed "$PKG") || return $?
+	printf '%s\n' "$installed" | awk -v expected="$PKG-$ver" '$1 == expected { found=1 } END { exit !found }' || {
+		echo "result: 目标版本 $constraint 未安装"
+		return 1
+	}
 
-	if command -v apk >/dev/null 2>&1; then
-		(
-			flock 9
-			apk update 2>&1
-			ver=$(apk list "$PKG" 2>/dev/null | awk -v p="$PKG" '$1 ~ "^" p "-[0-9]" { v=$1; sub("^" p "-", "", v); print v }' | sort -V | tail -1)
-			if [ -n "$ver" ]; then
-				constraint="$PKG=$ver"
-			else
-				echo "result: 软件源中没有找到 $PKG，请检查网络或软件源配置"
-				exit 1
-			fi
+	# Use the installed lifecycle implementation, not the pre-upgrade copy.
+	. /usr/share/honk/lifecycle.sh || return $?
+	restore_service_state || return $?
+	/etc/init.d/rpcd reload || return $?
+}
 
-			echo "--- apk add -s $constraint ---"
-			if ! apk add -s "$constraint" 2>&1; then
-				echo "note: apk 预检失败，通常是系统上其它软件包的问题，继续尝试升级"
-			fi
-			echo "--- apk add $constraint ---"
-			apk add "$constraint" 2>&1
-			exit 0
-		) 9>/tmp/luci-app-honk.apk.lock
-		rc=$?
-		if [ "$rc" != 0 ]; then
-			:
-		elif ! apk list --installed 2>/dev/null | grep -q "^${PKG}-"; then
-			echo "result: $PKG is not installed"
-			rc=1
-		elif apk list -u 2>/dev/null | grep -q "^${PKG}-"; then
-			echo "result: $PKG still has a pending upgrade"
-			rc=1
-		else
-			echo "result: $PKG is at the latest available version"
-			rc=0
-		fi
-	else
-		echo "no package manager found"
-		exit 3
-	fi
-
-	service_rc=0
-	if [ "$rc" = "0" ]; then
-		echo "reloading rpcd to pick up new scripts"
-		/etc/init.d/rpcd reload 2>&1
-		restore_service_state || service_rc=$?
-	fi
-
-	# 前端轮询见到 ✓/✗ 即停止，结论只在这里输出一次。
-	if [ "$rc" != "0" ]; then
-		echo "$(date '+%F %T') ✗ 升级失败 (rc=$rc)"
-	elif [ "$service_rc" != "0" ]; then
-		echo "$(date '+%F %T') ✗ 软件包升级成功，但服务启动失败，请查看日志后手动启动"
+(
+	exec >"$LOG" 2>&1
+	work_dir=
+	trap '[ -z "$work_dir" ] || rm -rf "$work_dir"; rm -f "$0"' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	echo "$(date '+%F %T') begin upgrade: $PKG"
+	rc=0
+	upgrade_package || rc=$?
+	if [ "$rc" != 0 ]; then
+		echo "$(date '+%F %T') ✗ 升级失败 (rc=$rc)，请查看上方错误"
 	else
 		echo "$(date '+%F %T') ✓ 完成"
 	fi
+	exit "$rc"
 ) </dev/null >/dev/null 2>&1 &
 
 echo "started in background, see $LOG"

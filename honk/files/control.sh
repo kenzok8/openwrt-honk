@@ -166,11 +166,13 @@ check_kernel() {
 	major=$(printf '%s' "$kernel" | cut -d. -f1)
 	minor=$(printf '%s' "$kernel" | cut -d. -f2)
 	[ "$major" -gt 6 ] || { [ "$major" -eq 6 ] && [ "$minor" -ge 12 ]; } || { fail "内核版本过低，需要 Linux 6.12 或更新"; return 1; }
-	[ -r /sys/kernel/btf/vmlinux ] || { fail "内核缺少 BTF（/sys/kernel/btf/vmlinux），请换用带 BTF 的固件"; return 1; }
+	[ -r /sys/kernel/btf/vmlinux ] || [ -r /usr/lib/debug/boot/vmlinux ] || {
+		fail "缺少 BTF：需要 /sys/kernel/btf/vmlinux 或与运行内核匹配的 vmlinux-btf 软件包"
+		return 1
+	}
 	[ -d /sys/fs/bpf ] && grep -q ' /sys/fs/bpf bpf ' /proc/mounts || { fail "bpffs 未挂载到 /sys/fs/bpf，请检查内核或手工挂载"; return 1; }
 	command -v ip >/dev/null 2>&1 || { fail "缺少 ip 命令（装 ip-full）"; return 1; }
 	command -v modprobe >/dev/null 2>&1 || { fail "缺少 modprobe 命令（装 kmod）"; return 1; }
-	[ -r /sys/kernel/btf/vmlinux ] || { fail "内核缺少 BTF（/sys/kernel/btf/vmlinux），请换用带 BTF 的固件"; return 1; }
 	for module in sch_ingress cls_bpf veth nft_queue nfnetlink_queue; do
 		module_available "$module" || { fail "缺少内核模块 $module，请确认 kmod-sched-core / kmod-sched-bpf / kmod-veth / kmod-nft-queue 已安装"; return 1; }
 	done
