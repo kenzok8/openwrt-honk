@@ -95,13 +95,14 @@ STAGE_MK="$ROOT/honk/generated-stage.mk"
 	echo "PKG_SOURCE_URL:=https://github.com/kenzok8/openwrt-honk/releases/download/${HONK_SOURCE_TAG:-staging}/"
 } > "$STAGE_MK"
 
-# aya 0.14.0 exhaustively destructures libc::timespec, which breaks when
-# musl32_time64 changes the struct layout on 32-bit targets (extra padding
-# fields). One-line fix to the vendored source; harmless on 64-bit.
+# aya 0.14+ exhaustively destructures libc::timespec. From libc 0.2.19x the
+# 32-bit time64 layouts (musl32_time64 / gnu_time_bits64) carry a private
+# padding field, so the pattern stops compiling. One-line fix to the vendored
+# source; harmless on 64-bit. Matches whatever aya the pinned lock resolves.
 if ! cargo +"$TOOLCHAIN" fetch --locked --target x86_64-unknown-linux-musl >/dev/null 2>&1; then
 	echo "warning: cargo fetch failed; vendored-source patches below may be skipped" >&2
 fi
-for aya_utils in "$CARGO_HOME"/registry/src/*/aya-0.14.0/src/programs/utils.rs; do
+for aya_utils in "$CARGO_HOME"/registry/src/*/aya-*/src/programs/utils.rs; do
 	[ -f "$aya_utils" ] || continue
 	sed -i 's/let libc::timespec { tv_sec, tv_nsec } = time;/let libc::timespec { tv_sec, tv_nsec, .. } = time;/' "$aya_utils"
 done
