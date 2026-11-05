@@ -184,7 +184,10 @@ rm -rf "$reset_fixture"
 
 grep -Fq 'include $(INCLUDE_DIR)/package.mk' luci-app-honk/Makefile
 grep -Fq '$(eval $(call BuildPackage,luci-app-honk))' luci-app-honk/Makefile
-! grep -Fq 'include $(TOPDIR)/feeds/luci/luci.mk' luci-app-honk/Makefile
+! grep -Fq 'include $(TOPDIR)/feeds/luci/luci.mk' luci-app-honk/Makefile || {
+	echo 'luci-app-honk must not include the stock luci.mk' >&2
+	exit 1
+}
 grep -Fq 'PKG_BUILD_DEPENDS:=luci-base/host' luci-app-honk/Makefile
 grep -Fq 'po2lmo ./po/zh-cn/honk.po' luci-app-honk/Makefile
 grep -Fq '$(INSTALL_DATA) $(PKG_BUILD_DIR)/honk.zh-cn.lmo' luci-app-honk/Makefile
@@ -197,11 +200,14 @@ grep -Fq 'HONK_ASSET_ARMV7?=' honk/Makefile
 grep -Fq '@(x86_64||aarch64||arm)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
-# 内核 BTF 允许来自固件或 vmlinux-btf 包，两个脚本都必须按 honk-core 的顺序查找
-! grep -Fq '@KERNEL_DEBUG_INFO_BTF' honk/Makefile
+! grep -v '^[[:space:]]*#' honk/Makefile | grep -Fq '@KERNEL_DEBUG_INFO_BTF' || {
+	echo 'honk must not gate on @KERNEL_DEBUG_INFO_BTF; vmlinux-btf covers BTF-less kernels' >&2
+	exit 1
+}
 for script in honk/files/control.sh honk/files/update.sh; do
 	grep -Fq '/sys/kernel/btf/vmlinux' "$script"
 	grep -Fq '/usr/lib/debug/boot/vmlinux' "$script"
+	grep -Fq 'HONK_VMLINUX_BTF' "$script"
 done
 # 管理口自保护规则由启动时按本机地址重写，标记块与同步函数必须都在
 grep -qxF '    # honk:local-direct-begin' honk/files/config.dae

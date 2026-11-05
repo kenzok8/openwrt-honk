@@ -116,7 +116,13 @@ ci/build-core.sh
 | `v2ray-geoip` / `v2ray-geosite` | 路由 GeoIP/GeoSite 数据 |
 | `rpcd` / `luci-base` / `cgi-io` | LuCI 运行依赖 |
 
-内核需要 BTF，honk-core 用 CO-RE eBPF，缺少 BTF 会启动失败。查找顺序与核心一致：`HONK_VMLINUX_BTF` → `/sys/kernel/btf/vmlinux` → `/usr/lib/debug/boot/vmlinux`，即固件自带 BTF，或装 [vmlinux-btf](https://github.com/kenzok8/vmlinux-btf) 把原始 BTF 补到 `/usr/lib/debug/boot/vmlinux`（官方 OpenWrt 用后者，dae 同样依赖它）。`scripts/install.sh` 发现两个路径都没有时会自动从软件源补装，但只在包的内核版本与 `uname -r` 完全一致时才装——跨版本 BTF 会让 CO-RE 偏移静默算错。自编译或快照内核没有现成包时，用同一次编译产出的 `vmlinux` 跑 `pahole --btf_encode_detached=bpf.vmlinux vmlinux`，把结果放到 `/usr/lib/debug/boot/vmlinux`，或设 `HONK_VMLINUX_BTF` 指过去。
+honk-core 用 CO-RE eBPF，缺 BTF 起不来。BTF 按这个顺序找：
+
+1. `HONK_VMLINUX_BTF` 指定的文件。设了它就只认这一个，读不到直接拒绝启动，不回退。
+2. `/sys/kernel/btf/vmlinux`，内核自带 BTF 的固件有。
+3. `/usr/lib/debug/boot/vmlinux`，[vmlinux-btf](https://github.com/kenzok8/vmlinux-btf) 装的就是这里。
+
+官方 OpenWrt 内核不带 BTF，走第 3 条。`scripts/install.sh` 两条默认路径都没有时会从软件源补装：主次版本一致就装，补丁号不同照装但打警告，跨系列跳过。自编译或快照内核没有现成包时，拿同一次编译的 `vmlinux` 跑 `pahole --btf_encode_detached=vmlinux.btf vmlinux`，放到 `/usr/lib/debug/boot/vmlinux` 或用 `HONK_VMLINUX_BTF` 指过去。
 
 ## 系统要求
 
