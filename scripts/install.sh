@@ -91,6 +91,11 @@ geodata_installed() {
 	fi
 }
 
+# honk-core 用 CO-RE eBPF，两个位置任一有 BTF 就能跑：固件自带，或 vmlinux-btf 包
+btf_present() {
+	[ -r /sys/kernel/btf/vmlinux ] || [ -r /usr/lib/debug/boot/vmlinux ]
+}
+
 apk_file_version() {
 	metadata="$(apk --allow-untrusted adbdump "$1")" || return 1
 	name="$(printf '%s\n' "$metadata" | sed -n 's/^  name: //p' | head -n 1)"
@@ -222,7 +227,43 @@ main() {
 		done
 	fi
 
-	echo "安装 honk、luci-app-honk 及所需 geo 数据"
+	# 固件没编 BTF 时补装 vmlinux-btf：dae 也是靠这个包在官方 OpenWrt 上跑起来的
+	# BTF 最好与内核同源：同系列补丁位差别实测可用，只警告；跨系列直接不装。
+	if ! btf_present; then
+		kernel_release="$(uname -r | sed 's/-.*//')"
+		echo "内核没有自带 BTF，尝试从软件源补装 vmlinux-btf。"
+		btf_dir="$GEO_FEED/$SDK/$ARCH"
+		btf_listing="$(fetch_text "$btf_dir/" || true)"
+		if [ "$PM" = apk ]; then
+			btf_name="$(printf '%s\n' "$btf_listing" | grep -oE 'vmlinux-btf-[0-9][^"/<]*\.apk' | head -n 1)"
+		else
+			btf_name="$(printf '%s\n' "$btf_listing" | grep -oE "vmlinux-btf_[^\"/<]*_${ARCH}\\.ipk" | head -n 1)"
+		fi
+		btf_kernel="$(printf '%s\n' "$btf_name" | sed -E 's/^vmlinux-btf[-_]([0-9][0-9.]*)[-_].*/\1/')"
+		if [ -z "$btf_name" ]; then
+			echo "未找到 $SDK/$ARCH 的 vmlinux-btf，honk 启动时会因为缺 BTF 失败。" >&2
+		elif [ "${btf_kernel%.*}" != "${kernel_release%.*}" ]; then
+			echo "软件源的 vmlinux-btf 是为内核 $btf_kernel 编的，当前内核是 $kernel_release，跨版本了，跳过自动安装。" >&2
+			echo "需要为当前内核生成 BTF，或换用自带 BTF 的固件。" >&2
+		else
+			btf_file="$TMP_DIR/$btf_name"
+			echo "下载 $btf_dir/$btf_name"
+			if download_file "$btf_dir/$btf_name" "$btf_file"; then
+				if [ "$PM" = apk ]; then apk --allow-untrusted verify "$btf_file" || exit 1; fi
+				set -- "$@" "$btf_file"
+				if [ "$btf_kernel" = "$kernel_release" ]; then
+					echo "已加入安装：$btf_name（与当前内核 $kernel_release 一致）"
+				else
+					echo "已加入安装：$btf_name（按内核 $btf_kernel 编译，当前 $kernel_release，同系列补丁位不同）"
+					echo "这一般能用；若出现异常，先怀疑这份 BTF，删掉 /usr/lib/debug/boot/vmlinux 即恢复缺 BTF 状态。" >&2
+				fi
+			else
+				echo "vmlinux-btf 下载失败，honk 启动时会因为缺 BTF 失败。" >&2
+			fi
+		fi
+	fi
+
+	echo "安装 honk、luci-app-honk 及所需依赖包"
 	install_rc=0
 	if [ "$PM" = apk ]; then
 		apk --allow-untrusted verify "$honk_file" "$luci_file" || exit 1

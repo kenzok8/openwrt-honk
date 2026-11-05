@@ -116,11 +116,13 @@ ci/build-core.sh
 | `v2ray-geoip` / `v2ray-geosite` | 路由 GeoIP/GeoSite 数据 |
 | `rpcd` / `luci-base` / `cgi-io` | LuCI 运行依赖 |
 
-内核需要 BTF（`/sys/kernel/btf/vmlinux`），honk-core 用 CO-RE eBPF，缺少 BTF 会启动失败。
+内核需要 BTF，honk-core 用 CO-RE eBPF，缺少 BTF 会启动失败。查找顺序与核心一致：`HONK_VMLINUX_BTF` → `/sys/kernel/btf/vmlinux` → `/usr/lib/debug/boot/vmlinux`，即固件自带 BTF，或装 [vmlinux-btf](https://github.com/kenzok8/vmlinux-btf) 把原始 BTF 补到 `/usr/lib/debug/boot/vmlinux`（官方 OpenWrt 用后者，dae 同样依赖它）。`scripts/install.sh` 发现两个路径都没有时会自动从软件源补装，但只在包的内核版本与 `uname -r` 完全一致时才装——跨版本 BTF 会让 CO-RE 偏移静默算错。自编译或快照内核没有现成包时，用同一次编译产出的 `vmlinux` 跑 `pahole --btf_encode_detached=bpf.vmlinux vmlinux`，把结果放到 `/usr/lib/debug/boot/vmlinux`，或设 `HONK_VMLINUX_BTF` 指过去。
 
 ## 系统要求
 
-- OpenWrt x86_64（推荐 25.x，需 Linux 6.12+ 且内核开启 BTF）
+- OpenWrt x86_64 / aarch64 / armv7（25.x，需 Linux 6.12+）
+- 内核自带 BTF，或安装 `vmlinux-btf` 包
+- 只有内核自带 BTF 时才启用「原生 UDP 接收追踪」，用外部 BTF 时该功能降级，其余功能不受影响
 
 ## 致谢
 

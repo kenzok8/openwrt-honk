@@ -197,7 +197,12 @@ grep -Fq 'HONK_ASSET_ARMV7?=' honk/Makefile
 grep -Fq '@(x86_64||aarch64||arm)' honk/Makefile
 grep -Fq '$(INSTALL_BIN) $(CURDIR)/files/update.sh' honk/Makefile
 
-grep -Fq '+@KERNEL_DEBUG_INFO_BTF' honk/Makefile
+# 内核 BTF 允许来自固件或 vmlinux-btf 包，两个脚本都必须按 honk-core 的顺序查找
+! grep -Fq '@KERNEL_DEBUG_INFO_BTF' honk/Makefile
+for script in honk/files/control.sh honk/files/update.sh; do
+	grep -Fq '/sys/kernel/btf/vmlinux' "$script"
+	grep -Fq '/usr/lib/debug/boot/vmlinux' "$script"
+done
 # 管理口自保护规则由启动时按本机地址重写，标记块与同步函数必须都在
 grep -qxF '    # honk:local-direct-begin' honk/files/config.dae
 grep -Fq 'sync_local_direct()' honk/files/control.sh
