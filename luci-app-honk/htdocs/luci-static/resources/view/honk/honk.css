@@ -65,11 +65,11 @@
 	margin: 4px 0 18px;
 	display: flex;
 	align-items: center;
-	gap: 14px;
+	gap: 12px;
 }
 
 .honk-header-logo {
-	height: 46px;
+	height: 30px;
 	width: auto;
 	flex: none;
 	display: block;
@@ -101,7 +101,7 @@
 
 @media (max-width: 480px) {
 	.honk-header { gap: 10px; }
-	.honk-header-logo { height: 34px; }
+	.honk-header-logo { height: 26px; }
 }
 
 /* ---------- Cards ---------- */
@@ -548,7 +548,7 @@
 	top: 2px;
 	left: 2px;
 	width: 23px;
-	height: 23px;
+	height: 30px;
 	border-radius: 50%;
 	background: #fff;
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
