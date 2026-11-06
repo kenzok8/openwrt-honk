@@ -46,35 +46,30 @@ LAYOUT = Template(
   </head>
   <body data-page="$page">
     <a class="skip-link" href="#content">跳到正文</a>
-    <header class="header">
-      <a class="brand" href="index.html">
-        <img src="assets/logo.png" width="28" height="28" alt="" />
-        <span>$site<small>$subtitle</small></span>
-      </a>
-      <button class="search-trigger" type="button" data-search-open>
-        <span aria-hidden="true">⌕</span> 搜索文档 <kbd>Ctrl K</kbd>
-      </button>
-      <nav class="header-links">
-        <a href="https://github.com/$repo">GitHub ↗</a>
-      </nav>
-      <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅主题" aria-pressed="false">◐</button>
-      <button class="icon-button menu-button" id="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false">目录</button>
-    </header>
-    <div class="layout">
-      <aside class="sidebar" id="sidebar">
-$sidebar
-        <div class="sidebar-footer">
-          <span class="version">$version</span>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <a class="brand" href="index.html">
+          <img src="assets/logo.png" width="34" height="34" alt="" />
+          <span class="brand-text">$site<em>$subtitle</em></span>
+        </a>
+        <nav class="masthead-nav" aria-label="页面">$tabs</nav>
+        <div class="masthead-actions">
+          <button class="search-trigger" type="button" data-search-open aria-label="搜索">⌕</button>
+          <a class="gh-link" href="https://github.com/$repo">GitHub</a>
+          <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅主题" aria-pressed="false">◐</button>
         </div>
-      </aside>
-      <main id="content" class="content">
+      </div>
+      <div class="masthead-rule"></div>
+    </header>
+    <main id="content" class="page">
 $content
-        <footer class="page-footer">
-          <a href="https://github.com/$repo/blob/main/docs/site/content/$page">编辑此页</a>
-          <span>$site 文档 · $license</span>
-        </footer>
-      </main>
-    </div>
+      <nav class="pager" aria-label="上下页">$pager</nav>
+      <footer class="page-footer">
+        <span class="page-version">$version</span>
+        <a href="https://github.com/$repo/blob/main/docs/site/content/$page">在 GitHub 上编辑</a>
+        <span>$site 文档 · $license</span>
+      </footer>
+    </main>
     <div class="search-overlay" id="search" hidden>
       <div class="search-box">
         <input type="search" id="search-input" placeholder="搜索标题与正文…" autocomplete="off" spellcheck="false" />
@@ -205,13 +200,25 @@ def build(site: dict, output: Path, check_only: bool) -> list[str]:
 
     for item in pages(site):
         page = item["page"]
-        sidebar = ['        <nav aria-label="文档目录">']
+        tabs = []
         for group in site["nav"]:
-            sidebar.append(f'          <p class="nav-label">{html.escape(group["group"])}</p>')
             for entry in group["items"]:
                 current = ' aria-current="page"' if entry["page"] == page else ""
-                sidebar.append(f'          <a href="{entry["page"]}"{current}>{html.escape(entry["title"])}</a>')
-        sidebar.append("        </nav>")
+                tabs.append(f'<a href="{entry["page"]}"{current}>{html.escape(entry["title"])}</a>')
+
+        order = [entry["page"] for entry in pages(site)]
+        index_of = order.index(page)
+        pager = []
+        if index_of > 0:
+            prev = pages(site)[index_of - 1]
+            pager.append(
+                f'<a class="pager-prev" href="{prev["page"]}"><small>上一页</small>{html.escape(prev["title"])}</a>'
+            )
+        if index_of + 1 < len(order):
+            nxt = pages(site)[index_of + 1]
+            pager.append(
+                f'<a class="pager-next" href="{nxt["page"]}"><small>下一页</small>{html.escape(nxt["title"])}</a>'
+            )
 
         title = site["title"] if page == "index.html" else f'{item["title"]} · {site["title"]}'
         document = LAYOUT.substitute(
@@ -224,7 +231,8 @@ def build(site: dict, output: Path, check_only: bool) -> list[str]:
             license=site["license"],
             site=html.escape(site["title"]),
             subtitle=html.escape(site["subtitle"]),
-            sidebar="\n".join(sidebar),
+            tabs="\n".join(tabs),
+            pager="\n".join(pager),
             content=rendered[page],
             version=f'v{html.escape(read_version(site))}' if read_version(site) else "",
         )
@@ -247,7 +255,8 @@ def build(site: dict, output: Path, check_only: bool) -> list[str]:
             license=site["license"],
             site=html.escape(site["title"]),
             subtitle=html.escape(site["subtitle"]),
-            sidebar='        <nav aria-label="文档目录"><a href="index.html">返回文档首页</a></nav>',
+            tabs='<a href="index.html">概览</a>',
+            pager='<a class="pager-next" href="index.html"><small>回到</small>文档首页</a>',
             content='        <h1>页面不存在</h1>\n        <p>链接可能已经调整，<a href="index.html">回到文档首页</a>。</p>',
             version="",
         ),
