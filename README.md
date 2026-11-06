@@ -13,11 +13,6 @@
   <a href="https://github.com/kenzok8/openwrt-honk/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/kenzok8/openwrt-honk?style=flat-square"></a>
 </div>
 
-<p align="center">
-  <a href="https://kenzok8.github.io/openwrt-honk/">📖 在线使用文档</a> ·
-  <a href="https://github.com/kenzok8/openwrt-honk/releases">📦 下载安装</a> ·
-  <a href="https://github.com/kenzok8/openwrt-honk/issues">💬 问题反馈</a>
-</p>
 
 ## 界面预览
 
