@@ -1,0 +1,42 @@
+<h1>安全与权限</h1>
+
+<p>Honk 的配置里有节点密码、订阅地址和面板凭据。默认只在本机与 LAN 内使用，别把管理入口开到公网。</p>
+
+<h2 id="exposure">暴露面</h2>
+
+<table>
+  <tr><th>入口</th><th>默认</th><th>说明</th></tr>
+  <tr><td>LuCI 管理</td><td>由 uhttpd 提供</td><td>跟着 LuCI 的登录与 ACL 走</td></tr>
+  <tr><td>原生 API（Doona）</td><td><code>192.168.x.x:9527</code></td><td>只绑 LAN 地址，带口令认证</td></tr>
+  <tr><td>Clash API</td><td>关闭，端口 <code>9090</code></td><td>启用时必须设密钥，给 Zashboard 等面板用</td></tr>
+  <tr><td>配置终端（PTY）</td><td><code>18793</code></td><td>按 <code>honk.main.bind</code> 绑 LAN / 全部 / 回环；口令 <code>pty_token</code> 为空时拒绝一切连接</td></tr>
+</table>
+
+<blockquote>LuCI 走未加密 HTTP 时，浏览器到路由器之间的登录信息和 API 流量没有传输加密。要把面板暴露到外网，必须套 HTTPS 反向代理，并给 Clash API 设强口令。</blockquote>
+
+<h2 id="credentials">凭据在哪</h2>
+
+<ul>
+  <li><code>/etc/config/honk</code> —— UCI 配置，含 Clash API 密钥、PTY 口令</li>
+  <li><code>/etc/honk/config.dae</code> —— 节点链接与订阅地址，权限 0600</li>
+  <li><code>/etc/honk/system.dae</code> —— 面板托管的配置段，权限 0600</li>
+</ul>
+
+<p>备份时留意：这几份文件里就是明文凭据。要发给别人排查问题，先脱敏。</p>
+
+<h2 id="lan-only">只允许 LAN 访问</h2>
+
+<p>默认的 <code>bind=lan</code> 会把 PTY 和原生 API 绑在 LAN 地址上，WAN 侧访问不到。确实需要外网访问时：</p>
+
+<ul>
+  <li>用反向代理 + HTTPS，不要把端口直接映射出去</li>
+  <li>给 Clash API 换掉默认密钥，并限制来源地址</li>
+  <li><code>bind</code> 不要改成 <code>all</code>，除非你已经用防火墙限定来源</li>
+</ul>
+
+<h2 id="uninstall-data">删除数据</h2>
+
+<pre><code>apk del luci-app-honk honk
+rm -rf /etc/honk /etc/config/honk</code></pre>
+
+<p>卸载脚本不会自动删 <code>/etc/honk/</code>，避免误删配置。确认不再使用后再手动清理。</p>

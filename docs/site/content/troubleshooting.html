@@ -1,0 +1,51 @@
+<h1>常见问题</h1>
+
+<p>按「现象 → 先查什么」排。改配置前先备份 <code>/etc/honk/</code>（维护页有导出）。</p>
+
+<h2 id="start-fail">启动失败 / 一直是已停止</h2>
+
+<ol>
+  <li><code>uname -r</code> 是否 6.12+</li>
+  <li>BTF 是否存在：<code>ls -l /sys/kernel/btf/vmlinux /usr/lib/debug/boot/vmlinux</code></li>
+  <li>维护页「系统检查」跑一遍，它会报具体缺哪项</li>
+  <li>日志页看最近报错，最多 200 行，凭据已脱敏</li>
+</ol>
+
+<p>更多排查顺序见<a href="kernel.html#check">内核与 BTF</a>。</p>
+
+<h2 id="doona-locked">「打开 Doona」是灰的</h2>
+
+<p>Doona 只有在<b>已初始化、正在运行、且 API 就绪</b>时才开放。三个条件任一不满足，按钮就是禁用的。先看概览页的状态卡片，再点启动。</p>
+
+<h2 id="dns">切进来后 DNS 不通</h2>
+
+<ul>
+  <li>确认监听端口没被别的程序占用：<code>ss -tulnp | grep 9527</code></li>
+  <li>确认 LAN 网络选对了（多网段设备容易选成另一个）</li>
+  <li>看日志里有没有 DNS 上游失败；上游不可达时不会偷偷直连</li>
+</ul>
+
+<h2 id="settings-readonly">服务设置是灰的，改不了</h2>
+
+<p><code>config.dae</code> 里自己写了 <code>global</code> / <code>experimental</code>，这些字段就归你的文件管。</p>
+
+<ul>
+  <li>保留自己写：设置区继续只读，改配置走「配置」页或手改文件</li>
+  <li>交给面板：点概览页的「切换为面板管理」，会先备份原文件，再把这两段交给 <code>system.dae</code></li>
+</ul>
+
+<p>细节见<a href="config.html#ownership">谁在管这份配置</a>。</p>
+
+<h2 id="update-card">「软件包更新」一直显示已是最新</h2>
+
+<p>这张卡片只查本机 apk 源，不查 GitHub。用安装脚本装的机器没有把 feed 写进源，所以永远显示最新。想让它有用，先跑一次软件源脚本（见<a href="install.html#upgrade">升级</a>）。</p>
+
+<h2 id="arm">armv7 能装吗</h2>
+
+<p><code>arm_cortex-a7_neon-vfpv4</code> 和 <code>arm_cortex-a9</code> 有包，但上游只发 x86_64 / aarch64，这两个是源码交叉编译，<b>没有真机验证</b>。跑不通属于正常范围，别拿它当生产环境。</p>
+
+<h2 id="reset">想从零开始</h2>
+
+<pre><code>wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/uninstall.sh | ash
+rm -rf /etc/honk /etc/config/honk
+# 再跑一次 install.sh</code></pre>

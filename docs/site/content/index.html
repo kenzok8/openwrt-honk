@@ -1,0 +1,43 @@
+<p class="hero"><img src="assets/logo.png" width="96" height="96" alt="Honk" /></p>
+
+<h1>Honk</h1>
+
+<p>Honk 是给 OpenWrt 用的透明代理一体包：一个基于 eBPF 的核心，配一套 LuCI 管理界面和一个自带的核心 Web 界面。流量在内核态分流，直连流量几乎不额外消耗 CPU。</p>
+
+<blockquote>只发 OpenWrt / ImmortalWrt <b>25.12</b>（内核 6.12+）的 <code>.apk</code>。24.10 及更早的内核版本装上也起不来，安装脚本会先查内核再决定是否继续。</blockquote>
+
+<div class="cards">
+  <a class="card" href="install.html"><strong>安装与升级 →</strong><span>一键脚本、软件源、卸载</span></a>
+  <a class="card" href="kernel.html"><strong>内核与 BTF →</strong><span>起不来先看这一页</span></a>
+  <a class="card" href="config.html"><strong>初始化与配置 →</strong><span>初始化、节点、Doona</span></a>
+</div>
+
+<h2 id="components">三个组件</h2>
+
+<table>
+  <tr><th>组件</th><th>说明</th></tr>
+  <tr><td><b>honk</b></td><td>基于 eBPF 的透明代理核心，dae 风格的 Rust 重写；常驻内存小，直连流量几乎零开销</td></tr>
+  <tr><td><b>luci-app-honk</b></td><td>LuCI 管理界面：概览、配置（订阅 / 粘贴节点 / dae 导入）、日志、维护</td></tr>
+  <tr><td><b>Doona</b></td><td>核心自带的 Web 界面，装到 <code>/usr/share/doona</code>，管理节点、分组、路由、DNS 与订阅，不另起服务</td></tr>
+</table>
+
+<h2 id="arch">支持范围</h2>
+
+<table>
+  <tr><th>架构</th><th>状态</th></tr>
+  <tr><td><code>x86_64</code></td><td>主力支持（软路由）</td></tr>
+  <tr><td><code>aarch64_cortex-a53</code> · <code>aarch64_cortex-a72</code> · <code>aarch64_cortex-a76</code> · <code>aarch64_generic</code></td><td>支持，ARM64 设备（含树莓派 5 这类 a76 设备）</td></tr>
+  <tr><td><code>arm_cortex-a7_neon-vfpv4</code> · <code>arm_cortex-a9</code></td><td>实验性：上游只发 x86_64 / aarch64，这两个是源码交叉编译，未做真机验证</td></tr>
+</table>
+
+<h2 id="what-it-is-not">它不是什么</h2>
+
+<ul>
+  <li>不是多内核面板。Honk 只有一个内核，不做 dae / sing-box / mihomo 切换。</li>
+  <li>不是规则订阅转换器。分流规则写在 <code>config.dae</code> 里，或直接在 Doona 里调。</li>
+  <li>不支持 24.10 及更早的固件 —— eBPF 数据面要 Linux 6.12+。</li>
+</ul>
+
+<h2 id="where-to-start">从哪里开始</h2>
+
+<p>没装过就先看<a href="install.html">安装与升级</a>；装完起不来，直接跳<a href="kernel.html">内核与 BTF</a>；能起来但不知道怎么配，看<a href="config.html">初始化与配置</a>。</p>

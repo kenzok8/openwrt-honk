@@ -1,0 +1,46 @@
+<h1>内核与 BTF</h1>
+
+<p>Honk 的核心用 CO-RE eBPF，<b>没有 BTF 就起不来</b>。九成的「装好了启动失败」都出在这里，先按这一页排查。</p>
+
+<h2 id="kernel">内核版本</h2>
+
+<p>eBPF 数据面要求 <b>Linux 6.12+</b>。24.10 及更早（6.6 / 5.15）装上也起不来，所以只发 25.12 的包。</p>
+
+<p>查看当前内核：</p>
+
+<pre><code>uname -r</code></pre>
+
+<h2 id="btf-order">BTF 查找顺序</h2>
+
+<p>与核心内部的查找顺序一致，前一个命中的就用它：</p>
+
+<table>
+  <tr><th>顺序</th><th>位置</th><th>说明</th></tr>
+  <tr><td>1</td><td><code>HONK_VMLINUX_BTF</code> 指定的文件</td><td>设了它就<b>只认这一个</b>，读不到直接拒绝启动，不回退</td></tr>
+  <tr><td>2</td><td><code>/sys/kernel/btf/vmlinux</code></td><td>内核自带 BTF 的固件有（如 ImmortalWrt）</td></tr>
+  <tr><td>3</td><td><code>/usr/lib/debug/boot/vmlinux</code></td><td><a href="https://github.com/kenzok8/vmlinux-btf">vmlinux-btf</a> 装的就是这里，官方 OpenWrt 走这条</td></tr>
+</table>
+
+<p>快速确认有没有：</p>
+
+<pre><code>ls -l /sys/kernel/btf/vmlinux /usr/lib/debug/boot/vmlinux 2>/dev/null</code></pre>
+
+<h2 id="no-btf">两条路径都没有怎么办</h2>
+
+<ul>
+  <li><b>先试软件源</b>：安装脚本会自动补装 <code>vmlinux-btf</code>，也可以手动 <code>apk add vmlinux-btf</code>，版本要和内核主次版本一致</li>
+  <li><b>自编译或快照内核</b>：拿同一次编译的 <code>vmlinux</code> 生成 BTF：<code>pahole --btf_encode_detached=vmlinux.btf vmlinux</code>，放到 <code>/usr/lib/debug/boot/vmlinux</code></li>
+  <li><b>临时指过去</b>：把生成好的 BTF 放到任意位置，用 <code>HONK_VMLINUX_BTF=/path/to/vmlinux.btf</code> 指给它</li>
+</ul>
+
+<blockquote>用外部 BTF 时「原生 UDP 接收追踪」会降级，其余功能不受影响。只有内核自带 BTF 才能开这项。</blockquote>
+
+<h2 id="check">起不来时按顺序看</h2>
+
+<ol>
+  <li><code>uname -r</code> —— 低于 6.12 直接换固件，别继续折腾</li>
+  <li>BTF 三条路径是否存在（见上）</li>
+  <li>依赖模块是否加载：<code>lsmod | grep -E "sch_ingress|cls_bpf|veth|nft_queue"</code></li>
+  <li>LuCI「服务 → Honk → 维护 → 系统检查」，它会逐项报缺什么</li>
+  <li>再看<a href="troubleshooting.html">常见问题</a>里对应的现象</li>
+</ol>

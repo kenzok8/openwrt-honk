@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/site/assets/logo.png" width="112" height="112" alt="Honk"></p>
+
 <h1 align="center">openwrt-honk</h1>
 
 <p align="center">OpenWrt / ImmortalWrt 25.12 透明代理一体包（内核 6.12+，7 架构 APK）<br><b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面</p>

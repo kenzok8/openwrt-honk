@@ -1,0 +1,75 @@
+<h1>初始化与配置</h1>
+
+<p>装完包之后，服务默认是停的、也没初始化。顺序是：<b>初始化 → 运行系统检查 → 启动</b>。跳过初始化直接启动通常会被拦下来。</p>
+
+<h2 id="first-run">首次使用</h2>
+
+<ol>
+  <li>打开 LuCI「服务 → Honk」，在概览页创建管理员账号（用户名 + 8 位以上密码）</li>
+  <li>点「运行系统检查」，看设备是否满足 eBPF / BTF / 模块 / 端口条件</li>
+  <li>确认无误后点「启动」，状态变成运行中</li>
+  <li>需要 Web 面板时点「打开 Doona」，它由核心直接提供，不另起服务</li>
+</ol>
+
+<h2 id="settings">服务设置</h2>
+
+<table>
+  <tr><th>项</th><th>默认</th><th>说明</th></tr>
+  <tr><td>LAN 网络</td><td><code>lan</code></td><td>接管哪个接口的流量</td></tr>
+  <tr><td>监听端口</td><td><code>9527</code></td><td>核心原生 API 的端口，只监听 LAN 地址</td></tr>
+  <tr><td>启用 Clash API</td><td>关</td><td>给 Zashboard 这类面板用，默认端口 <code>9090</code></td></tr>
+  <tr><td>Clash API 密钥</td><td>空</td><td>启用时必填，6–128 位字母、数字、点、下划线或连字符</td></tr>
+</table>
+
+<p>设置存在 <code>/etc/config/honk</code>，实际生效的配置在 <code>/etc/honk/</code>：</p>
+
+<table>
+  <tr><th>路径</th><th>内容</th></tr>
+  <tr><td><code>/etc/honk/config.dae</code></td><td>运行配置：节点、订阅、分组、路由、DNS</td></tr>
+  <tr><td><code>/etc/honk/system.dae</code></td><td>面板托管的 <code>global</code> / <code>experimental</code> 段</td></tr>
+  <tr><td><code>/etc/honk/state/</code></td><td>运行状态与缓存</td></tr>
+</table>
+
+<h2 id="ownership">谁在管这份配置</h2>
+
+<p>面板能不能改「服务设置」，取决于 <code>config.dae</code> 的写法：</p>
+
+<table>
+  <tr><th>写法</th><th>面板行为</th></tr>
+  <tr><td>只有 <code>include { system.dae }</code>（可再带节点/分组等）</td><td>面板可以改端口、LAN、Clash API，改动写进 <code>system.dae</code></td></tr>
+  <tr><td>自己写了 <code>global</code> / <code>experimental</code></td><td>这些设置归你的文件，面板只读</td></tr>
+  <tr><td>两者都有</td><td>面板不猜归属，显示一个「切换为面板管理」按钮，点了会<b>先备份原文件</b>再把这两段交给面板</td></tr>
+</table>
+
+<p>切换前的弹窗会列出会变动和会保留的项，取消不会改动任何东西。</p>
+
+<h2 id="nodes">加节点与订阅</h2>
+
+<p>两条路，最终都落在 <code>config.dae</code>：</p>
+
+<ul>
+  <li><b>LuCI「配置」页</b>：贴订阅链接或分享链接，支持 Clash YAML / Base64 / 纯链接列表；也可以直接导入已有的 dae 配置</li>
+  <li><b>手写 <code>config.dae</code></b>：<code>node { label: 'share-link' }</code> 或 <code>subscription { tag: 'url' }</code>，重载后生效</li>
+</ul>
+
+<p>路由、DNS 与订阅也可以只在 Doona 面板里管。面板改完会写回同一份配置，LuCI 侧刷新就能看到。</p>
+
+<h2 id="geo">Geo 数据</h2>
+
+<p>路由用的 GeoIP / GeoSite 来自 <code>v2ray-geoip</code> / <code>v2ray-geosite</code>，与 daede 共用 <code>/usr/share/v2ray</code>。</p>
+
+<ul>
+  <li>维护页可以手动更新，也可以开启自动更新（<code>honk.main.geo_auto</code>，频率 <code>geo_auto_freq</code>，默认 daily）</li>
+  <li>也可以填自己的 GeoIP / GeoSite 下载地址</li>
+  <li>更新失败不会删掉现有数据文件</li>
+</ul>
+
+<h2 id="maintenance">维护页能做什么</h2>
+
+<ul>
+  <li>软件包更新（只查本机 apk 源，见<a href="install.html#upgrade">升级</a>）</li>
+  <li>Geo 数据：手动更新 / 自动更新 / 自定义下载地址</li>
+  <li>配置备份与恢复：导出、导入、恢复到某个时间点</li>
+  <li>系统检查：内核、BTF、模块、端口、冲突逐项检查</li>
+  <li>重置：数据重置（先停服务）与管理员密码重置</li>
+</ul>

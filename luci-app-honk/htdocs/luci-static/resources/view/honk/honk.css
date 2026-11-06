@@ -63,6 +63,20 @@
 
 .honk-header {
 	margin: 4px 0 18px;
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+
+.honk-header-logo {
+	height: 46px;
+	width: auto;
+	flex: none;
+	display: block;
+}
+
+.honk-header-text {
+	min-width: 0;
 }
 
 .honk-header h2 {
@@ -83,6 +97,11 @@
 	line-height: 1.5;
 	color: var(--hk-muted);
 	max-width: 68ch;
+}
+
+@media (max-width: 480px) {
+	.honk-header { gap: 10px; }
+	.honk-header-logo { height: 34px; }
 }
 
 /* ---------- Cards ---------- */

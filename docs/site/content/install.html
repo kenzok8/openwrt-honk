@@ -1,0 +1,56 @@
+<h1>安装与升级</h1>
+
+<p>Honk 由两个包组成：<code>honk</code>（honk-core 二进制 + 服务脚本 + 默认配置）和 <code>luci-app-honk</code>（LuCI 界面 + 中文翻译 + Doona 资产）。只提供 <code>.apk</code>，不提供 <code>.ipk</code>。</p>
+
+<h2 id="install-script">一键安装</h2>
+
+<p>以 <code>root</code> 执行。大陆推荐走 jsDelivr 镜像，比各类加速站稳定：</p>
+
+<pre><code>wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/install.sh | ash</code></pre>
+
+<p>镜像还没同步到最新脚本时，直连 GitHub：</p>
+
+<pre><code>wget -O - https://raw.githubusercontent.com/kenzok8/openwrt-honk/refs/heads/main/scripts/install.sh | ash</code></pre>
+
+<h2 id="install-notes">脚本会做什么</h2>
+
+<ul>
+  <li>先查内核版本，低于 6.12 直接退出，不会装一半</li>
+  <li>从最新 Release 下载两个包并校验，安装包下载默认走 <code>GH_PROXY</code>（<code>https://ghfast.top/</code>），失败回落直连</li>
+  <li>复用设备已有的 Geo 数据包（<code>v2ray-geoip</code> / <code>v2ray-geosite</code>，与 daede 共用 <code>/usr/share/v2ray</code>）；缺少时从聚合源下载，失败则用设备现有软件源</li>
+  <li>发现两条默认 BTF 路径都没有时，补装 <code>vmlinux-btf</code>：主次版本一致就装，补丁号不同照装但打警告，跨系列跳过</li>
+</ul>
+
+<p>换加速站：</p>
+
+<pre><code>GH_PROXY=https://你的加速站/ wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/install.sh | ash</code></pre>
+
+<h2 id="upgrade">升级</h2>
+
+<p>两条路，选一条即可。</p>
+
+<p><b>① 重跑安装脚本</b> —— 不用配软件源，最稳，版本一定是最新的 Release。</p>
+
+<p><b>② 加软件源</b>，之后在「服务 → Honk → 维护 → 软件包更新」里点升级：</p>
+
+<pre><code>wget -qO- https://down.dllkids.xyz/openwrt-feed/openwrt-feed-setup.sh | sh</code></pre>
+
+<blockquote>「软件包更新」卡片只查本机 apk 源，不查 GitHub。用安装脚本装的机器没有把 feed 写进源，卡片会一直显示「已是最新」。想让卡片有用，先跑上面这条软件源脚本（装公钥 + 写源 + 刷索引）。刚发布的版本要等 feed 同步过去才进索引，急着升级就直接重跑安装脚本。</blockquote>
+
+<h2 id="uninstall">卸载</h2>
+
+<pre><code>wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/uninstall.sh | ash</code></pre>
+
+<p>卸载脚本会停服务、删包。配置留在 <code>/etc/honk/</code>，确认不再使用后手动删除；不清空的话下次重装会直接接上旧配置。</p>
+
+<h2 id="deps">依赖</h2>
+
+<table>
+  <tr><th>包名</th><th>用途</th></tr>
+  <tr><td><code>ca-bundle</code></td><td>CA 证书包</td></tr>
+  <tr><td><code>kmod-sched-core</code> / <code>kmod-sched-bpf</code></td><td>eBPF 流量调度</td></tr>
+  <tr><td><code>kmod-veth</code></td><td>虚拟以太网设备</td></tr>
+  <tr><td><code>kmod-nft-queue</code></td><td>nftables 队列</td></tr>
+  <tr><td><code>v2ray-geoip</code> / <code>v2ray-geosite</code></td><td>路由 GeoIP / GeoSite 数据</td></tr>
+  <tr><td><code>rpcd</code> / <code>luci-base</code> / <code>cgi-io</code></td><td>LuCI 运行依赖</td></tr>
+</table>

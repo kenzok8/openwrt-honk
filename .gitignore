@@ -9,3 +9,6 @@
 /openwrt-sdk-*/
 /build/
 .env.local
+
+.build/
+__pycache__/

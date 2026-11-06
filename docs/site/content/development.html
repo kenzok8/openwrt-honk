@@ -1,0 +1,55 @@
+<h1>构建与发布</h1>
+
+<p>发布流程以「固定输入 + 候选 Release + 人工复测」三件事为核心，不靠手工改文件。</p>
+
+<h2 id="pins">固定输入</h2>
+
+<p>核心与 Doona 的完整提交、Doona 的 OpenWrt 补丁摘要、OpenWrt 25.12.4 x86/64 官方 SDK 地址和 SHA256，都固定在 <code>ci/pins.env</code>。Doona 从源码构建并保留 OpenWrt 同源 API 补丁；归档不含可选中文字体，浏览器用系统字体。</p>
+
+<h2 id="auto-bump">自动跟随上游</h2>
+
+<p><code>auto-bump.yml</code> 每 6 小时检查官方 <code>main</code> 与 Doona 更新：</p>
+
+<ol>
+  <li>在独立分支写入新的 pin、包版本和归档哈希</li>
+  <li>构建核心、Doona 和全部 7 组 SDK 安装包</li>
+  <li><b>只产出候选 Release</b>，不碰 <code>main</code> 和正式软件源</li>
+  <li>真机复测通过后，用 <code>auto_publish</code> 原子推进：<code>main</code>、正式 tag、Release 与 R2 软件源一起更新</li>
+</ol>
+
+<h2 id="build">本地构建</h2>
+
+<p>完整构建（含核心）要在大小写敏感的 Linux 文件系统上跑 —— Doona 上游有仅大小写不同的文件。</p>
+
+<p>依赖：Rust / rustup、Zig 0.14.1、Node.js 22.13+ 与 Corepack、Git、curl、ripgrep、GNU tar、zstd、<code>readelf</code>，以及 <code>build-essential</code>、clang、LLVM、libbpf、libelf、pkg-config、CMake、libclang 和 OpenWrt SDK 所需工具。核心交叉编译脚本会核对 Rust / Doona / SDK 输入与 Zig、bpf-linker 版本；SDK 阶段限定 Linux x86_64。</p>
+
+<pre><code>bash scripts/check.sh
+ci/build-doona.sh
+ci/build-core.sh</code></pre>
+
+<p>源码归档写入被 Git 忽略的 <code>artifacts/cache/</code>。7 组 SDK 安装包（7 架构 × SDK 25.12）由 <code>release.yml</code> 构建，它从本次运行独立的源码资产 tag 下载带 SHA256 的阶段文件，任一散列不匹配或安装包缺失都会使构建失败。</p>
+
+<h2 id="scripts">仓库脚本</h2>
+
+<table>
+  <tr><th>脚本</th><th>作用</th></tr>
+  <tr><td><code>scripts/install.sh</code></td><td>一键安装：查内核、下包、校验、补依赖与 BTF</td></tr>
+  <tr><td><code>scripts/uninstall.sh</code></td><td>停服务、删包</td></tr>
+  <tr><td><code>scripts/check.sh</code></td><td>提交前自检</td></tr>
+  <tr><td><code>scripts/verify-source-assets.sh</code></td><td>校验源码资产与散列</td></tr>
+  <tr><td><code>scripts/update-honk-version.sh</code></td><td>同步包版本号</td></tr>
+</table>
+
+<h2 id="provenance">来源记录</h2>
+
+<p>核心提交、Doona 提交、补丁摘要及实际阶段归档散列，都记录在构建生成的 provenance 文件里。安装后随包安装到 <code>/usr/share/licenses/</code>。</p>
+
+<h2 id="docs-site">维护这个文档站</h2>
+
+<p>内容在 <code>docs/site/content/</code>，每页只写正文片段，页头侧栏由构建脚本统一生成。</p>
+
+<pre><code>python3 docs/site/build.py            # 生成到 .build/docs-site
+python3 docs/site/build.py --check    # 自检：锚点重复、死链、导航漏页
+python3 -m http.server 4173 --directory .build/docs-site</code></pre>
+
+<p>新增一页：加 HTML、在 <code>site.json</code> 导航登记、<code>h2</code>/<code>h3</code> 都带 <code>id</code>。推送后由 <code>.github/workflows/docs.yml</code> 校验并发布到 GitHub Pages。</p>
