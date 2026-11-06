@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""构建 Tower 文档站。
+"""构建 Honk 文档站。
 
 只用 Python 标准库：读取 site.json 与 content/ 下的正文片段，套上统一布局，
 顺手做一遍自检（锚点重复、站内死链、导航漏页），最后输出到 .build/docs-site。
@@ -55,7 +55,7 @@ LAYOUT = Template(
         <span aria-hidden="true">⌕</span> 搜索文档 <kbd>Ctrl K</kbd>
       </button>
       <nav class="header-links">
-        <a href="https://github.com/kenzok8/openwrt-tower">GitHub ↗</a>
+        <a href="https://github.com/$repo">GitHub ↗</a>
       </nav>
       <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅主题" aria-pressed="false">◐</button>
       <button class="icon-button menu-button" id="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false">目录</button>
@@ -70,8 +70,8 @@ $sidebar
       <main id="content" class="content">
 $content
         <footer class="page-footer">
-          <a href="https://github.com/kenzok8/openwrt-tower/blob/main/docs/site/content/$page">编辑此页</a>
-          <span>Tower 文档 · MIT</span>
+          <a href="https://github.com/$repo/blob/main/docs/site/content/$page">编辑此页</a>
+          <span>$site 文档 · $license</span>
         </footer>
       </main>
     </div>
@@ -123,7 +123,7 @@ def collect_ids(body: str, page: str) -> set[str]:
 
 
 def check_structure(body: str, page: str) -> list[str]:
-    """Pages 部署在 /openwrt-tower/ 子路径下，绝对路径会 404；正文要在第一个 h2 之前出现 h1。"""
+    """Pages 部署在 /openwrt-honk/ 子路径下，绝对路径会 404；正文要在第一个 h2 之前出现 h1。"""
     problems = []
     h1 = body.find("<h1")
     h2 = body.find("<h2")
@@ -220,6 +220,8 @@ def build(site: dict, output: Path, check_only: bool) -> list[str]:
             description=html.escape(item.get("summary", site["description"])),
             canonical=site["base_url"] + page,
             page=page.removesuffix(".html"),
+            repo=site["repo"],
+            license=site["license"],
             site=html.escape(site["title"]),
             subtitle=html.escape(site["subtitle"]),
             sidebar="\n".join(sidebar),
@@ -241,6 +243,8 @@ def build(site: dict, output: Path, check_only: bool) -> list[str]:
             description="页面不存在",
             canonical=site["base_url"],
             page="404",
+            repo=site["repo"],
+            license=site["license"],
             site=html.escape(site["title"]),
             subtitle=html.escape(site["subtitle"]),
             sidebar='        <nav aria-label="文档目录"><a href="index.html">返回文档首页</a></nav>',
@@ -253,7 +257,7 @@ def build(site: dict, output: Path, check_only: bool) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="构建 Tower 文档站")
+    parser = argparse.ArgumentParser(description="构建 Honk 文档站")
     parser.add_argument("--output", default=str(REPO / ".build/docs-site"), help="输出目录")
     parser.add_argument("--check", action="store_true", help="只做自检，不写文件")
     args = parser.parse_args()

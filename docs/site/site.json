@@ -3,6 +3,8 @@
   "subtitle": "OpenWrt 透明代理一体包",
   "description": "基于 eBPF 的透明代理核心 honk，配 Doona Web 界面与 luci-app-honk 管理界面，只发 OpenWrt 25.12。",
   "base_url": "https://kenzok8.github.io/openwrt-honk/",
+  "repo": "kenzok8/openwrt-honk",
+  "license": "GPL-3.0",
   "version_file": "luci-app-honk/Makefile",
   "nav": [
     {
