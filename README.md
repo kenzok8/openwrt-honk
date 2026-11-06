@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/site/assets/logo.png" width="112" height="112" alt="Honk"></p>
+<p align="center"><img src="docs/site/assets/logo.png" width="96" height="96" alt="Honk"></p>
 
 <h1 align="center">openwrt-honk</h1>
 
