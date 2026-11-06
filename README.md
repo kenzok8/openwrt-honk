@@ -4,6 +4,21 @@
 
 <p align="center">OpenWrt / ImmortalWrt 25.12 透明代理一体包（内核 6.12+，7 架构 APK）<br><b>honk</b> 核心 + <b>Doona</b> Web 界面 + <b>luci-app-honk</b> 管理界面</p>
 
+<div align="center">
+  <a href="https://github.com/kenzok8/openwrt-honk/releases"><img alt="Release" src="https://img.shields.io/github/v/release/kenzok8/openwrt-honk?style=flat-square&label=release"></a>
+  <a href="https://github.com/kenzok8/openwrt-honk/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/kenzok8/openwrt-honk/total?style=flat-square&label=downloads"></a>
+  <a href="https://github.com/kenzok8/openwrt-honk/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/kenzok8/openwrt-honk/main?style=flat-square"></a>
+  <a href="https://github.com/kenzok8/openwrt-honk/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/kenzok8/openwrt-honk?style=flat-square"></a>
+  <a href="https://github.com/kenzok8/openwrt-honk/issues?q=is%3Aissue+is%3Aclosed"><img alt="Closed issues" src="https://img.shields.io/github/issues-closed/kenzok8/openwrt-honk?style=flat-square"></a>
+  <a href="https://github.com/kenzok8/openwrt-honk/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/kenzok8/openwrt-honk?style=flat-square"></a>
+</div>
+
+<p align="center">
+  <a href="https://kenzok8.github.io/openwrt-honk/">📖 在线使用文档</a> ·
+  <a href="https://github.com/kenzok8/openwrt-honk/releases">📦 下载安装</a> ·
+  <a href="https://github.com/kenzok8/openwrt-honk/issues">💬 问题反馈</a>
+</p>
+
 ## 界面预览
 
 <table>
