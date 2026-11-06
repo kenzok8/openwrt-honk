@@ -1194,7 +1194,7 @@ list)
 				;;
 			recover)
 				# 中断的维护事务只能靠 recover 收尾；以前只有 CLI 能跑，面板上无路可走
-				exec "$MAINT" recover
+				exec "$CONTROL" recover
 				;;
 			backup)
 				start_job backup
