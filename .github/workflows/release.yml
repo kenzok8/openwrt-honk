@@ -539,12 +539,19 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          # 轻量 tag 的 .object.sha 就是提交 SHA；带注释的 tag（git tag -a）这里
-          # 指向 tag 对象，真正的提交在 .object.object.sha，两种都要能过。
-          tag_ref_sha="$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.sha')"
-          tag_commit_sha="$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.object.sha // .object.sha')"
-          test "$tag_commit_sha" = "${{ github.sha }}" || {
-            echo "::error::tag $TAG resolves to $tag_commit_sha (ref $tag_ref_sha), expected ${{ github.sha }}"
+          # /git/ref/tags 只给一层 object：轻量 tag 的 object.sha 就是提交，
+          # 注释 tag（git tag -a）要先拿 type 判断，再查 /git/tags 才得到提交。
+          repo_slug="${{ github.repository }}"
+          tag_ref_sha="$(gh api "repos/$repo_slug/git/ref/tags/$TAG" --jq '.object.sha')"
+          tag_object_type="$(gh api "repos/$repo_slug/git/ref/tags/$TAG" --jq '.object.type')"
+          if [ "$tag_object_type" = "tag" ]; then
+            tag_commit_sha="$(gh api "repos/$repo_slug/git/tags/$tag_ref_sha" --jq '.object.sha')"
+          else
+            tag_commit_sha="$tag_ref_sha"
+          fi
+          checkout_sha="$(git rev-parse HEAD)"
+          test "$tag_commit_sha" = "$checkout_sha" || {
+            echo "::error::tag $TAG resolves to $tag_commit_sha (ref $tag_ref_sha, type $tag_object_type), expected $checkout_sha"
             exit 1
           }
           mkdir -p published
