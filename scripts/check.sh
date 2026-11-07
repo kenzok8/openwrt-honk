@@ -4,13 +4,21 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
-for tool in bash sh node sha256sum git tar; do
+for tool in bash sh node python3 sha256sum git tar; do
 	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 
-for script in ci/build-doona.sh scripts/check.sh scripts/verify-source-assets.sh; do
+for script in ci/build-core.sh ci/build-doona.sh scripts/check.sh scripts/verify-source-assets.sh; do
 	bash -n "$script"
 done
+python3 - <<'PY'
+import ast
+from pathlib import Path
+
+for name in ("prepare-linux66-package.py", "verify-linux66-ipk.py"):
+    path = Path("ci") / name
+    ast.parse(path.read_text(), filename=str(path))
+PY
 for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-honk/root/usr/share/luci-app-honk/*.sh; do
 	sh -n "$script"
 done
@@ -36,6 +44,8 @@ grep -q '^DOONA_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_PATCH_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 grep -q '^OPENWRT_SDK_SHA256=[0-9a-f]\{64\}$' ci/pins.env
 test "$(sha256sum ci/patches/doona-openwrt.patch | cut -d' ' -f1)" = "$(sed -n 's/^DOONA_PATCH_SHA256=//p' ci/pins.env)"
+test "$(sha256sum ci/patches/honk-core-linux66-openwrt.patch | cut -d' ' -f1)" = "$(sed -n 's/^CORE_COMPAT_PATCH_SHA256=//p' ci/pins-linux66.env)"
+grep -q '^CORE_MIN_KERNEL=6\.6\.40$' ci/pins-linux66.env
 source ci/pins.env
 test "$CORE_COMMIT" = "$(sed -n 's/^CORE_COMMIT:=//p' honk/Makefile)"
 test "$DOONA_ARCHIVE" = "$(sed -n 's/^PKG_SOURCE:=//p' luci-app-honk/Makefile)"

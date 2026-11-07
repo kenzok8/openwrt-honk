@@ -1,0 +1,148 @@
+name: Build experimental Linux 6.6 packages
+
+on:
+  push:
+    branches:
+      - test/linux66-sdk24
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux66-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86_64, aarch64, armv7]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y clang cmake libclang-dev pkg-config ripgrep zstd
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.14.1
+
+      - name: Check package sources
+        run: bash scripts/check.sh
+
+      - name: Build fixed compatibility source
+        env:
+          CORE_LANE: linux66
+          CORE_ARCHS: ${{ matrix.architecture }}
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          set -euo pipefail
+          bash ci/build-core.sh
+          cp ci/pins-linux66.env artifacts/cache/
+          cp honk/generated-linux66-provenance.json artifacts/cache/
+          cp honk/generated-linux66-stage.mk artifacts/cache/
+          cd artifacts/cache
+          sha256sum honk-core-*-linux66-*.tar.gz > SHA256SUMS
+
+      - name: Keep experimental build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: honk-linux66-${{ matrix.architecture }}-${{ github.sha }}
+          path: artifacts/cache/
+          if-no-files-found: error
+          retention-days: 14
+
+  sdk24:
+    needs: core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk_arch: x86_64
+            core_arch: x86_64
+          - sdk_arch: aarch64_generic
+            core_arch: aarch64
+          - sdk_arch: aarch64_cortex-a53
+            core_arch: aarch64
+          - sdk_arch: aarch64_cortex-a72
+            core_arch: aarch64
+          - sdk_arch: aarch64_cortex-a76
+            core_arch: aarch64
+          - sdk_arch: arm_cortex-a7_neon-vfpv4
+            core_arch: armv7
+          - sdk_arch: arm_cortex-a9
+            core_arch: armv7
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: honk-linux66-${{ matrix.core_arch }}-${{ github.sha }}
+          path: artifacts/cache
+
+      - name: Prepare isolated SDK feed
+        run: |
+          set -euo pipefail
+          cp artifacts/cache/generated-linux66-stage.mk honk/
+          cp artifacts/cache/generated-linux66-provenance.json honk/
+          python3 ci/prepare-linux66-package.py
+          printf '\nPKG_SOURCE_URL:=file:///feed/dl/\n' >> artifacts/linux66-package/honk/generated-stage.mk
+          mkdir -p artifacts/linux66-sdk-output
+
+      - name: Check out fixed SDK action
+        uses: actions/checkout@v7
+        with:
+          repository: kenzok8/gh-action-sdk
+          ref: 44f98c51d04aebd1aa79fe4f603559c1ec2085da
+          path: .sdk-action
+          persist-credentials: false
+
+      - name: Build experimental OpenWrt 24.10 IPKs
+        uses: ./.sdk-action
+        env:
+          ARCH: ${{ matrix.sdk_arch }}-openwrt-24.10
+          CONTAINER: immortalwrt/sdk
+          FEEDNAME: honk
+          FEED_DIR: ${{ github.workspace }}/artifacts/linux66-package
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/linux66-sdk-output
+          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
+          NO_SHFMT_CHECK: '1'
+          PACKAGES: honk luci-app-honk
+
+      - name: Verify package payloads
+        env:
+          CORE_ARCH: ${{ matrix.core_arch }}
+          SDK_ARCH: ${{ matrix.sdk_arch }}
+        run: |
+          set -euo pipefail
+          python3 ci/verify-linux66-ipk.py \
+            --packages-dir "artifacts/linux66-sdk-output/bin/packages/$SDK_ARCH/honk" \
+            --feed-dir artifacts/linux66-package \
+            --core-arch "$CORE_ARCH" --package-arch "$SDK_ARCH" \
+            --output-dir artifacts/linux66-verified
+
+      - name: Keep verified experimental IPKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: honk-linux66-sdk24-${{ matrix.sdk_arch }}-${{ github.sha }}
+          path: artifacts/linux66-verified/
+          if-no-files-found: error
+          retention-days: 14

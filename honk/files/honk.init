@@ -72,6 +72,11 @@ start_service() {
 	procd_close_instance
 }
 
+restart() {
+	. /usr/share/honk/lifecycle.sh || return 1
+	honk_lifecycle_restart 30
+}
+
 reload_service() {
 	# honk-core has no hot-reload API wired here; a reload is an explicit
 	# restart so existing connections are cycled. The UI only exposes

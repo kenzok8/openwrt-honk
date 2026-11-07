@@ -1,0 +1,408 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -334,8 +334,6 @@
+ [[package]]
+ name = "aya"
+ version = "0.14.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "66e644424fada9fff4fdc63848db1732fb69b626e8328202ef55c03df1f4d939"
+ dependencies = [
+  "assert_matches",
+  "aya-obj",
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -178,9 +178,7 @@
+ strip = true
+ 
+ [patch.crates-io]
+-# honk (6.6 debugging): grow the verifier log buffer on E2BIG and cap it at
+-# 64 MB so the full exploration log of a large classifier survives; honk-core
+-# dumps it to /tmp/honk_vlog.txt on TC load failure.
++# OpenWrt restores bounded verifier logging in the upstream vendored Aya.
+ aya = { path = "vendor/aya" }
+ # honk rprx fork: preset X25519 keyshare + ClientHello fixup hooks (REALITY)
+ boring-sys = { git = "https://github.com/Glassyiris/boring-sys", rev = "3beb573b65ecaa69b7eefe3c2fecd074b97facd2" }
+--- a/crates/honk-core/src/daens.rs
++++ b/crates/honk-core/src/daens.rs
+@@ -656,9 +656,30 @@
+ /// Whether `path` is a mountpoint (appears in /proc/mounts).
+ #[cfg(feature = "ebpf")]
+ fn is_mountpoint(path: &str) -> bool {
++    let Ok(path) = std::fs::canonicalize(path) else {
++        return false;
++    };
+     std::fs::read_to_string("/proc/mounts")
+-        .map(|m| m.lines().any(|l| l.split_whitespace().nth(1) == Some(path)))
++        .map(|mounts| {
++            mounts.lines().any(|line| {
++                line.split_whitespace()
++                    .nth(1)
++                    .is_some_and(|mountpoint| std::path::Path::new(mountpoint) == path)
++            })
++        })
+         .unwrap_or(false)
++}
++
++#[cfg(all(test, feature = "ebpf", target_os = "linux"))]
++mod mountpoint_tests {
++    #[test]
++    fn detects_mountpoint_through_symlink() {
++        let alias = std::env::temp_dir().join(format!("honk-mount-alias-{}", std::process::id()));
++        std::os::unix::fs::symlink("/proc", &alias).expect("create mount alias");
++        let result = super::is_mountpoint(alias.to_str().expect("UTF-8 alias"));
++        std::fs::remove_file(alias).expect("remove mount alias");
++        assert!(result);
++    }
+ }
+ 
+ /// Fixture for production-load tests: a real `dae0`/`dae0peer` pair in the
+--- a/crates/honk-core/src/ebpf/real/attach.rs
++++ b/crates/honk-core/src/ebpf/real/attach.rs
+@@ -33,7 +33,7 @@
+             kernel_version().ok_or_else(|| anyhow::anyhow!("cannot determine kernel version"))?;
+         anyhow::ensure!(
+             version >= (6, 6, 40),
+-            "compiled routing requires Linux 6.12 or newer (running {}.{}.{})",
++            "compiled routing requires Linux 6.6.40 or newer (running {}.{}.{})",
+             version.0,
+             version.1,
+             version.2
+--- a/crates/honk-core/src/ebpf/real/bindings.rs
++++ b/crates/honk-core/src/ebpf/real/bindings.rs
+@@ -116,12 +116,6 @@
+     match classifier.load() {
+         Ok(()) | Err(ProgramError::AlreadyLoaded) => {}
+         Err(error) => {
+-            // 6.6 debugging: persist the full verifier log. The kernel log for
+-            // a large classifier can be tens of MB, far past what a syslog
+-            // line can carry.
+-            if let ProgramError::LoadError { verifier_log, .. } = &error {
+-                let _ = std::fs::write("/tmp/honk_vlog.txt", verifier_log.to_string());
+-            }
+             anyhow::bail!("load TC program '{name}': {error}")
+         }
+     }
+--- a/crates/honk-nfqueue/src/netlink.rs
++++ b/crates/honk-nfqueue/src/netlink.rs
+@@ -285,11 +285,7 @@
+     Ok(buffer.freeze())
+ }
+ 
+-/// nf_tables acknowledges a batch as a whole. Kernels that only echo
+-/// BATCH_END (observed on 6.6) never produce one NLMSG_ERROR per inner
+-/// message, so counting to `expected` blocks forever and startup hangs with
+-/// the datapath closed. Accept the batch-end echo, and bound the wait so a
+-/// silent kernel degrades to "nfqueue unavailable" instead of a deadlock.
++// Linux 6.6 acknowledges committed inner operations, but not BATCH_END.
+ const ACK_TIMEOUT: Duration = Duration::from_secs(3);
+ 
+ fn is_batch_end_ack(message: &Message) -> bool {
+@@ -297,33 +293,32 @@
+     if message.body.len() < 4 + NLMSG_HDRLEN {
+         return false;
+     }
+-    let original_type = u16::from_ne_bytes([message.body[4], message.body[5]]);
+-    original_type == NFNL_MSG_BATCH_END
++    let original_type = u16::from_ne_bytes([message.body[8], message.body[9]]);
++    let original_sequence =
++        u32::from_ne_bytes(message.body[12..16].try_into().expect("four bytes"));
++    original_type == NFNL_MSG_BATCH_END && original_sequence == message.sequence
+ }
+ 
+ pub(crate) fn send_and_acks(
+     fd: RawFd,
+     request: &[u8],
+     sequence: u32,
+-    expected: usize,
++    expected: &[u16],
+ ) -> io::Result<()> {
+-    debug_assert_ne!(expected, 0);
++    debug_assert!(!expected.is_empty());
++    let batch = request.get(4..6).is_some_and(|kind| {
++        u16::from_ne_bytes(kind.try_into().expect("two bytes")) == NFNL_MSG_BATCH_BEGIN
++    });
+     send(fd, request)?;
+     let deadline = Instant::now() + ACK_TIMEOUT;
+-    let mut received = 0usize;
++    let mut received = Vec::with_capacity(expected.len());
+     loop {
+         let remaining = deadline.saturating_duration_since(Instant::now());
+         if remaining.is_zero() {
+-            if received == 0 {
+-                return Err(io::Error::new(
+-                    io::ErrorKind::TimedOut,
+-                    "nf_tables batch was not acknowledged",
+-                ));
+-            }
+-            // Part of the batch was acknowledged with no error reply, which
+-            // means the kernel applied the transaction. Return instead of
+-            // waiting for acknowledgements that will never come.
+-            return Ok(());
++            return Err(io::Error::new(
++                io::ErrorKind::TimedOut,
++                "nf_tables batch was not fully acknowledged",
++            ));
+         }
+         let mut pollfd = libc::pollfd {
+             fd,
+@@ -343,31 +338,45 @@
+             continue;
+         }
+         let datagram = recv_datagram(fd, 64 * 1024)?;
++        let mut batch_end_ack = false;
+         for message in messages(datagram) {
+             let message = message.map_err(invalid_data)?;
+             if message.message_type != NLMSG_ERROR || message.sequence != sequence {
+                 continue;
+             }
+-            if message.body.len() < 4 {
++            if message.body.len() < 4 + NLMSG_HDRLEN {
+                 return Err(io::Error::new(
+                     io::ErrorKind::InvalidData,
+                     "truncated NLMSG_ERROR",
+                 ));
+             }
++            let original_sequence =
++                u32::from_ne_bytes(message.body[12..16].try_into().expect("four bytes"));
++            if original_sequence != sequence {
++                continue;
++            }
+             let code = i32::from_ne_bytes(message.body[..4].try_into().expect("four bytes"));
+             if code != 0 {
+                 return Err(io::Error::from_raw_os_error(-code));
+             }
+-            received += 1;
+-            if received >= expected || is_batch_end_ack(&message) {
+-                return Ok(());
++            let original_type = u16::from_ne_bytes([message.body[8], message.body[9]]);
++            if expected.contains(&original_type) && !received.contains(&original_type) {
++                received.push(original_type);
+             }
++            batch_end_ack |= batch && is_batch_end_ack(&message);
++        }
++        if received.len() == expected.len() || batch_end_ack {
++            return Ok(());
+         }
+     }
+ }
+ 
+ pub(crate) fn send_and_ack(fd: RawFd, request: &[u8], sequence: u32) -> io::Result<()> {
+-    send_and_acks(fd, request, sequence, 1)
++    let kind = request
++        .get(4..6)
++        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "truncated netlink request"))?;
++    let kind = u16::from_ne_bytes(kind.try_into().expect("two bytes"));
++    send_and_acks(fd, request, sequence, &[kind])
+ }
+ 
+ fn invalid_data(error: DecodeError) -> io::Error {
+@@ -377,6 +386,95 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    fn ack_datagram(sequence: u32, original_type: u16, code: i32) -> Vec<u8> {
++        let mut bytes = Vec::new();
++        bytes.extend_from_slice(&36u32.to_ne_bytes());
++        bytes.extend_from_slice(&NLMSG_ERROR.to_ne_bytes());
++        bytes.extend_from_slice(&0u16.to_ne_bytes());
++        bytes.extend_from_slice(&sequence.to_ne_bytes());
++        bytes.extend_from_slice(&0u32.to_ne_bytes());
++        bytes.extend_from_slice(&code.to_ne_bytes());
++        bytes.extend_from_slice(&20u32.to_ne_bytes());
++        bytes.extend_from_slice(&original_type.to_ne_bytes());
++        bytes.extend_from_slice(&NLM_F_REQUEST.to_ne_bytes());
++        bytes.extend_from_slice(&sequence.to_ne_bytes());
++        bytes.extend_from_slice(&0u32.to_ne_bytes());
++        bytes
++    }
++
++    fn exchange_ack(reply: Vec<u8>, expected: &[u16]) -> io::Result<()> {
++        use std::os::fd::AsRawFd;
++        let mut fds = [-1; 2];
++        let result =
++            unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) };
++        assert_eq!(result, 0);
++        let local = unsafe { OwnedFd::from_raw_fd(fds[0]) };
++        let peer = unsafe { OwnedFd::from_raw_fd(fds[1]) };
++        let responder = std::thread::spawn(move || {
++            recv_datagram(peer.as_raw_fd(), 1024).expect("request");
++            send(peer.as_raw_fd(), &reply).expect("reply");
++            // Keep the peer open until the acknowledgement timeout expires.
++            std::thread::sleep(ACK_TIMEOUT + Duration::from_millis(50));
++        });
++        let mut request = vec![0; NLMSG_HDRLEN];
++        request[4..6].copy_from_slice(&NFNL_MSG_BATCH_BEGIN.to_ne_bytes());
++        let result = send_and_acks(local.as_raw_fd(), &request, 7, expected);
++        responder.join().expect("responder");
++        result
++    }
++
++    #[test]
++    fn batch_end_ack_uses_echoed_header_type_and_sequence() {
++        let ack = ack_datagram(7, NFNL_MSG_BATCH_END, 0);
++        let mut message = messages(Bytes::from(ack)).next().unwrap().unwrap();
++        assert!(is_batch_end_ack(&message));
++        message.sequence = 8;
++        assert!(!is_batch_end_ack(&message));
++        let mut ack = ack_datagram(7, NFNL_MSG_BATCH_BEGIN, 0);
++        // A length whose low word is 17 must not be read as BATCH_END.
++        ack[20..24].copy_from_slice(&17u32.to_ne_bytes());
++        let message = messages(Bytes::from(ack)).next().unwrap().unwrap();
++        assert!(!is_batch_end_ack(&message));
++    }
++
++    #[test]
++    fn batch_end_only_ack_completes_transaction() {
++        exchange_ack(ack_datagram(7, NFNL_MSG_BATCH_END, 0), &[2560, 2563, 2566]).unwrap();
++    }
++
++    #[test]
++    fn error_after_batch_end_in_same_datagram_is_not_ignored() {
++        let mut reply = ack_datagram(7, NFNL_MSG_BATCH_END, 0);
++        reply.extend(ack_datagram(7, NFNL_MSG_BATCH_BEGIN, -libc::EPERM));
++        let error = exchange_ack(reply, &[2560]).unwrap_err();
++        assert_eq!(error.raw_os_error(), Some(libc::EPERM));
++    }
++
++    #[test]
++    fn partial_ack_timeout_is_failure() {
++        let error = exchange_ack(ack_datagram(7, 2560, 0), &[2560, 2563, 2566]).unwrap_err();
++        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
++    }
++
++    #[test]
++    fn linux66_inner_operation_acks_complete_transaction() {
++        let mut reply = Vec::new();
++        for kind in [2560, 2563, 2566] {
++            reply.extend(ack_datagram(7, kind, 0));
++        }
++        exchange_ack(reply, &[2560, 2563, 2566]).unwrap();
++    }
++
++    #[test]
++    fn duplicate_operation_ack_does_not_complete_transaction() {
++        let mut reply = Vec::new();
++        for _ in 0..3 {
++            reply.extend(ack_datagram(7, 2560, 0));
++        }
++        let error = exchange_ack(reply, &[2560, 2563, 2566]).unwrap_err();
++        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
++    }
+ 
+     #[test]
+     fn attributes_round_trip_with_alignment() {
+--- a/crates/honk-nfqueue/src/queue.rs
++++ b/crates/honk-nfqueue/src/queue.rs
+@@ -549,7 +549,7 @@
+                     .next()
+                     .expect("one config message")
+                     .expect("valid config message");
+-                let mut acknowledgement = Vec::with_capacity(20);
++                let mut acknowledgement = Vec::with_capacity(36);
+                 let start = netlink::put_message_header(
+                     &mut acknowledgement,
+                     netlink::NLMSG_ERROR,
+@@ -558,6 +558,7 @@
+                     0,
+                     0,
+                 );
++                acknowledgement.extend_from_slice(&request[..netlink::NLMSG_HDRLEN]);
+                 netlink::seal_message(&mut acknowledgement, start);
+                 netlink::send(peer.as_raw_fd(), &acknowledgement).expect("config ACK");
+                 requests.push(request);
+--- a/crates/honk-nfqueue/src/rules.rs
++++ b/crates/honk-nfqueue/src/rules.rs
+@@ -74,7 +74,9 @@
+         ruleset.remove_owned_table()?;
+         let sequence = ruleset.next_sequence();
+         let request = build_install_batch(sequence);
+-        netlink::send_and_acks(ruleset.socket.as_raw_fd(), &request, sequence, 4)?;
++        let expected = [NFT_MSG_NEWTABLE, NFT_MSG_NEWCHAIN, NFT_MSG_NEWRULE]
++            .map(|kind| (netlink::NFNL_SUBSYS_NFTABLES << 8) | kind);
++        netlink::send_and_acks(ruleset.socket.as_raw_fd(), &request, sequence, &expected)?;
+         ruleset.installed = true;
+         Ok(ruleset)
+     }
+@@ -93,7 +95,8 @@
+     fn remove_owned_table(&mut self) -> Result<(), RulesError> {
+         let sequence = self.next_sequence();
+         let request = build_delete_batch(sequence);
+-        match netlink::send_and_acks(self.socket.as_raw_fd(), &request, sequence, 2) {
++        let expected = [(netlink::NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_DELTABLE];
++        match netlink::send_and_acks(self.socket.as_raw_fd(), &request, sequence, &expected) {
+             Ok(()) => Ok(()),
+             Err(error) if error.raw_os_error() == Some(libc::ENOENT) => Ok(()),
+             Err(error) => Err(error.into()),
+--- a/vendor/aya/src/sys/bpf.rs
++++ b/vendor/aya/src/sys/bpf.rs
+@@ -1406,12 +1406,7 @@
+     f: impl Fn(&mut [u8]) -> io::Result<T>,
+ ) -> (io::Result<T>, VerifierLog) {
+     const MIN_LOG_BUF_SIZE: usize = 1024 * 10;
+-    // honk (6.6 debugging): the verifier's full exploration log for the large
+-    // flattened classifiers is ~25 MB; the stock 16 MB cap truncates it to
+-    // head+tail. Allow growth to 64 MB, and treat E2BIG ("program too large")
+-    // as a grow trigger too: the verifier fails with E2BIG once the 1M insn
+-    // complexity budget dies, and without this the buffer stops at 100 KB.
+-    const MAX_LOG_BUF_SIZE: usize = 256 * 1024 * 1024;
++    const MAX_LOG_BUF_SIZE: usize = (u32::MAX >> 8) as usize;
+ 
+     let mut log_buf = Vec::new();
+     let mut retries = 0;
+@@ -1419,13 +1414,7 @@
+         let ret = f(log_buf.as_mut_slice());
+         if retries != max_retries {
+             if let Err(io_error) = &ret {
+-                let grow = retries == 0
+-                    || io_error.raw_os_error() == Some(ENOSPC)
+-                    // E2BIG only while the buffer is still below 32 MB, so a
+-                    // genuine too-many-insns failure stops growing here.
+-                    || (io_error.raw_os_error() == Some(libc::E2BIG)
+-                        && log_buf.capacity() < (128 * 1024 * 1024));
+-                if grow {
++                if retries == 0 || io_error.raw_os_error() == Some(ENOSPC) {
+                     let len = (log_buf.capacity() * 10).clamp(MIN_LOG_BUF_SIZE, MAX_LOG_BUF_SIZE);
+                     log_buf.resize(len, 0);
+                     if let Some(first) = log_buf.first_mut() {
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -1070,6 +1070,18 @@
+         config.routing.rules.len()
+     );
+ 
++    // Register before creating kernel resources so startup signals remain pending.
++    // Background shells can inherit ignored signals; reset before installing handlers.
++    unsafe {
++        libc::signal(libc::SIGINT, libc::SIG_DFL);
++        libc::signal(libc::SIGTERM, libc::SIG_DFL);
++    }
++
++    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
++        .expect("failed to register SIGINT handler");
++    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
++        .expect("failed to register SIGTERM handler");
++
+     // The old instance owns queue 320 until this lock is released. Check
+     // NFQUEUE only after the handoff so a transient busy result cannot turn
+     // a healthy restart into a permanently degraded process.
+@@ -1581,19 +1593,6 @@
+ 
+     let shutdown_intent = control_plane.shutdown_intent();
+     let sig_handle = tokio::spawn(async move {
+-        // The shell may start us with SIGINT/SIGTERM ignored (e.g. background
+-        // job). Reset them to the default disposition so tokio can install its
+-        // own handlers.
+-        unsafe {
+-            libc::signal(libc::SIGINT, libc::SIG_DFL);
+-            libc::signal(libc::SIGTERM, libc::SIG_DFL);
+-        }
+-
+-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+-            .expect("failed to register SIGINT handler");
+-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+-            .expect("failed to register SIGTERM handler");
+-
+         tokio::select! {
+             _ = sigint.recv() => {
+                 info!("Received SIGINT, shutting down...");

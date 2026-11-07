@@ -1513,3 +1513,15 @@ msgstr "备份会超过 512 个文件或 127 MB，日志里写了是哪个条目
 
 msgid "config.dae or system.dae is missing under /etc/honk. Reinstall or repair Honk before backing up."
 msgstr "/etc/honk 里缺 config.dae 或 system.dae，先修复或重装 Honk 再备份。"
+
+msgid "Linux 6.6 experimental"
+msgstr "Linux 6.6 实验版"
+
+msgid "The compatibility core requires Linux 6.6.40 or newer."
+msgstr "兼容核心需要 Linux 6.6.40 或更新，请升级固件。"
+
+msgid "The core does not match its compatibility metadata. Reinstall Honk."
+msgstr "核心与兼容信息不匹配，请重新安装 Honk。"
+
+msgid "Kernel BTF is missing. Install vmlinux-btf matching your firmware, or use firmware with built-in BTF."
+msgstr "缺少内核 BTF，请安装与固件匹配的 vmlinux-btf，或使用自带 BTF 的固件。"
