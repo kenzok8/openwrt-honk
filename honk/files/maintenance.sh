@@ -511,8 +511,6 @@ collect_tree() {
 	collect_root=$1
 	collect_out=$2
 	collect_error=
-	# 每一处失败都给出不同错误码：面板只需要报「备份失败」时，用户和我们都
-	# 无从知道是符号链接、特殊文件、单文件过大还是文件数超限。
 	[ -d "$collect_root" ] && [ ! -L "$collect_root" ] || { collect_error=honk_tree_missing; return 1; }
 	if find "$collect_root" -type l -print 2>/dev/null | grep -q .; then collect_error=honk_tree_has_symlink; return 1; fi
 	if find "$collect_root" ! -type f ! -type d -print 2>/dev/null | grep -q .; then collect_error=honk_tree_has_special_file; return 1; fi
@@ -872,9 +870,7 @@ validate_candidate() {
 	network_get_device candidate_device "$u_network" || return 1
 	network_get_ipaddr candidate_ip "$u_network" || return 1
 	if [ "$identity" = archive ]; then
-		# 导入的包记的是原设备的 LAN 口和 API IP，后面 write_live_system 会把它
-		# 改写成当前设备。这里如果拿本机 IP 去比，换台设备/换了 LAN IP 的备份
-		# 一律报 unsupported_candidate_config，备份就成了只能回灌同一台机器。
+		# 包里记的是原设备的 IP，落地时会被改写；拿本机 IP 比会拒掉换设备的备份。
 		archive_lan=$(sed -n "s/^    lan_interface: '\([^']*\)'$/\1/p" "$config_tree/system.dae")
 		archive_listen=$(sed -n "s/^        listen: '\([^']*\)'$/\1/p" "$config_tree/system.dae")
 		validate_config_tree "$config_tree" "$archive_lan" "${archive_listen%:*}" "${archive_listen##*:}" "$u_initialized" || return 2

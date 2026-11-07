@@ -1,8 +1,8 @@
 name: Build Honk packages
 
 on:
-  push:
-    branches: [main]
+  # main 的构建由 tag 的 Build & Release 覆盖，这里只在 PR 和手动时跑。
+  pull_request:
   workflow_dispatch:
 
 permissions:

@@ -94,11 +94,7 @@ const callUpdateApply = rpc.declare({ object: 'honk', method: 'update_apply', ex
 let pageStylesInstalled = false;
 let switchStylesInstalled = false;
 
-/* 开关的样式跟着 JS 走，不放进 honk.css：CSS 和 JS 分别缓存，主题又各改
-   各的 checkbox/button。CSS 还是旧的、JS 已经更新时，页面上会同时出现
-   「老式胶囊」和「没样式的空按钮」，用户看到的就是错位开关。
-   knob 用 left 定位而不是 transform：有的主题会给按钮/子元素强压
-   transform，压下去圆点就再也不跟着动。 */
+/* 开关样式随 JS 注入：CSS 与 JS 分开缓存，主题又各改各的 checkbox/button。 */
 const SWITCH_CSS = [
 	'.honk-page .honk-switch-wrap{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;vertical-align:middle;line-height:1}',
 	'.honk-page .honk-switch-label{font-size:11px;font-weight:600;letter-spacing:.3px;opacity:.62}',
@@ -107,8 +103,7 @@ const SWITCH_CSS = [
 	'.honk-page .honk-switch.is-on{background:rgba(74,160,101,.65)!important}',
 	'.honk-page .honk-switch:disabled{opacity:.45;cursor:not-allowed}',
 	'.honk-page .honk-switch:focus-visible{outline:2px solid rgba(74,160,101,.75);outline-offset:2px}',
-	/* 0,3,1 才压得过 honk.css 里 `.honk-page input[type="checkbox"]` 的 46px !important，
-	   否则这颗真 input 在部分主题下会显形，多出一个大胶囊。 */
+	/* 0,3,1 才压得过 honk.css 里那颗 46px !important 的 checkbox。 */
 	'.honk-page .honk-switch-wrap>input.honk-switch-input{position:absolute!important;width:1px!important;height:1px!important;margin:0!important;padding:0!important;border:0!important;opacity:0!important;pointer-events:none!important;appearance:none!important;-webkit-appearance:none!important;box-shadow:none!important;background:none!important}'
 ].join('\n');
 
@@ -145,7 +140,6 @@ function switchControl(input) {
 		toggle.setAttribute('aria-checked', input.checked ? 'true' : 'false');
 		toggle.disabled = !!input.disabled;
 		caption.textContent = input.checked ? 'ON' : 'OFF';
-		/* 内联写 left：主题的 !important 之外没人能盖掉它。 */
 		knob.style.left = input.checked ? '23px' : '3px';
 	};
 
@@ -173,7 +167,6 @@ function installStyles() {
 	const stylesheet = document.createElement('link');
 	stylesheet.id = 'honk-page-styles';
 	stylesheet.rel = 'stylesheet';
-	/* ?v= 跟 JS 模块一个版本，避免升级后吃到上一版的样式表。 */
 	stylesheet.href = L.resource('view/honk/honk.css') + (L.env.resource_version ? '?v=' + L.env.resource_version : '');
 	document.head.appendChild(stylesheet);
 	pageStylesInstalled = true;

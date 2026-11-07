@@ -418,9 +418,7 @@ return view.extend({
 			}).finally(function() { setBackupBusy(false); });
 		});
 
-		/* 选文件只走 LuCI 自带的上传对话框：先弹确认，再让用户选一次。
-		   之前自己拿隐藏 input 选完，又让 ui.uploadFile 再选一次，
-		   同一次导入要选两遍，第一个框选到的文件根本没被用。 */
+		/* 只让用户选一次文件：上传对话框自己会弹选择框。 */
 		importBtn.addEventListener('click', function(ev) {
 			ev.preventDefault();
 			if (backupBusy) return;

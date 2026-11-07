@@ -335,9 +335,6 @@
 	min-width: 0;
 }
 
-/* 自绘开关的样式在 view/honk/rpc.js 里随 JS 注入：CSS 和 JS 分开缓存，
-   只放一边会出现版本错配的错位开关。 */
-
 @media (max-width: 719px) {
 	.honk-page .cbi-value {
 		flex-direction: column;
