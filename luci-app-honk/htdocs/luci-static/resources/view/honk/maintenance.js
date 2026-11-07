@@ -382,7 +382,6 @@ return view.extend({
 		const restoreCfgBtn = E('button', { 'class': 'cbi-button cbi-button-negative', 'type': 'button' }, _('Restore config'));
 		/* 忘记密码用：只清管理员记录，不动订阅和规则 */
 		const resetAdminBtn = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('Reset administrator'));
-		const fileInput = E('input', { 'type': 'file', 'accept': '.tar.gz,.gz,application/gzip', 'style': 'display:none' });
 		let backupBusy = false;
 		writeControls.push(exportBtn, importBtn, restoreCfgBtn, resetAdminBtn);
 
@@ -419,18 +418,14 @@ return view.extend({
 			}).finally(function() { setBackupBusy(false); });
 		});
 
+		/* 选文件只走 LuCI 自带的上传对话框：先弹确认，再让用户选一次。
+		   之前自己拿隐藏 input 选完，又让 ui.uploadFile 再选一次，
+		   同一次导入要选两遍，第一个框选到的文件根本没被用。 */
 		importBtn.addEventListener('click', function(ev) {
 			ev.preventDefault();
 			if (backupBusy) return;
-			fileInput.click();
-		});
-		fileInput.addEventListener('change', function(ev) {
-			const file = ev.target.files && ev.target.files[0];
-			if (!file) return;
-			if (!confirm(_('Stop Honk before restoring. Restoring replaces Honk user data. Continue?'))) {
-				fileInput.value = '';
+			if (!confirm(_('Stop Honk before restoring. Restoring replaces Honk user data. Continue?')))
 				return;
-			}
 			setBackupBusy(true);
 			backupMessage.textContent = _('Restoring…');
 			honk.restorePrepare().then(honk.ensureOk).then(function() {
@@ -449,7 +444,6 @@ return view.extend({
 				backupMessage.textContent = honk.errorMessage(error, _('Restore failed.'));
 			}).finally(function() {
 				setBackupBusy(false);
-				fileInput.value = '';
 			});
 		});
 
@@ -493,7 +487,6 @@ return view.extend({
 		backupSection.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Config backup')));
 		backupSection.appendChild(E('p', { 'class': 'honk-note' }, _('Export a backup archive, import one from your computer, or restore Honk to its default configuration.')));
 		backupSection.appendChild(E('div', { 'class': 'honk-actions' }, [ exportBtn, importBtn, restoreCfgBtn, resetAdminBtn ]));
-		backupSection.appendChild(fileInput);
 		backupSection.appendChild(backupMessage);
 
 		/* --- System check and repair card --- */

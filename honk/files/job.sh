@@ -103,7 +103,9 @@ json_load "$(cat "$job_dir/output" 2>/dev/null)" 2>/dev/null || {
 	if [ -e /etc/.honk-maintenance/journal ] || [ -L /etc/.honk-maintenance/journal ] || [ -d /run/honk.lock ]; then
 		write_status rollback_required recovery false maintenance_recovery_required
 	else
-		write_status failed complete false operation_failed
+		# 独立错误码，面板据此提示去看维护日志；沿用 operation_failed 会让用户
+		# 只能看到「维护操作失败」，没有任何可反馈的线索。
+		write_status failed complete false maintenance_no_result
 	fi
 	logger -t honk-maintenance "$operation failed (invalid result)" 2>/dev/null || :
 	exit 1
