@@ -43,8 +43,31 @@
 | `aarch64_cortex-a53` · `aarch64_cortex-a72` · `aarch64_cortex-a76` · `aarch64_generic` | 支持，ARM64 设备（含树莓派 5 等 a76 设备） |
 | `arm_cortex-a7_neon-vfpv4` · `arm_cortex-a9` | 实验性：25.12 内核满足 6.12，但上游只发 x86_64 / aarch64，这两个由源码交叉编译，尚未做真机验证 |
 
-- eBPF 数据面要求 **Linux 6.12+**，24.10 及更早（6.6 / 5.15）装上也起不来，所以只发 **OpenWrt / ImmortalWrt 25.12** 的包；安装脚本会先查内核，低于 6.12 直接退出。
-- 25.12 起 OpenWrt 换用 apk，这里只提供 `.apk`，不再提供 `.ipk`。
+- 稳定版核心要求 **Linux 6.12+**，目前公开安装入口对应 **OpenWrt / ImmortalWrt 25.12**；安装脚本会先检查内核。
+- 稳定版提供 `.apk`。24.10 / Linux 6.6 兼容通道仍处于实验验证阶段，不通过上述稳定版入口安装。
+
+### Linux 6.6 实验兼容通道
+
+兼容核心基于 [6106757-lab/honk 的 kernel-floor-6.6 分支](https://github.com/6106757-lab/honk/tree/6bdfdc2f21f17714e6b3d5083607c4308cc33782)，继承该分支的功能与限制。固定提交和 OpenWrt 集成补丁摘要位于 [ci/pins-linux66.env](ci/pins-linux66.env)，与稳定版独立维护，不自动追更。
+
+- 候选最低内核为 `6.6.40`，首轮以 24.10 x86_64 为验证对象；AArch64、ARMv7 编译成功也不等于已经通过设备运行验收。
+- 兼容包复用 LuCI 和 Doona，显示实验标识；需要匹配的内核模块以及内置或外置 BTF。
+- 当前不接入稳定软件源，不自动发布 Release。LuCI 一键升级会拒绝切到稳定源；手动包管理器升级仍可能替换兼容包，实验设备应保持来源隔离。
+- `linux66.yml` 在测试分支推送或手动触发时构建三类核心，再用 24.10 SDK 为上述 7 个包架构打包；校验核心哈希、来源和脚本后保留 IPK artifacts，不代表设备运行认证或正式发布。
+- UDP 会话容量取决于文件描述符和内存预算。本地 `nofile=4096` 验证中上限为 168 个，高频新建会话达到上限后会丢包，空闲回收后恢复；不适合作为高并发支持承诺。
+- 内核不提供 kprobe BPF 时，UDP 内核路径观测会降级；外置 BTF 不能补齐这一能力，不能只按 `6.6` 版本号认定功能完整。
+- AArch64 模拟环境的连续规则重载测试出现过短暂 UDP 丢包；无重载对照通过，目前不承诺重载期间 UDP 无损。
+
+Linux x86_64 构建机上可执行：
+
+```bash
+CORE_LANE=linux66 CORE_ARCHS=x86_64 bash ci/build-core.sh
+python3 ci/prepare-linux66-package.py
+```
+
+核心归档与兼容信息写入 `artifacts/cache/` 和 `honk/generated-linux66-*`，实验包源码准备到 `artifacts/linux66-package/`。将其中的 `dl/` 复制到 24.10 SDK 的 `dl/`，再编译 `honk` 与 `luci-app-honk`；此流程用于本地验收，版本号尚未分配为新的公开 Release。
+
+更换或卸载实验包前，先在 LuCI 停止服务并确认已停止，再操作软件包管理器。
 
 ## 安装
 
