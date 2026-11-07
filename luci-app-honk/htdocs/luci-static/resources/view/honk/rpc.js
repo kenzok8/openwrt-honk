@@ -471,13 +471,13 @@ function resultMessage(result, fallback) {
 
 function errorMessage(error, fallback) {
 	const token = error && error.message;
-	const mapped = tokenMessage(token);
-	if (mapped)
-		return mapped;
 	/* 没映射过就把错误码原样带出来，否则用户只能看到「操作失败」，没法反馈 */
-	if (token && /^[a-z0-9_]+$/.test(token))
-		return _('%s (code: %s)').format(fallback || _('The operation failed.'), token);
-	return fallback;
+	const text = tokenMessage(token) || (token && /^[a-z0-9_]+$/.test(token)
+		? _('%s (code: %s)').format(fallback || _('The operation failed.'), token)
+		: fallback);
+	/* 后端把 stderr 摘要放进 detail，直接给用户，省得再去翻日志。 */
+	const detail = error && error.detail;
+	return detail ? _('%s Reason: %s').format(text, String(detail)) : text;
 }
 
 function jobPhaseMessage(phase) {
@@ -524,6 +524,7 @@ function waitJob(jobId, onProgress) {
 				if (result.state === 'failed' || result.state === 'rollback_required') {
 					const error = new Error(result.state === 'rollback_required' ? 'maintenance_recovery_required' : result.message || 'operation_failed');
 					error.recoveryRequired = result.state === 'rollback_required';
+					error.detail = result.detail;
 					reject(error);
 					return;
 				}

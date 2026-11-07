@@ -1513,3 +1513,6 @@ msgstr "备份会超过 512 个文件或 127 MB，日志里写了是哪个条目
 
 msgid "config.dae or system.dae is missing under /etc/honk. Reinstall or repair Honk before backing up."
 msgstr "/etc/honk 里缺 config.dae 或 system.dae，先修复或重装 Honk 再备份。"
+
+msgid "%s Reason: %s"
+msgstr "%s 原因：%s"

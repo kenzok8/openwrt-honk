@@ -13,6 +13,7 @@ write_status() {
 	status_phase=$2
 	status_ok=$3
 	status_message=$4
+	status_detail=$5
 	# jshn 的布尔只认 1/0，传 "true" 会被写进状态文件成 false。
 	case "$status_ok" in true|1) status_ok=1 ;; *) status_ok=0 ;; esac
 	status_tmp=$job_dir/status.new
@@ -22,6 +23,8 @@ write_status() {
 		json_add_string phase "$status_phase"
 		json_add_boolean ok "$status_ok"
 		json_add_string message "$status_message"
+		# 失败原因进面板，不然只有一句错误码。
+		[ -n "$status_detail" ] && json_add_string detail "$status_detail"
 		json_dump
 	} > "$status_tmp" || return 1
 	chmod 0600 "$status_tmp" || return 1
@@ -91,23 +94,21 @@ while kill -0 "$maint_pid" 2>/dev/null; do
 done
 wait "$maint_pid"
 operation_rc=$?
-json_load "$(cat "$job_dir/output" 2>/dev/null)" 2>/dev/null || {
-	# 脚本没吐出结果（崩溃、语法错误、被信号杀掉）时，stderr 里往往就是唯一线索，
-	# 只报 operation_failed 会让用户和我们都无法定位。
-	invalid_reason=$(sed -n '$p' "$job_dir/stderr" 2>/dev/null)
-	if [ -n "$invalid_reason" ]; then
-		logger -t honk-maintenance "$operation produced no result: $invalid_reason" 2>/dev/null || :
-	else
-		logger -t honk-maintenance "$operation produced no result and no error output" 2>/dev/null || :
-	fi
+# json_load 空串会返回 0，而且失败时 jshn 还留着上一次状态对象的 message，
+# 所以空输出必须显式判掉，否则面板报的是随机残留值（曾经出现「preparing」）。
+result_json=$(cat "$job_dir/output" 2>/dev/null)
+json_cleanup 2>/dev/null || :
+if [ -z "$result_json" ] || ! json_load "$result_json" 2>/dev/null; then
+	# 脚本没吐出结果时 stderr 是唯一线索，进状态给面板看。
+	invalid_reason=$(sed -n '$p' "$job_dir/stderr" 2>/dev/null | tr -d '\r' | cut -c1-200)
+	logger -t honk-maintenance "$operation produced no result: ${invalid_reason:-<no stderr>}" 2>/dev/null || :
 	if [ -e /etc/.honk-maintenance/journal ] || [ -L /etc/.honk-maintenance/journal ] || [ -d /run/honk.lock ]; then
-		write_status rollback_required recovery false maintenance_recovery_required
+		write_status rollback_required recovery false maintenance_recovery_required "$invalid_reason"
 	else
-		write_status failed complete false maintenance_no_result
+		write_status failed complete false maintenance_no_result "$invalid_reason"
 	fi
-	logger -t honk-maintenance "$operation failed (invalid result)" 2>/dev/null || :
 	exit 1
-}
+fi
 json_get_var operation_ok ok
 json_get_var operation_message message
 if [ "$operation_rc" -eq 0 ] && [ "$operation_ok" = 1 ]; then
