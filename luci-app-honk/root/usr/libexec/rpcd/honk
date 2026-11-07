@@ -245,17 +245,21 @@ start_job() {
 	job_pid=$!
 	printf '%s\n' "$job_pid" > "$job_dir/worker.pid" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
 	chmod 0600 "$job_dir/worker.pid" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
-	# worker 一秒内既没活着也没写状态，就是它压根没起来；把现场写进日志和 detail。
+	# worker 一秒内既没活着也没写状态，就是它压根没起来。
+	# 这时在本进程里直接跑完：备份逻辑本身是好的，不该因为后台起不来就让导出彻底不可用。
 	sleep 1
 	if ! kill -0 "$job_pid" 2>/dev/null && [ "$(jsonfilter -i "$job_dir/status" -e '@.phase' 2>/dev/null)" = queued ]; then
 		job_runner_detail="id=$(id -u 2>/dev/null) jobs=$(stat -c '%u:%a' "$JOBS" 2>/dev/null) dir=$(stat -c '%u:%a' "$job_dir" 2>/dev/null) runner=$(command -v "$JOB_RUNNER" 2>/dev/null || echo missing)"
-		logger -t honk-maintenance "job runner did not start: $job_runner_detail" 2>/dev/null || :
-		json_init
-		json_add_boolean ok 0
-		json_add_string message job_runner_unavailable
-		json_add_string detail "$job_runner_detail"
-		json_dump
-		return 1
+		logger -t honk-maintenance "job runner did not start, running inline: $job_runner_detail" 2>/dev/null || :
+		"$JOB_RUNNER" "$job_id" "$job_operation" >/dev/null 2>&1 || :
+		if [ "$(jsonfilter -i "$job_dir/status" -e '@.phase' 2>/dev/null)" = queued ]; then
+			json_init
+			json_add_boolean ok 0
+			json_add_string message job_runner_unavailable
+			json_add_string detail "$job_runner_detail"
+			json_dump
+			return 1
+		fi
 	fi
 	json_init
 	json_add_boolean ok 1
