@@ -675,4 +675,4 @@ jobs:
             -H "Authorization: Bearer ${AGGREGATE_FEED_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/kenzok8/openwrt-clashoo/actions/workflows/aggregate-feed.yml/dispatches \
-            -d '{"ref":"main"}' || echo "Aggregate trigger failed; scheduled workflow will retry."
+            -d '{"ref":"main","inputs":{"trigger_project":"honk"}}' || echo "Aggregate trigger failed; scheduled workflow will retry."
