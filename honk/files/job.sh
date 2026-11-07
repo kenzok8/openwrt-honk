@@ -40,9 +40,14 @@ esac
 case "$operation" in backup|restore|reset|update_check|update_apply) ;; *) exit 2 ;; esac
 
 job_dir=$JOBS/$job_id
+# 早退也要留下状态，否则面板只能看到 worker 掉了，问不出是哪一项不过。
 [ -d "$JOBS" ] && [ ! -L "$JOBS" ] && [ -d "$job_dir" ] && [ ! -L "$job_dir" ] || exit 2
 [ "$(stat -c '%u:%a' "$JOBS" 2>/dev/null)" = 0:700 ] && [ "$(stat -c '%u:%a' "$job_dir" 2>/dev/null)" = 0:700 ] || exit 2
-[ "$(id -u)" = 0 ] || exit 2
+if [ "$(id -u)" != 0 ]; then
+	write_status failed complete false job_runner_not_root "uid=$(id -u)"
+	logger -t honk-maintenance "job runner is not root (uid=$(id -u))" 2>/dev/null || :
+	exit 2
+fi
 write_status running preparing true preparing || exit 1
 : > "$job_dir/output" || exit 1
 chmod 0600 "$job_dir/output" || exit 1

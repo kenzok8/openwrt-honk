@@ -273,6 +273,8 @@ function tokenMessage(token) {
 		worker_lost: _('The maintenance worker stopped unexpectedly; check system recovery status before retrying.'),
 		operation_failed: _('The maintenance operation failed.'),
 	maintenance_no_result: _('The maintenance script stopped without reporting a result. Check Maintenance → Logs → Maintenance for the reason.'),
+	job_runner_unavailable: _('The maintenance worker did not start at all. The panel cannot see why, so this is a packaging or permission problem on the device.'),
+	job_runner_not_root: _('The maintenance worker did not run as root.'),
 	honk_tree_missing: _('The /etc/honk directory is missing or is a symlink.'),
 	honk_tree_has_symlink: _('There is a symlink under /etc/honk. The backup cannot carry it; remove it and try again.'),
 	honk_tree_has_special_file: _('There is a non-regular file (device, socket, fifo) under /etc/honk. Remove it and try again.'),
