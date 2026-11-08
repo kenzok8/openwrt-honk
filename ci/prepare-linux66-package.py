@@ -61,17 +61,16 @@ def prepare(root):
     luci_makefile = output / "luci-app-honk/Makefile"
     luci_text = luci_makefile.read_text()
     luci_new, count = re.subn(
-        r"^PKG_SOURCE_URL\?=.*$", "PKG_SOURCE_URL:=file://$(TOPDIR)/dl", luci_text, count=1, flags=re.M
+        r"^PKG_SOURCE_URL\?=.*$", "PKG_SOURCE_URL:=file:///feed/dl/", luci_text, count=1, flags=re.M
     )
     if count != 1:
         raise ValueError("luci-app-honk source url changed")
     luci_makefile.write_text(luci_new)
     (output / "honk/generated-stage.mk").write_text(
         stage.read_text() + "HONK_CORE_LANE:=linux66\n" + f"CORE_COMMIT:={core['commit']}\n"
-        + "PKG_SOURCE_URL:=file://$(TOPDIR)/dl\n")
+        + "PKG_SOURCE_URL:=file:///feed/dl/\n")
     shutil.copyfile(provenance, output / "honk/generated-provenance.json")
     print(output)
-    print("Copy dl/ into the SDK dl/ before building.")
     print("Local experimental build only; package versions are not release assignments.")
 
 
