@@ -114,8 +114,6 @@ jobs:
           KEY_BUILD: ${{ secrets.OPKG_KEY_BUILD }}
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
 
-      # SDK 版本跟着 immortalwrt/sdk 容器漂移，构建完把真实标识落在产物里，
-      # 发布清单才能回答「这批包是哪个 SDK 出的」。取不到也不影响构建。
       - name: Record SDK identity
         continue-on-error: true
         run: |

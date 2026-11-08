@@ -3,15 +3,10 @@
 HONK_LIFECYCLE_CORE=/usr/bin/honk-core
 HONK_LIFECYCLE_HAVE_TIMEOUT=$(command -v timeout 2>/dev/null)
 
-# timeout 存在不代表支持小数秒：busybox 各构建/版本行为不同，有的只吃整数，
-# `timeout 0.25 sleep 1` 会直接报错返回，轮询就变成空转、预算瞬间烧完。
-# 这里探测一次，顺便决定「几次 tick 算一秒」，让预算始终按真实秒数走。
 HONK_LIFECYCLE_TICKS=1
 honk_lifecycle_detect_pause() {
 	HONK_LIFECYCLE_TICKS=1
 	[ -n "$HONK_LIFECYCLE_HAVE_TIMEOUT" ] || return 0
-	# 只看返回码不够：有的实现把 0.25 解析成 0 后立刻返回 124，看起来"支持"，
-	# 实际 pause 是 0。这里量真实耗时（/proc/uptime 是百分秒精度）。
 	pause_before=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)
 	[ -n "$pause_before" ] || return 0
 	timeout 0.25 sleep 1 2>/dev/null
@@ -183,8 +178,6 @@ honk_lifecycle_resources_clear() {
 	! ip netns list 2>/dev/null | awk '{print $1}' | grep -qx daens
 }
 
-# 核心已经不在时，把崩溃/SIGKILL 留下的 dae0/dae0peer/daens 收掉。
-# 核心还在就绝不动手，否则会把正在用的数据面摘掉。
 honk_lifecycle_reclaim_resources() {
 	command -v ip >/dev/null 2>&1 || return 1
 	[ -z "$(pidof honk-core 2>/dev/null)" ] || return 1
@@ -221,7 +214,6 @@ honk_lifecycle_drain() {
 			hlp_wait=1
 		fi
 		if ! honk_lifecycle_resources_clear; then
-			# 核心已经退出却还留着网络资源，先回收一次；核心还在时回收函数会拒绝。
 			honk_lifecycle_reclaim_resources || :
 			honk_lifecycle_resources_clear || hlp_wait=1
 		fi

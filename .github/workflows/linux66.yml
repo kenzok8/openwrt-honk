@@ -1,7 +1,6 @@
 name: Build experimental Linux 6.6 packages
 
 on:
-  # 实验通道只手动跑：跟着 main 推送跑等于每次白烧 3 个核心 + 7 个 SDK 的构建。
   workflow_dispatch:
     inputs:
       publish:
@@ -126,8 +125,6 @@ jobs:
           FEEDNAME: honk
           FEED_DIR: ${{ github.workspace }}/artifacts/linux66-package
           ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/linux66-sdk-output
-          # wall 只提供 v2ray-geoip/geosite；固定到完整 SHA，更新走独立审阅，
-          # 避免实验通道的构建被第三方 feed 的 HEAD 变动拖走。
           EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall^ebd9d11b4ff8ee91b1d14e98c79523311eb5ae44
           NO_SHFMT_CHECK: '1'
           PACKAGES: honk luci-app-honk
@@ -152,8 +149,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # 实验通道的发布：产物进独立 tag 的 Release 留档，IPK 推到 openwrt-feed/honk/24.10/，
-  # 由 clashoo 的聚合工作流生成并签名 opkg 索引（和稳定通道同一条路径，不另建前缀）。
   publish:
     name: Publish experimental 6.6 packages
     needs: [core, sdk24]
@@ -194,7 +189,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Linux 6.6 experimental ${{ steps.meta.outputs.version }}
           prerelease: true
-          # 同名资产覆盖，不同架构/内核的包累积保留
           files: dist/*
           fail_on_unmatched_files: true
 
@@ -219,9 +213,6 @@ jobs:
           acl = private
           no_check_bucket = true
           EOF
-          # 24.10 是 opkg：每个 arch 目录要放本架构包 + _all 包。
-          # 索引（Packages/Packages.gz/Packages.sig）由 clashoo 的聚合工作流统一生成，
-          # 这里只放包，避免两处各签一份索引。
           all_ipk=$(find dist -name '*_all.ipk')
           for arch in x86_64 aarch64_generic aarch64_cortex-a53 aarch64_cortex-a72 \
                       aarch64_cortex-a76 arm_cortex-a7_neon-vfpv4 arm_cortex-a9; do

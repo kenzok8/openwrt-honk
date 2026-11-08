@@ -42,8 +42,6 @@ fork_owner="Glassy""iris"
 grep -q '^CORE_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_COMMIT=[0-9a-f]\{40\}$' ci/pins.env
 grep -q '^DOONA_PATCH_SHA256=[0-9a-f]\{64\}$' ci/pins.env
-# SDK 由 gh-action-sdk 容器按 ARCH 拉取，pins.env 不再记录 SDK 归档；
-# 改为要求构建流程把实际 SDK 标识写进发布产物，保证可追溯。
 grep -Fq 'Record SDK identity' .github/workflows/release.yml
 grep -Fq "'sdk_versions':" .github/workflows/release.yml
 ! grep -q '^OPENWRT_VERSION=' ci/pins.env || {
