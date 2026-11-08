@@ -3,6 +3,26 @@
 HONK_LIFECYCLE_CORE=/usr/bin/honk-core
 HONK_LIFECYCLE_HAVE_TIMEOUT=$(command -v timeout 2>/dev/null)
 
+# timeout 存在不代表支持小数秒：busybox 各构建/版本行为不同，有的只吃整数，
+# `timeout 0.25 sleep 1` 会直接报错返回，轮询就变成空转、预算瞬间烧完。
+# 这里探测一次，顺便决定「几次 tick 算一秒」，让预算始终按真实秒数走。
+HONK_LIFECYCLE_TICKS=1
+honk_lifecycle_detect_pause() {
+	HONK_LIFECYCLE_TICKS=1
+	[ -n "$HONK_LIFECYCLE_HAVE_TIMEOUT" ] || return 0
+	# 只看返回码不够：有的实现把 0.25 解析成 0 后立刻返回 124，看起来"支持"，
+	# 实际 pause 是 0。这里量真实耗时（/proc/uptime 是百分秒精度）。
+	pause_before=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)
+	[ -n "$pause_before" ] || return 0
+	timeout 0.25 sleep 1 2>/dev/null
+	pause_after=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)
+	[ -n "$pause_after" ] || return 0
+	awk -v a="$pause_before" -v b="$pause_after" 'BEGIN { exit (b - a >= 0.15) ? 0 : 1 }' && \
+		HONK_LIFECYCLE_TICKS=4
+	return 0
+}
+honk_lifecycle_detect_pause
+
 # 字段归属：自带 global/experimental → file；只 include system.dae（且写法规范）→ system；
 # 其余一律 unknown。写法不规范时不猜，直接拒绝。
 config_owner() {
@@ -49,7 +69,7 @@ config_owner() {
 
 # 启动轮询用 0.25 秒粒度，核心就绪后尽快返回；没有 timeout 命令时退回 1 秒。
 honk_lifecycle_pause() {
-	if [ -n "$HONK_LIFECYCLE_HAVE_TIMEOUT" ]; then
+	if [ "$HONK_LIFECYCLE_TICKS" -gt 1 ]; then
 		timeout 0.25 sleep 1 2>/dev/null
 		return 0
 	fi
@@ -163,6 +183,20 @@ honk_lifecycle_resources_clear() {
 	! ip netns list 2>/dev/null | awk '{print $1}' | grep -qx daens
 }
 
+# 核心已经不在时，把崩溃/SIGKILL 留下的 dae0/dae0peer/daens 收掉。
+# 核心还在就绝不动手，否则会把正在用的数据面摘掉。
+honk_lifecycle_reclaim_resources() {
+	command -v ip >/dev/null 2>&1 || return 1
+	[ -z "$(pidof honk-core 2>/dev/null)" ] || return 1
+	for hlp_link in dae0 dae0peer; do
+		ip link show "$hlp_link" >/dev/null 2>&1 && ip link del "$hlp_link" >/dev/null 2>&1
+	done
+	if ip netns list 2>/dev/null | awk '{print $1}' | grep -qx daens; then
+		ip netns del daens >/dev/null 2>&1
+	fi
+	honk_lifecycle_resources_clear
+}
+
 honk_lifecycle_drain() {
 	hlp_timeout=${1:-30}
 	while [ "$hlp_timeout" -gt 0 ]; do
@@ -186,7 +220,11 @@ honk_lifecycle_drain() {
 			done
 			hlp_wait=1
 		fi
-		honk_lifecycle_resources_clear || hlp_wait=1
+		if ! honk_lifecycle_resources_clear; then
+			# 核心已经退出却还留着网络资源，先回收一次；核心还在时回收函数会拒绝。
+			honk_lifecycle_reclaim_resources || :
+			honk_lifecycle_resources_clear || hlp_wait=1
+		fi
 		honk_lifecycle_parse_listen || { echo "honk lifecycle: invalid configured listener" >&2; return 1; }
 		hlp_port=$HONK_LIFECYCLE_PORT
 		if honk_lifecycle_port_open "$hlp_port"; then hlp_wait=1; fi
@@ -277,7 +315,7 @@ honk_lifecycle_start() {
 		fi
 		honk_lifecycle_pause
 		hlp_tick=$((hlp_tick + 1))
-		[ "$hlp_tick" -lt 4 ] || { hlp_tick=0; hlp_timeout=$((hlp_timeout - 1)); }
+		[ "$hlp_tick" -lt "$HONK_LIFECYCLE_TICKS" ] || { hlp_tick=0; hlp_timeout=$((hlp_timeout - 1)); }
 	done
 	echo "honk lifecycle: new managed core did not become stable and own its API listener" >&2
 	return 1

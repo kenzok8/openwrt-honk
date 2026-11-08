@@ -91,6 +91,12 @@ const callLogs = rpc.declare({
 const callUpdateCheck = rpc.declare({ object: 'honk', method: 'update_check', expect: { '': {} } });
 const callUpdateApply = rpc.declare({ object: 'honk', method: 'update_apply', expect: { '': {} } });
 
+/* LuCI 的 RPC 默认 20 秒超时（L.env.rpctimeout），而一次完整 apply、备份或
+   恢复要 25–31 秒，超时后用户只看到 No response。honk 的同步操作都在同一条
+   请求链上，统一放宽；只升不降，避免影响已经调过该值的人。 */
+if (!L.env.rpctimeout || L.env.rpctimeout < 180)
+	L.env.rpctimeout = 180;
+
 let pageStylesInstalled = false;
 let switchStylesInstalled = false;
 

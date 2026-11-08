@@ -69,16 +69,9 @@ system_config_readonly() {
 no_honk_resources() {
 	# honk-core removes dae0/dae0peer and the daens netns when it exits cleanly. A
 	# crash or SIGKILL leaves them behind, and preflight then refuses every later
-	# start, so the service can never come back without hand surgery. Reclaim them
-	# here, but only when no core is running to own them.
-	if ! pidof honk-core >/dev/null 2>&1; then
-		for stale_link in dae0 dae0peer; do
-			ip link show "$stale_link" >/dev/null 2>&1 && ip link del "$stale_link" >/dev/null 2>&1
-		done
-		if ip netns list 2>/dev/null | awk '{print $1}' | grep -qx daens; then
-			ip netns del daens >/dev/null 2>&1
-		fi
-	fi
+	# start, so the service can never come back without hand surgery.
+	# 回收逻辑放在 lifecycle.sh 里共用：只有核心不在时才动手。
+	honk_lifecycle_reclaim_resources || :
 	for link in dae0 dae0peer; do
 		ip link show "$link" >/dev/null 2>&1 && { fail "$link 已存在（上次没有正常退出），请先停止服务或执行系统恢复"; return 1; }
 	done
@@ -1237,6 +1230,9 @@ recover() {
 			return 1
 		fi
 	fi
+	# 崩溃留下的 dae0/dae0peer/daens 会让下一次启动的前置检查直接失败，
+	# recover 是用户被卡住时唯一的出口，这里必须顺手清掉（核心在时函数会拒绝）。
+	honk_lifecycle_reclaim_resources || :
 	echo '{"ok":true,"message":"transaction_recovered"}'
 }
 
