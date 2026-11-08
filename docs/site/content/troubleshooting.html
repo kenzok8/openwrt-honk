@@ -5,7 +5,7 @@
 <h2 id="start-fail">启动失败 / 一直是已停止</h2>
 
 <ol>
-  <li><code>uname -r</code> 是否 6.12+</li>
+  <li><code>uname -r</code> 是否达标（稳定 6.12+ / 实验 6.6.40+）</li>
   <li>BTF 是否存在：<code>ls -l /sys/kernel/btf/vmlinux /usr/lib/debug/boot/vmlinux</code></li>
   <li>维护页「系统检查」跑一遍，它会报具体缺哪项</li>
   <li>日志页看最近报错，最多 200 行，凭据已脱敏</li>

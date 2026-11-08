@@ -4,7 +4,7 @@
 
 <p>Honk 是给 OpenWrt 用的透明代理一体包：一个基于 eBPF 的核心，配一套 LuCI 管理界面和一个自带的核心 Web 界面。流量在内核态分流，直连流量几乎不额外消耗 CPU。</p>
 
-<blockquote>只发 OpenWrt / ImmortalWrt <b>25.12</b>（内核 6.12+）的 <code>.apk</code>。24.10 及更早的内核版本装上也起不来，安装脚本会先查内核再决定是否继续。</blockquote>
+<blockquote>两条通道：<b>25.12</b>（内核 6.12+）发 <code>.apk</code> 稳定版；<b>24.10</b>（内核 6.6.40+）走 Linux 6.6 实验通道，发 <code>.ipk</code>。安装脚本会先查内核再决定是否继续。</blockquote>
 
 <div class="cards">
   <a class="card" href="install.html"><strong>安装与升级 →</strong><span>一键脚本、软件源、卸载</span></a>
@@ -35,7 +35,7 @@
 <ul>
   <li>不是多内核面板。Honk 只有一个内核，不做 dae / sing-box / mihomo 切换。</li>
   <li>不是规则订阅转换器。分流规则写在 <code>config.dae</code> 里，或直接在 Doona 里调。</li>
-  <li>不支持 24.10 及更早的固件 —— eBPF 数据面要 Linux 6.12+。</li>
+  <li>不支持 24.10 以下的固件 —— 稳定通道要 Linux 6.12+，实验通道最低 6.6.40。</li>
 </ul>
 
 <h2 id="where-to-start">从哪里开始</h2>

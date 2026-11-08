@@ -4,7 +4,9 @@
 
 <h2 id="kernel">内核版本</h2>
 
-<p>eBPF 数据面要求 <b>Linux 6.12+</b>。24.10 及更早（6.6 / 5.15）装上也起不来，所以只发 25.12 的包。</p>
+<p>稳定通道要求 <b>Linux 6.12+</b>，对应 OpenWrt / ImmortalWrt 25.12。24.10 走 Linux 6.6 实验通道，最低内核 <b>6.6.40</b>，面板概览会显示「Linux 6.6 实验版」。</p>
+
+<p>两条通道的内核与 BTF 要求都是硬的：版本不够或没有 BTF 一律起不来，装之前先确认。</p>
 
 <p>查看当前内核：</p>
 
@@ -38,7 +40,7 @@
 <h2 id="check">起不来时按顺序看</h2>
 
 <ol>
-  <li><code>uname -r</code> —— 低于 6.12 直接换固件，别继续折腾</li>
+  <li><code>uname -r</code> —— 稳定通道低于 6.12、实验通道低于 6.6.40 就别继续了</li>
   <li>BTF 三条路径是否存在（见上）</li>
   <li>依赖模块是否加载：<code>lsmod | grep -E "sch_ingress|cls_bpf|veth|nft_queue"</code></li>
   <li>LuCI「服务 → Honk → 维护 → 系统检查」，它会逐项报缺什么</li>

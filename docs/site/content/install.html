@@ -15,7 +15,7 @@
 <h2 id="install-notes">脚本会做什么</h2>
 
 <ul>
-  <li>先查内核版本，低于 6.12 直接退出，不会装一半</li>
+  <li>先查内核版本（稳定 6.12+ / 实验 6.6.40+），不够直接退出，不会装一半</li>
   <li>从最新 Release 下载两个包并校验，安装包下载默认走 <code>GH_PROXY</code>（<code>https://ghfast.top/</code>），失败回落直连</li>
   <li>复用设备已有的 Geo 数据包（<code>v2ray-geoip</code> / <code>v2ray-geosite</code>，与 daede 共用 <code>/usr/share/v2ray</code>）；缺少时从聚合源下载，失败则用设备现有软件源</li>
   <li>发现两条默认 BTF 路径都没有时，补装 <code>vmlinux-btf</code>：主次版本一致就装，补丁号不同照装但打警告，跨系列跳过</li>

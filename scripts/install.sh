@@ -126,18 +126,27 @@ kernel_ok() {
 	minor="${minor%%.*}"
 	case "$major" in ''|*[!0-9]*) return 1 ;; esac
 	case "$minor" in ''|*[!0-9]*) return 1 ;; esac
-	[ "$major" -gt 6 ] || { [ "$major" -eq 6 ] && [ "$minor" -ge 12 ]; }
+	patch="${release#*.}"; patch="${patch#*.}"; patch="${patch%%.*}"
+	case "$patch" in ''|*[!0-9]*) patch=0 ;; esac
+	case "$PM" in
+		apk) [ "$major" -gt 6 ] || { [ "$major" -eq 6 ] && [ "$minor" -ge 12 ]; } ;;
+		*)   [ "$major" -gt 6 ] || { [ "$major" -eq 6 ] && { [ "$minor" -gt 6 ] || { [ "$minor" -eq 6 ] && [ "$patch" -ge 40 ]; }; }; } ;;
+	esac
 }
 
 main() {
-	if ! kernel_ok; then
-		echo "当前内核 $(uname -r) 低于 honk 的要求：eBPF 数据面需要 Linux 6.12 及以上" >&2
-		echo "（OpenWrt / ImmortalWrt 25.12 分支起）。请先升级固件再安装。" >&2
-		exit 1
-	fi
-
 	PM="$(detect_manager)"
 	[ "$PM" = unsupported ] && { echo "无法识别包管理器（opkg/apk）。" >&2; exit 1; }
+
+	if ! kernel_ok; then
+		if [ "$PM" = apk ]; then
+			echo "当前内核 $(uname -r) 低于稳定通道的要求：需要 Linux 6.12 及以上（OpenWrt / ImmortalWrt 25.12）。" >&2
+		else
+			echo "当前内核 $(uname -r) 低于实验通道的要求：需要 Linux 6.6.40 及以上（OpenWrt 24.10）。" >&2
+		fi
+		echo "请先升级固件再安装。" >&2
+		exit 1
+	fi
 
 	ARCH="$(detect_arch "$PM")"
 	[ -n "$ARCH" ] || { echo "无法识别架构。" >&2; exit 1; }
@@ -157,14 +166,24 @@ main() {
 	release_list="$(fetch_text "$GH_API_LIST")"
 	[ -n "$release_list" ] || { echo "无法获取 Release 列表。" >&2; exit 1; }
 
-	# 从列表里挑第一个正式版：非预发布，且 tag 形如 v2026.xx…。
+	# 两个通道的 tag 前缀不同：稳定通道 v<年份>.<月>.<日>，实验通道 linux66-<版本>。
 	# 不用 jq（设备上不一定有），只用 awk 按 tag_name/prerelease 配对挑。
-	stable_tag="$(printf '%s' "$release_list" | awk '
+	if [ "$PM" = apk ]; then
+		tag_re='^v[0-9][0-9][0-9][0-9]\.'
+		require_stable=1
+	else
+		tag_re='^linux66-'
+		require_stable=0
+	fi
+	stable_tag="$(printf '%s' "$release_list" | awk -v re="$tag_re" -v need="$require_stable" '
 		/"tag_name":/ { line=$0; sub(/^.*"tag_name": *"/, "", line); sub(/".*$/, "", line);
-		                tag = (line ~ /^v[0-9][0-9][0-9][0-9]\./) ? line : "" }
-		tag != "" && /"prerelease":/ { if ($0 ~ /:[[:space:]]*false/) { print tag; exit }; tag = "" }
+		                tag = (line ~ re) ? line : "" }
+		tag != "" && /"prerelease":/ {
+			if (need == 1) { if ($0 ~ /:[[:space:]]*false/) { print tag; exit }; tag = "" }
+			else { print tag; exit }
+		}
 	')"
-	[ -n "$stable_tag" ] || { echo "未找到正式版 Release（最近 10 个全是预发布）。" >&2; exit 1; }
+	[ -n "$stable_tag" ] || { echo "未找到可用的 Release（通道：$PM）。" >&2; exit 1; }
 	echo "使用正式版：$stable_tag"
 
 	release_json="$(fetch_text "$GH_API_TAG/$stable_tag")"
