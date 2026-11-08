@@ -100,6 +100,22 @@ jobs:
           name: honk-linux66-${{ matrix.core_arch }}-${{ github.sha }}
           path: artifacts/cache
 
+      - name: Cache the Doona source archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . ci/pins.env
+          tag=$(sed -n 's/^HONK_SOURCE_TAG?=//p' honk/Makefile)
+          mkdir -p artifacts/cache
+          for attempt in 1 2 3; do
+            if gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$DOONA_ARCHIVE" --dir artifacts/cache --clobber; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          test -s "artifacts/cache/$DOONA_ARCHIVE"
+
       - name: Prepare isolated SDK feed
         run: |
           set -euo pipefail

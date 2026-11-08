@@ -9,6 +9,14 @@ import shutil
 from pathlib import Path
 
 
+def luci_makefile_archive(root: Path) -> str:
+    text = (root / "luci-app-honk/Makefile").read_text()
+    match = re.search(r"^PKG_SOURCE:=(.+)$", text, re.M)
+    if not match:
+        raise ValueError("luci-app-honk PKG_SOURCE missing")
+    return match.group(1).strip()
+
+
 def prepare(root):
     stage = root / "honk/generated-linux66-stage.mk"
     provenance = root / "honk/generated-linux66-provenance.json"
@@ -47,6 +55,17 @@ def prepare(root):
         raise ValueError("package architecture constraint changed")
     text = text.replace(old, "@(" + "||".join(symbols[arch] for arch in architectures) + ")", 1)
     makefile.write_text(text)
+
+    doona = luci_makefile_archive(root)
+    shutil.copyfile(root / "artifacts/cache" / doona, downloads / doona)
+    luci_makefile = output / "luci-app-honk/Makefile"
+    luci_text = luci_makefile.read_text()
+    luci_new, count = re.subn(
+        r"^PKG_SOURCE_URL\?=.*$", "PKG_SOURCE_URL:=file://$(TOPDIR)/dl", luci_text, count=1, flags=re.M
+    )
+    if count != 1:
+        raise ValueError("luci-app-honk source url changed")
+    luci_makefile.write_text(luci_new)
     (output / "honk/generated-stage.mk").write_text(
         stage.read_text() + "HONK_CORE_LANE:=linux66\n" + f"CORE_COMMIT:={core['commit']}\n"
         + "PKG_SOURCE_URL:=file://$(TOPDIR)/dl\n")
