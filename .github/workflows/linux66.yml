@@ -181,7 +181,7 @@ jobs:
           echo "tag=linux66-${version}" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           mkdir -p dist
-          find artifacts -path '*linux66-verified*' -name '*.ipk' -exec cp -v {} dist/ \;
+          find artifacts -path '*sdk24*' -name '*.ipk' -exec cp -v {} dist/ \;
           find artifacts -path '*honk-linux66-*' -name 'honk-core-*.tar.gz' -exec cp -v {} dist/ \;
           find artifacts -path '*honk-linux66-*' -name 'generated-linux66-*' -exec cp -v {} dist/ \;
           test "$(find dist -name '*.ipk' | wc -l)" -ge 8
