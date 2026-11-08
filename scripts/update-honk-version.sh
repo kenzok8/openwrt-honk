@@ -26,7 +26,19 @@ if [ "$core_new" = "$CORE_COMMIT" ]; then
 	exit 0
 fi
 
-version="$(TZ=Asia/Shanghai date +%Y.%m.%d)"
+# 程序版本 = YYYY.MM.DD；同一天再出程序版本递增第四段，避免把 2026.11.08.2 覆盖成
+# 2026.11.08 造成版本回退。
+today="$(TZ=Asia/Shanghai date +%Y.%m.%d)"
+current="$(sed -n 's/^PKG_VERSION:=//p' "$REPO_DIR/honk/Makefile")"
+case "$current" in
+	"$today") version="$today.1" ;;
+	"$today".*)
+		counter=${current#"$today".}
+		case "$counter" in ''|*[!0-9]*) echo "error: invalid PKG_VERSION $current" >&2; exit 1 ;; esac
+		version="$today.$((counter + 1))"
+		;;
+	*) version="$today" ;;
+esac
 
 echo "Advancing core pin:"
 echo "  $(printf '%s' "$CORE_COMMIT" | cut -c1-7) -> $(printf '%s' "$core_new" | cut -c1-7)"

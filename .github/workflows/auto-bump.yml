@@ -96,18 +96,24 @@ jobs:
           doona_new='${{ steps.detect.outputs.doona_new }}'
           today=$(TZ=Asia/Shanghai date +%Y.%m.%d)
 
+          # 程序版本 = YYYY.MM.DD；同一天再出程序版本就递增第四段（.1、.2 …），
+          # PKG_RELEASE 只留给纯打包修订，所以这里恒为 1。
+          # 直接写日期会把 2026.11.08 覆盖到 2026.11.08.2 之上，包管理器会当成降级。
           bump_package() {
             file=$1
             old_version=$(sed -n 's/^PKG_VERSION:=//p' "$file")
-            old_release=$(sed -n 's/^PKG_RELEASE:=//p' "$file")
-            case "$old_release" in ''|*[!0-9]*) echo "::error::invalid release in $file"; exit 1 ;; esac
-            if [ "$old_version" = "$today" ]; then
-              new_release=$((old_release + 1))
-            else
-              new_release=1
-            fi
-            sed -i -e "s/^PKG_VERSION:=.*/PKG_VERSION:=$today/" \
-              -e "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$new_release/" "$file"
+            case "$old_version" in
+              '') echo "::error::missing PKG_VERSION in $file"; exit 1 ;;
+              "$today") new_version="$today.1" ;;
+              "$today".*)
+                counter=${old_version#"$today".}
+                case "$counter" in ''|*[!0-9]*) echo "::error::invalid version $old_version in $file"; exit 1 ;; esac
+                new_version="$today.$((counter + 1))"
+                ;;
+              *) new_version="$today" ;;
+            esac
+            sed -i -e "s/^PKG_VERSION:=.*/PKG_VERSION:=$new_version/" \
+              -e "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" "$file"
           }
 
           sed -i \
