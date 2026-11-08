@@ -398,7 +398,8 @@ jobs:
             awk '
               BEGIN {
                 RS = "\036"; FS = "\037"
-                order = "feat fix improve build docs chore change"
+                # 排序按主次：修复在最前，改动居中，文档最后。
+                order = "fix feat improve change build chore docs"
               }
               {
                 subject = $1; body = $2
