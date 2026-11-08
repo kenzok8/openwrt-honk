@@ -223,12 +223,19 @@ jobs:
           # 索引（Packages/Packages.gz/Packages.sig）由 clashoo 的聚合工作流统一生成，
           # 这里只放包，避免两处各签一份索引。
           all_ipk=$(find dist -name '*_all.ipk')
-          for ipk in dist/*_x86_64.ipk dist/*_aarch64_generic.ipk dist/*_aarch64_cortex-a53.ipk dist/*_aarch64_cortex-a72.ipk dist/*_aarch64_cortex-a76.ipk dist/*_arm_cortex-a7_neon-vfpv4.ipk dist/*_arm_cortex-a9.ipk; do
-            [ -f "$ipk" ] || continue
-            arch=$(basename "$ipk" .ipk); arch=${arch##*_}
+          for arch in x86_64 aarch64_generic aarch64_cortex-a53 aarch64_cortex-a72 \
+                      aarch64_cortex-a76 arm_cortex-a7_neon-vfpv4 arm_cortex-a9; do
             dest="r2:${R2_BUCKET}/openwrt-feed/honk/24.10/${arch}/"
-            rclone copy "$ipk" "$dest" --checksum --transfers 4
-            [ -n "$all_ipk" ] && rclone copy "$all_ipk" "$dest" --checksum --transfers 4
+            uploaded=0
+            for ipk in dist/*_"${arch}".ipk; do
+              [ -f "$ipk" ] || continue
+              rclone copy "$ipk" "$dest" --checksum --transfers 4
+              uploaded=1
+            done
+            [ "$uploaded" = 1 ] || { echo "::error::no IPK for $arch"; exit 1; }
+            if [ -n "$all_ipk" ]; then
+              rclone copy "$all_ipk" "$dest" --checksum --transfers 4
+            fi
             echo "uploaded -> $dest"
           done
 
