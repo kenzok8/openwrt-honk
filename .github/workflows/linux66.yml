@@ -3,6 +3,11 @@ name: Build experimental Linux 6.6 packages
 on:
   # 实验通道只手动跑：跟着 main 推送跑等于每次白烧 3 个核心 + 7 个 SDK 的构建。
   workflow_dispatch:
+    inputs:
+      publish:
+        description: '构建后发布到 Release 和实验源（关闭则只出 artifact）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -146,3 +151,94 @@ jobs:
           path: artifacts/linux66-verified/
           if-no-files-found: error
           retention-days: 14
+
+  # 实验通道的发布：产物进独立 tag 的 Release 留档，IPK 推到 openwrt-feed/honk/24.10/，
+  # 由 clashoo 的聚合工作流生成并签名 opkg 索引（和稳定通道同一条路径，不另建前缀）。
+  publish:
+    name: Publish experimental 6.6 packages
+    needs: [core, sdk24]
+    if: github.ref == 'refs/heads/main' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Flatten assets
+        id: meta
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^PKG_VERSION:=//p' honk/Makefile | head -n 1)
+          [ -n "$version" ] || { echo "::error::cannot read PKG_VERSION"; exit 1; }
+          echo "tag=linux66-${version}" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          find artifacts -path '*linux66-verified*' -name '*.ipk' -exec cp -v {} dist/ \;
+          find artifacts -path '*honk-linux66-*' -name 'honk-core-*.tar.gz' -exec cp -v {} dist/ \;
+          find artifacts -path '*honk-linux66-*' -name 'generated-linux66-*' -exec cp -v {} dist/ \;
+          test "$(find dist -name '*.ipk' | wc -l)" -ge 8
+          ( cd dist && sha256sum ./* > SHA256SUMS )
+
+      - name: Publish experimental release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Linux 6.6 experimental ${{ steps.meta.outputs.version }}
+          prerelease: true
+          # 同名资产覆盖，不同架构/内核的包累积保留
+          files: dist/*
+          fail_on_unmatched_files: true
+
+      - name: Upload IPKs to the experimental feed path
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          [ -z "${R2_BUCKET:-}" ] && { echo "No R2 bucket, skip upload"; exit 0; }
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY_ID}
+          secret_access_key = ${R2_SECRET_ACCESS_KEY}
+          endpoint = ${R2_ENDPOINT}
+          acl = private
+          no_check_bucket = true
+          EOF
+          # 24.10 是 opkg：每个 arch 目录要放本架构包 + _all 包。
+          # 索引（Packages/Packages.gz/Packages.sig）由 clashoo 的聚合工作流统一生成，
+          # 这里只放包，避免两处各签一份索引。
+          all_ipk=$(find dist -name '*_all.ipk')
+          for ipk in dist/*_x86_64.ipk dist/*_aarch64_generic.ipk dist/*_aarch64_cortex-a53.ipk dist/*_aarch64_cortex-a72.ipk dist/*_aarch64_cortex-a76.ipk dist/*_arm_cortex-a7_neon-vfpv4.ipk dist/*_arm_cortex-a9.ipk; do
+            [ -f "$ipk" ] || continue
+            arch=$(basename "$ipk" .ipk); arch=${arch##*_}
+            dest="r2:${R2_BUCKET}/openwrt-feed/honk/24.10/${arch}/"
+            rclone copy "$ipk" "$dest" --checksum --transfers 4
+            [ -n "$all_ipk" ] && rclone copy "$all_ipk" "$dest" --checksum --transfers 4
+            echo "uploaded -> $dest"
+          done
+
+      - name: Trigger unified feed aggregation
+        env:
+          AGGREGATE_FEED_TOKEN: ${{ secrets.AGGREGATE_FEED_TOKEN }}
+        run: |
+          [ -z "$AGGREGATE_FEED_TOKEN" ] && { echo "No aggregate token, skip trigger"; exit 0; }
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${AGGREGATE_FEED_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/kenzok8/openwrt-clashoo/actions/workflows/aggregate-feed.yml/dispatches \
+            -d '{"ref":"main","inputs":{"trigger_project":"honk"}}' || echo "Aggregate trigger failed; scheduled workflow will retry."
