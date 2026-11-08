@@ -162,7 +162,8 @@ jobs:
           # use the run id and are never overwritten: every version keeps its
           # own verified set.
           ci/build-doona.sh
-          ci/build-core.sh
+          # 官方通道只用 stable lane；6.6 的 pin 与兼容补丁由实验通道自己维护。
+          CORE_LANE=stable ci/build-core.sh
 
           tag="$HONK_SOURCE_TAG"
           gh release view "$tag" >/dev/null 2>&1 || \

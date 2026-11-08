@@ -1,9 +1,7 @@
 name: Build experimental Linux 6.6 packages
 
 on:
-  push:
-    branches:
-      - test/linux66-sdk24
+  # 实验通道只手动跑：跟着 main 推送跑等于每次白烧 3 个核心 + 7 个 SDK 的构建。
   workflow_dispatch:
 
 permissions:
@@ -123,7 +121,9 @@ jobs:
           FEEDNAME: honk
           FEED_DIR: ${{ github.workspace }}/artifacts/linux66-package
           ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/linux66-sdk-output
-          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
+          # wall 只提供 v2ray-geoip/geosite；固定到完整 SHA，更新走独立审阅，
+          # 避免实验通道的构建被第三方 feed 的 HEAD 变动拖走。
+          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall^ebd9d11b4ff8ee91b1d14e98c79523311eb5ae44
           NO_SHFMT_CHECK: '1'
           PACKAGES: honk luci-app-honk
 

@@ -248,5 +248,27 @@ grep -Fq 'checking_feed' honk/files/job.sh
 
 grep -Fq "honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
+# --- Linux 6.6 实验通道的 pin 保护 ---
+# 官方自动同步只认 ci/pins.env；一旦它也能改实验 pin，第三方核心就会被官方
+# 上游悄悄顶掉。这里用静态断言把两条轨道钉死。
+if [ -f ci/pins-linux66.env ]; then
+	linux66_commit=$(sed -n 's/^CORE_COMMIT=//p' ci/pins-linux66.env)
+	case "$linux66_commit" in
+		''|*[!0-9a-f]*) echo 'ci/pins-linux66.env must pin a hex commit.' >&2; exit 1 ;;
+	esac
+	[ "${#linux66_commit}" -eq 40 ] || { echo 'ci/pins-linux66.env must pin a full 40-char commit, not a branch head.' >&2; exit 1; }
+	patch_path=$(sed -n 's/^CORE_COMPAT_PATCH=//p' ci/pins-linux66.env)
+	patch_hash=$(sed -n 's/^CORE_COMPAT_PATCH_SHA256=//p' ci/pins-linux66.env)
+	[ -n "$patch_path" ] && [ -f "$patch_path" ] || { echo 'Linux 6.6 compat patch declared in pins is missing.' >&2; exit 1; }
+	actual_patch_hash=$(sha256sum "$patch_path" | cut -d' ' -f1)
+	[ "$actual_patch_hash" = "$patch_hash" ] || { echo 'Linux 6.6 compat patch does not match its pinned sha256.' >&2; exit 1; }
+	if grep -q 'pins-linux66\|CORE_COMPAT_PATCH' .github/workflows/auto-bump.yml; then
+		echo 'auto-bump.yml must not touch the Linux 6.6 pin or its compat patch.' >&2
+		exit 1
+	fi
+fi
+grep -Fq 'CORE_LANE: stable' .github/workflows/build.yml
+grep -Fq 'CORE_LANE=stable' .github/workflows/auto-bump.yml
+
 git diff --check
 echo 'Static checks passed.'

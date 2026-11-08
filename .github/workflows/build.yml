@@ -54,6 +54,9 @@ jobs:
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y ripgrep zstd
       - name: Build honk-core (x86_64)
+        # 显式指明官方通道，别让 lane 默认值将来被改掉时静默切换核心来源。
+        env:
+          CORE_LANE: stable
         run: CORE_ARCHS=x86_64 ci/build-core.sh
       - uses: actions/upload-artifact@v7
         with:
