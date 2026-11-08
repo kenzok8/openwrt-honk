@@ -544,18 +544,31 @@ jobs:
             exit 1
           fi
 
+      # 不用 softprops/action-gh-release：它发现同名 Release 就走 PATCH，
+      # GITHUB_TOKEN 更新（即使字段未变、回传同一 target_commitish）会被 403
+      # 「Resource not accessible by integration」拒掉，资产和软件源一起卡住。
+      # 改成「存在就先删、再建」：结果只取决于 tag 内容，不取决于谁建的。
       - name: Publish Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: Release ${{ steps.meta.outputs.tag }}
-          body_path: release_notes.md
-          prerelease: ${{ steps.meta.outputs.prerelease }}
-          make_latest: ${{ steps.meta.outputs.prerelease == 'false' }}
-          files: dist/**
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          if gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$repo" --yes
+          fi
+          if [ "$PRERELEASE" = 'false' ]; then
+            latest=(--latest)
+          else
+            latest=(--prerelease --latest=false)
+          fi
+          gh release create "$TAG" --repo "$repo" \
+            --target "${{ github.sha }}" \
+            --title "Release $TAG" \
+            --notes-file release_notes.md \
+            "${latest[@]}" dist/*
 
       - name: Verify published Release assets
         env:
