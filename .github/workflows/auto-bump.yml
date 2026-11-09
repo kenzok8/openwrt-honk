@@ -199,6 +199,8 @@ jobs:
 
       - name: Verify committed metadata against the published assets
         if: steps.detect.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Uses the committed (not generated) values, i.e. the download a plain

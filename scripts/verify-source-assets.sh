@@ -75,18 +75,28 @@ hashes+=("$doona_hash")
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 failed=0
+
+# GitHub 的匿名 release 下载会随时返 504，带 token 走 API 才稳定。
+fetch_asset() { # <name>
+	if command -v gh >/dev/null 2>&1 \
+		&& gh release download "$tag" --repo "${GITHUB_REPOSITORY:-kenzok8/openwrt-honk}" \
+			--pattern "$1" --dir "$workdir" --clobber >/dev/null 2>&1; then
+		return 0
+	fi
+	curl -fsSL --retry 3 -o "$workdir/$1" "$base/$1"
+}
+
 printf 'source tag: %s\n' "$tag"
 for i in "${!names[@]}"; do
 	name=${names[$i]}
 	expected=${hashes[$i]}
-	url="$base/$name"
 	if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
 		printf 'FAIL %-64s invalid SHA-256 in Makefile: %s\n' "$name" "${expected:-<empty>}"
 		failed=1
 		continue
 	fi
 	if ! $download; then
-		code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)
+		code=$(curl -sIL -o /dev/null -w '%{http_code}' "$base/$name" || echo 000)
 		if [ "$code" = 200 ]; then
 			printf 'OK   %-64s %s\n' "$name" "$expected"
 		else
@@ -95,7 +105,7 @@ for i in "${!names[@]}"; do
 		fi
 		continue
 	fi
-	if ! curl -fsSL --retry 3 -o "$workdir/$name" "$url"; then
+	if ! fetch_asset "$name"; then
 		printf 'FAIL %-64s download failed\n' "$name"
 		failed=1
 		continue

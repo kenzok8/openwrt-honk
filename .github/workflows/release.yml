@@ -46,8 +46,10 @@ jobs:
 
       - name: Download and hash every pinned asset
         # The committed Makefiles name an immutable source-<run_id> tag, so this
-        # is exactly the download a plain feed build performs. No generated file
-        # may substitute for it.
+        # is exactly the download a plain feed build performs. Token because
+        # anonymous release downloads intermittently fail with 504.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/verify-source-assets.sh --download
 
   build:
