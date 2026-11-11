@@ -37,6 +37,25 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Validate auto_publish inputs
+        # 放在矩阵之前：base_sha 写错或漏填要几秒内失败，而不是白跑 7 个 SDK 再在推进时报错。
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.auto_publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::auto_publish 需要 base_sha（候选提交的父提交，40 位 SHA），当前是 '${BASE_SHA:-未提供}'"
+            exit 1
+          }
+          parent=$(gh api "repos/${{ github.repository }}/commits/$CANDIDATE_SHA" --jq '.parents[0].sha')
+          [ "$parent" = "$BASE_SHA" ] || {
+            echo "::error::base_sha=$BASE_SHA 不是 $CANDIDATE_SHA 的父提交（实际为 $parent）"
+            exit 1
+          }
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -528,23 +547,42 @@ jobs:
           CANDIDATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::auto_publish 需要 base_sha（候选提交的父提交，40 位 SHA），当前是 '${BASE_SHA:-未提供}'"
+            exit 1
+          }
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git rev-parse HEAD^)" = "$BASE_SHA"
           remote_sha=$(gh api "repos/${{ github.repository }}/git/ref/heads/main" --jq .object.sha)
           tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
-          if [ "$remote_sha" = "$CANDIDATE_SHA" ] && [ "$tag_sha" = "$CANDIDATE_SHA" ]; then
-            echo "main and tag already point to this validated commit"
-          elif [ "$remote_sha" = "$BASE_SHA" ] && [ -z "$tag_sha" ]; then
-            git config user.name kenzok8
-            git config user.email kenzok8@gmail.com
-            git tag "$TAG" "$CANDIDATE_SHA"
-            git -c credential.helper='!gh auth git-credential' push --atomic origin \
-              "$CANDIDATE_SHA:refs/heads/main" "refs/tags/$TAG:refs/tags/$TAG"
-          else
-            echo "::error::main/tag changed: main=$remote_sha tag=$tag_sha"
+          # main 可能已经推进过：上一次只差打标签，或有人直接往 main 推了提交。
+          # 只要它正好是候选提交（或还是 base）就只补缺的那部分，候选提交没变，发布内容不变。
+          case "$remote_sha" in
+            "$CANDIDATE_SHA" | "$BASE_SHA") ;;
+            *) echo "::error::main 已变动：main=${remote_sha}，期望 ${BASE_SHA}" ; exit 1 ;;
+          esac
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$CANDIDATE_SHA" ]; then
+            echo "::error::标签 ${TAG} 已指向 ${tag_sha}，不是本次候选提交"
             exit 1
           fi
+          if [ "$remote_sha" = "$CANDIDATE_SHA" ] && [ -n "$tag_sha" ]; then
+            echo "main and tag already point to this validated commit"
+            exit 0
+          fi
+          git config user.name kenzok8
+          git config user.email kenzok8@gmail.com
+          if [ -z "$tag_sha" ]; then
+            git tag "$TAG" "$CANDIDATE_SHA"
+          fi
+          if [ "$remote_sha" = "$CANDIDATE_SHA" ]; then
+            refs="refs/tags/$TAG:refs/tags/$TAG"
+          elif [ -n "$tag_sha" ]; then
+            refs="$CANDIDATE_SHA:refs/heads/main"
+          else
+            refs="$CANDIDATE_SHA:refs/heads/main refs/tags/$TAG:refs/tags/$TAG"
+          fi
+          git -c credential.helper='!gh auth git-credential' push --atomic origin $refs
+          echo "推进完成：${refs}"
 
       # 不用 softprops/action-gh-release：它发现同名 Release 就走 PATCH，
       # GITHUB_TOKEN 更新（即使字段未变、回传同一 target_commitish）会被 403
