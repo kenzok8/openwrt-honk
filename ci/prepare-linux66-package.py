@@ -4,6 +4,7 @@
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -54,6 +55,12 @@ def prepare(root):
     if old not in text:
         raise ValueError("package architecture constraint changed")
     text = text.replace(old, "@(" + "||".join(symbols[arch] for arch in architectures) + ")", 1)
+    version = os.environ.get("LINUX66_VERSION", "").strip()
+    if version:
+        if not re.fullmatch(r"\d{4}\.\d{2}\.\d{2}(\.\d+)?", version):
+            raise ValueError("unexpected LINUX66_VERSION")
+        text = re.sub(r"^PKG_VERSION:=.*$", f"PKG_VERSION:={version}", text, count=1, flags=re.M)
+        text = re.sub(r"^PKG_RELEASE:=.*$", "PKG_RELEASE:=1", text, count=1, flags=re.M)
     makefile.write_text(text)
 
     doona = luci_makefile_archive(root)

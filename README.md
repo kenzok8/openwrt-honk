@@ -48,11 +48,11 @@
 
 ### Linux 6.6 实验兼容通道
 
-兼容核心基于 [6106757-lab/honk 的 kernel-floor-6.6 分支](https://github.com/6106757-lab/honk/tree/6bdfdc2f21f17714e6b3d5083607c4308cc33782)，继承该分支的功能与限制。固定提交和 OpenWrt 集成补丁摘要位于 [ci/pins-linux66.env](ci/pins-linux66.env)，与稳定版独立维护，不自动追更。
+兼容核心基于 [6106757-lab/honk 的 kernel-floor-6.6 分支](https://github.com/6106757-lab/honk/tree/kernel-floor-6.6)，继承该分支的功能与限制。每天跟一次该分支，有提交才重新出包；固定提交和 OpenWrt 集成补丁摘要位于 [ci/pins-linux66.env](ci/pins-linux66.env)，与稳定通道独立。
 
 - 最低内核 `6.6.40`。官方 OpenWrt 24.10.8（内核 6.6.144）已通过安装、启停、重启、升级与真实流量验证；其余架构编译通过不等于已做真机验收。
 - 兼容包复用 LuCI 和 Doona，面板概览显示「Linux 6.6 实验版」；需要匹配的内核模块，以及内置或按 `uname -r` 精确匹配的外部 BTF。
-- 发布走独立的预发布 Release（tag 形如 `linux66-<版本>`）与 `openwrt-feed/honk/24.10/<arch>/`，由聚合工作流统一生成并签名 opkg 索引；`linux66.yml` 手动触发，`publish=true` 才会发布。
+- 发布走独立的预发布 Release（tag 形如 `linux66-<日期>-r<run_id>`，包版本按日期）与 `openwrt-feed/honk/24.10/<arch>/`，由聚合工作流统一生成并签名 opkg 索引；`linux66.yml` 每天自动跟上游分支，有新提交就构建并发布；手动触发要勾 `publish` 才发。
 - LuCI 一键升级只允许同通道（6.6 核心从 24.10 源升级、稳定核心从 25.12 源升级），跨通道会被拒绝。
 - 两个通道的配置备份不能互导（恢复会报 `incompatible_core_version`），换通道请手工搬 `node {}` 块。
 - UDP 会话容量取决于文件描述符和内存预算。本地 `nofile=4096` 验证中上限为 168 个，高频新建会话达到上限后会丢包，空闲回收后恢复；不适合作为高并发支持承诺。

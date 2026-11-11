@@ -1,6 +1,8 @@
 name: Build experimental Linux 6.6 packages
 
 on:
+  schedule:
+    - cron: '30 1 * * *'
   workflow_dispatch:
     inputs:
       publish:
@@ -16,7 +18,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pin:
+    name: Sync the 6.6 core pin
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      version: ${{ steps.sync.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Sync pin
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . ci/pins-linux66.env
+          version=$(TZ=Asia/Shanghai date +%Y.%m.%d)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            exit 0
+          fi
+          head=$(git ls-remote "$CORE_REPOSITORY" "refs/heads/$CORE_BRANCH" | cut -f1)
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cannot resolve $CORE_BRANCH"; exit 1; }
+          if [ "$head" = "$CORE_COMMIT" ]; then
+            echo "Pin already at $head."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sed -i "s/^CORE_COMMIT=.*/CORE_COMMIT=$head/" ci/pins-linux66.env
+          bash scripts/check.sh
+          git config user.name kenzok8
+          git config user.email kenzok8@gmail.com
+          git add ci/pins-linux66.env
+          git commit -m "Pin the Linux 6.6 core at $version" \
+            -m "改动：ci/pins-linux66.env 的 CORE_COMMIT 跟到 $(printf '%s' "$head" | cut -c1-7)，实验包版本 $version-r1。" \
+            -m "原因：让 24.10 用户能装到最新的兼容核心，跑出问题才好反馈。"
+          git -c credential.helper='!gh auth git-credential' push origin HEAD:main
+
   core:
+    needs: pin
+    if: needs.pin.outputs.changed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -26,6 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.ref }}
           persist-credentials: false
 
       - uses: actions/setup-node@v7
@@ -69,7 +118,7 @@ jobs:
           retention-days: 14
 
   sdk24:
-    needs: core
+    needs: [pin, core]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
@@ -93,6 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.ref }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v7
@@ -117,6 +167,8 @@ jobs:
           test -s "artifacts/cache/$DOONA_ARCHIVE"
 
       - name: Prepare isolated SDK feed
+        env:
+          LINUX66_VERSION: ${{ needs.pin.outputs.version }}
         run: |
           set -euo pipefail
           cp artifacts/cache/generated-linux66-stage.mk honk/
@@ -167,8 +219,8 @@ jobs:
 
   publish:
     name: Publish experimental 6.6 packages
-    needs: [core, sdk24]
-    if: github.ref == 'refs/heads/main' && inputs.publish
+    needs: [pin, core, sdk24]
+    if: github.ref == 'refs/heads/main' && needs.pin.outputs.changed == 'true' && (github.event_name == 'schedule' || inputs.publish)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -177,6 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.ref }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v7
@@ -187,9 +240,9 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          version=$(sed -n 's/^PKG_VERSION:=//p' honk/Makefile | head -n 1)
-          [ -n "$version" ] || { echo "::error::cannot read PKG_VERSION"; exit 1; }
-          echo "tag=linux66-${version}" >> "$GITHUB_OUTPUT"
+          version='${{ needs.pin.outputs.version }}'
+          [ -n "$version" ] || { echo "::error::cannot read version"; exit 1; }
+          echo "tag=linux66-${version}-r${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           find artifacts -path '*sdk24*' -name '*.ipk' -exec cp -v {} dist/ \;
@@ -202,7 +255,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: main
           name: Linux 6.6 experimental ${{ steps.meta.outputs.version }}
           prerelease: true
           files: dist/*
