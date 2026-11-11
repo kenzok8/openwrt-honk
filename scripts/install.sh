@@ -93,6 +93,25 @@ geodata_installed() {
 	fi
 }
 
+# apk 只会丢一句 no such package，用户分不清是索引没刷、还是内核跟源对不上，
+# 装之前先把缺的包点名，并给出该怎么处理。
+preflight_deps() {
+	[ "$PM" = apk ] || return 0
+	_sim="$(apk add --simulate --allow-untrusted "$@" 2>&1)" || true
+	_missing="$(printf '%s\n' "$_sim" | sed -n 's/^  \([^ ]*\) (no such package):$/\1/p')"
+	[ -n "$_missing" ] || return 0
+	echo "安装前检查：这些依赖在你的软件源里不存在——" >&2
+	printf '%s\n' "$_missing" | sed 's/^/  /' >&2
+	if ! printf '%s\n' "$_missing" | grep -qv '^kmod-'; then
+		echo "它们都是内核模块，跟内核版本绑死：源里没有和 $(uname -r) 匹配的那一版，通常是固件内核比源里的新，或者源还没跟上。" >&2
+		echo "先 apk update 重试；仍然缺就只能换与该内核同源的固件，或用同一棵内核源码树出这几个包。" >&2
+	else
+		echo "多半是索引没刷或固件分支跟这个包不一致：先 apk update 再装。" >&2
+	fi
+	echo "已停止安装，没有改动系统。" >&2
+	return 1
+}
+
 # honk-core 用 CO-RE eBPF，两个位置任一有 BTF 就能跑：固件自带，或 vmlinux-btf 包
 btf_present() {
 	[ -r /sys/kernel/btf/vmlinux ] || [ -r /usr/lib/debug/boot/vmlinux ]
@@ -304,6 +323,7 @@ main() {
 		apk --allow-untrusted verify "$honk_file" "$luci_file" || exit 1
 		honk_version="$(apk_file_version "$honk_file" honk)" || exit 1
 		luci_version="$(apk_file_version "$luci_file" luci-app-honk)" || exit 1
+		preflight_deps "$@" || exit 1
 		install_output="$(apk add --allow-untrusted "$@" 2>&1)" || install_rc=$?
 	else
 		install_output="$(opkg install "$@" 2>&1)" || install_rc=$?
