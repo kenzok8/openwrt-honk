@@ -154,7 +154,7 @@ honk-core 用 CO-RE eBPF，缺 BTF 起不来。查找顺序与核心一致：
 
 **固定输入。** 核心和 Doona 的完整提交、Doona OpenWrt 补丁摘要、OpenWrt 25.12.4 x86/64 官方 SDK 地址和 SHA256 都固定在 `ci/pins.env`。Doona 从源码构建并保留 OpenWrt 同源 API 补丁，归档不含可选中文字体，浏览器用系统字体。
 
-**自动更新。** 核心跟官方 `main` 的最新提交（eBPF nightly 从上游源码读，不写死）。`auto-bump.yml` 每 6 小时检查官方 `main` 与 Doona 更新，在独立分支写入 pin、包版本和归档哈希，构建核心、Doona 和全部 7 组 SDK 安装包，**只产出候选 Release**；真机复测通过后以 `auto_publish` 推进，原子更新 `main`、正式 tag、Release 与 R2 软件源。
+**自动更新。** 核心跟官方 `v*` tag（eBPF nightly 从上游源码读，不写死），Doona 跟版本号。`auto-bump.yml` 每天检查一次：官方出新 tag 或 Doona 版本号变了，才在独立分支写入 pin、包版本和归档哈希，跑全部 7 组 SDK 安装包，矩阵全绿直接推进 `main`、正式 tag、Release 与 R2 软件源；任一 SDK 失败就只留候选分支，不动正式源。
 
 **构建环境。** 完整构建（含核心）需在大小写敏感的 Linux 文件系统上跑（Doona 上游有仅大小写不同的文件）。需要 Rust / rustup、Zig 0.14.1、Node.js 22.13+ 与 Corepack、Git、curl、ripgrep、GNU tar、zstd、`readelf`，以及 `build-essential`、clang、LLVM、libbpf、libelf、pkg-config、CMake、libclang 和 OpenWrt SDK 所需工具。核心交叉编译脚本会核对 Rust / Doona / SDK 输入与 Zig、bpf-linker 版本；SDK 阶段限定 Linux x86_64。
 
