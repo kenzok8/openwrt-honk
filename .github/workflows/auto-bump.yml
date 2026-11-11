@@ -1,8 +1,5 @@
 name: Check honk/doona upstream
 
-# Scheduled runs pin changed upstream commits and dispatch the full package
-# matrix; only a successful candidate is promoted to main and formal feeds.
-
 on:
   schedule:
     - cron: '30 0 * * *'
@@ -227,16 +224,15 @@ jobs:
             push origin "HEAD:refs/heads/$STAGING"
           echo "staging_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build, promote and verify full release
+      - name: Build and publish the release
         id: verify
         if: steps.detect.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # 只出候选：正式推进要等 252 真机复测通过后手工触发 auto_publish。
           output=$(gh workflow run release.yml --ref "$STAGING" \
-            -f candidate=true -f prerelease=true)
+            -f auto_publish=true -f base_sha='${{ steps.stage.outputs.base_sha }}')
           run_id=$(printf '%s\n' "$output" | sed -nE 's|.*actions/runs/([0-9]+).*|\1|p' | tail -1)
           case "$run_id" in ''|*[!0-9]*) echo "::error::cannot read release run ID: $output"; exit 1 ;; esac
           expected_sha='${{ steps.commit.outputs.staging_sha }}'
@@ -260,16 +256,13 @@ jobs:
             sleep 30
           done
           [ "${result%% *}" = completed ] || { echo "::error::release run $run_id timed out"; exit 1; }
-          candidate_tag=$(gh release list --limit 100 --json tagName --jq ".[].tagName | select(endswith(\"-r$run_id\"))" | head -1)
-          [ -n "$candidate_tag" ] || { echo "::error::candidate release for run $run_id is missing"; exit 1; }
+          release_tag=$(gh release list --limit 100 --json tagName --jq ".[].tagName | select(endswith(\"-r$run_id\"))" | head -1)
+          [ -n "$release_tag" ] || { echo "::error::release for run $run_id is missing"; exit 1; }
+          git -c credential.helper='!gh auth git-credential' push origin --delete "$STAGING" || true
 
           {
-            echo "## Honk upstream candidate ready"
+            echo "## Honk released"
             echo ""
-            echo "Staging branch: \`$STAGING\`"
-            echo "Candidate commit: \`${{ steps.commit.outputs.staging_sha }}\`"
-            echo "Candidate release: \`$candidate_tag\`"
-            echo ""
-            echo "Next: deploy to 252, then promote with"
-            echo "\`gh workflow run release.yml --ref $STAGING -f auto_publish=true -f base_sha=${{ steps.stage.outputs.base_sha }}\`."
+            echo "Release: \`$release_tag\`"
+            echo "Commit: \`${{ steps.commit.outputs.staging_sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
