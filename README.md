@@ -146,7 +146,7 @@ honk-core 用 CO-RE eBPF，缺 BTF 起不来。查找顺序与核心一致：
 
 补充说明：
 
-- 安装脚本发现两条默认路径都没有时，会从软件源补装 `vmlinux-btf`：主次版本一致就装，补丁号不同照装但打警告，跨系列跳过。
+- 安装脚本发现两条默认路径都没有时，按内核版本补装 `vmlinux-btf`：软件源里有当前内核那个版本就直接装；没有就按 `uname -r` 去 [vmlinux-btf 的 releases](https://github.com/kenzok8/vmlinux-btf/releases/tag/latest) 取同版本包（feed 只保留最新一版，内核一换就对不上）；两处都没有才只打印提示。同系列补丁号不同的包照装但打警告。
 - 自编译或快照内核没有现成包，拿同一次编译的 `vmlinux` 跑 `pahole --btf_encode_detached=vmlinux.btf vmlinux`，放到 `/usr/lib/debug/boot/vmlinux`，或用 `HONK_VMLINUX_BTF` 指过去。
 - 只有内核自带 BTF 时才启用「原生 UDP 接收追踪」，用外部 BTF 时该功能降级，其余功能不受影响。
 

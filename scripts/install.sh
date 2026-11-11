@@ -10,6 +10,8 @@ GH_API_LIST="https://api.github.com/repos/${REPO}/releases?per_page=10"
 GH_API_TAG="https://api.github.com/repos/${REPO}/releases/tags"
 GH_PROXY="${GH_PROXY:-https://ghfast.top/}"
 GEO_FEED="https://down.dllkids.xyz/openwrt-feed"
+# BTF 必须按内核版本取：feed 只留最新一版，跨系列时没法用，这里按 uname -r 精确取。
+BTF_RELEASE="https://github.com/kenzok8/vmlinux-btf/releases/download/latest"
 TMP_DIR="/tmp/honk-install"
 
 fetch_text() {
@@ -247,37 +249,51 @@ main() {
 	fi
 
 	# 固件没编 BTF 时补装 vmlinux-btf：dae 也是靠这个包在官方 OpenWrt 上跑起来的
-	# BTF 最好与内核同源：同系列补丁位差别实测可用，只警告；跨系列直接不装。
+	# BTF 必须与内核同源：同系列补丁位差别实测可用，只警告；跨系列不能用。
+	# feed 只保留最新一版，内核一换就跨系列，所以还要按 uname -r 去 release 精确取。
 	if ! btf_present; then
 		kernel_release="$(uname -r | sed 's/-.*//')"
-		echo "内核没有自带 BTF，尝试从软件源补装 vmlinux-btf。"
+		echo "内核没有自带 BTF，尝试补装 vmlinux-btf。"
 		btf_dir="$GEO_FEED/$SDK/$ARCH"
 		btf_listing="$(fetch_text "$btf_dir/" || true)"
 		if [ "$PM" = apk ]; then
 			btf_name="$(printf '%s\n' "$btf_listing" | grep -oE 'vmlinux-btf-[0-9][^"/<]*\.apk' | head -n 1)"
+			btf_release_name="vmlinux-btf-${kernel_release}-r1-${ARCH}.apk"
 		else
 			btf_name="$(printf '%s\n' "$btf_listing" | grep -oE "vmlinux-btf_[^\"/<]*_${ARCH}\\.ipk" | head -n 1)"
+			btf_release_name="vmlinux-btf_${kernel_release}-r1_${ARCH}.ipk"
 		fi
 		btf_kernel="$(printf '%s\n' "$btf_name" | sed -E 's/^vmlinux-btf[-_]([0-9][0-9.]*)[-_].*/\1/')"
-		if [ -z "$btf_name" ]; then
-			echo "未找到 $SDK/$ARCH 的 vmlinux-btf，honk 启动时会因为缺 BTF 失败。" >&2
-		elif [ "${btf_kernel%.*}" != "${kernel_release%.*}" ]; then
-			echo "软件源的 vmlinux-btf 是为内核 $btf_kernel 编的，当前内核是 $kernel_release，跨版本了，跳过自动安装。" >&2
-			echo "需要为当前内核生成 BTF，或换用自带 BTF 的固件。" >&2
-		else
-			btf_file="$TMP_DIR/$btf_name"
+		btf_file=""
+		btf_note=""
+		if [ -n "$btf_name" ] && [ "$btf_kernel" = "$kernel_release" ]; then
 			echo "下载 $btf_dir/$btf_name"
-			if download_file "$btf_dir/$btf_name" "$btf_file"; then
-				if [ "$PM" = apk ]; then apk --allow-untrusted verify "$btf_file" || exit 1; fi
-				set -- "$@" "$btf_file"
-				if [ "$btf_kernel" = "$kernel_release" ]; then
-					echo "已加入安装：$btf_name（与当前内核 $kernel_release 一致）"
-				else
-					echo "已加入安装：$btf_name（按内核 $btf_kernel 编译，当前 $kernel_release，同系列补丁位不同）"
-					echo "这一般能用；若出现异常，先怀疑这份 BTF，删掉 /usr/lib/debug/boot/vmlinux 即恢复缺 BTF 状态。" >&2
-				fi
+			btf_file="$TMP_DIR/$btf_name"
+			download_file "$btf_dir/$btf_name" "$btf_file" || btf_file=""
+		else
+			if [ -n "$btf_name" ]; then
+				echo "软件源里的 vmlinux-btf 是给内核 ${btf_kernel} 编的，改用 release 里为 ${kernel_release} 编的那版。"
 			else
-				echo "vmlinux-btf 下载失败，honk 启动时会因为缺 BTF 失败。" >&2
+				echo "软件源里没有 vmlinux-btf，改用 release 里为 ${kernel_release} 编的那版。"
+			fi
+			if download_github "$BTF_RELEASE/$btf_release_name" "$TMP_DIR/$btf_release_name"; then
+				btf_file="$TMP_DIR/$btf_release_name"
+			elif [ -n "$btf_name" ] && [ "${btf_kernel%.*}" = "${kernel_release%.*}" ]; then
+				echo "release 里也没这版，退回软件源的 ${btf_name}。" >&2
+				btf_file="$TMP_DIR/$btf_name"
+				download_file "$btf_dir/$btf_name" "$btf_file" || btf_file=""
+				btf_note="按内核 ${btf_kernel} 编译，当前 ${kernel_release}，同系列补丁位不同"
+			else
+				echo "vmlinux-btf 没有为内核 $kernel_release / $ARCH 出的包，honk 启动时会因为缺 BTF 失败。" >&2
+				echo "需要为当前内核生成 BTF，或换用自带 BTF 的固件：https://github.com/kenzok8/vmlinux-btf" >&2
+			fi
+		fi
+		if [ -n "$btf_file" ]; then
+			if [ "$PM" = apk ]; then apk --allow-untrusted verify "$btf_file" || exit 1; fi
+			set -- "$@" "$btf_file"
+			echo "已加入安装：${btf_file##*/}${btf_note:+（${btf_note}）}"
+			if [ -n "$btf_note" ]; then
+				echo "这一般能用；若出现异常，先怀疑这份 BTF，删掉 /usr/lib/debug/boot/vmlinux 即恢复缺 BTF 状态。" >&2
 			fi
 		fi
 	fi
