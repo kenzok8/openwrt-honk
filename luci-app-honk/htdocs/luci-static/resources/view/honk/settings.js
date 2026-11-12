@@ -50,6 +50,7 @@ function systemConfigCard(selfManaged) {
 
 	let previewed = false;
 	let previewHash = '';
+	let previewBase = '';
 	backBtn.addEventListener('click', function() {
 		backBtn.disabled = true;
 		if (!previewed) {
@@ -57,6 +58,7 @@ function systemConfigCard(selfManaged) {
 				preview.textContent = (result && result.content) || '';
 				preview.style.display = '';
 				previewHash = (result && result.sha256) || '';
+				previewBase = (result && result.base) || '';
 				previewed = true;
 				message.textContent = _('上面是面板将生成的 system.dae，确认后再次点击替换。');
 			}).catch(function(error) {
@@ -64,7 +66,7 @@ function systemConfigCard(selfManaged) {
 			}).finally(function() { backBtn.disabled = false; });
 			return;
 		}
-		honk.systemPanel(false, previewHash).then(honk.ensureOk).then(function() {
+		honk.systemPanel(false, previewHash, previewBase).then(honk.ensureOk).then(function() {
 			message.textContent = _('已交回面板管理');
 			window.setTimeout(function() { location.reload(); }, 1200);
 		}).catch(function(error) {

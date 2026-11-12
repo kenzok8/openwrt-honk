@@ -1259,14 +1259,18 @@ system_rollback() {
 	rollback_state=incomplete
 	cp -p "$_rs_backup" "$_rs_file" 2>/dev/null || { logger -t honk "rollback: restore file failed"; return 1; }
 	uci set honk.main.system_managed="$_rs_managed" >/dev/null 2>&1 && uci commit honk >/dev/null 2>&1 || :
-	if [ "$_rs_running" = 1 ]; then honk_lifecycle_start 30 >/dev/null 2>&1 || :; fi
+	_rs_ready=0
+	if [ "$_rs_running" = 1 ]; then honk_lifecycle_start 30 >/dev/null 2>&1 && _rs_ready=1; fi
 	_rs_now=$(sha256sum "$_rs_file" 2>/dev/null | awk '{print $1}')
 	_rs_flag=$(uci -q get honk.main.system_managed); [ -n "$_rs_flag" ] || _rs_flag=1
 	if [ "$_rs_now" = "$_rs_hash" ] && [ "$_rs_flag" = "$_rs_managed" ] &&
-		{ [ "$_rs_running" != 1 ] || managed_core_pid >/dev/null 2>&1; }; then
+		{ [ "$_rs_running" != 1 ] || [ "$_rs_ready" = 1 ]; }; then
 		rollback_state=rolled_back
 	else
-		logger -t honk "rollback incomplete: hash=$_rs_now managed=$_rs_flag"
+		# 回滚不完整时不能把备份一起删掉
+		_rs_keep=/tmp/honk-rollback-$(date +%s)-$(basename "$_rs_file")
+		cp -p "$_rs_backup" "$_rs_keep" 2>/dev/null && chmod 0600 "$_rs_keep" 2>/dev/null
+		logger -t honk "rollback incomplete: hash=$_rs_now managed=$_rs_flag ready=$_rs_ready backup=$_rs_keep"
 	fi
 }
 
@@ -1314,13 +1318,16 @@ write_system_config() {
 	work=$(mktemp -d /tmp/honk-syssave.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
 	trap 'rm -rf "$work"; honk_lock_release >/dev/null 2>&1' 0
 	cp -p "$sys" "$work/orig-system.dae" || { echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
-	# include 里的其它文件也要带上，校验的才是真正会跑的那份
-	for cfg_part in /etc/honk/*.dae; do
-		[ -f "$cfg_part" ] && [ "$cfg_part" != "$sys" ] && cp -p "$cfg_part" "$work/"
+	# 整棵树带过来，include 到子目录时才校验得到实际生效的那份
+	(cd /etc/honk && find . -path ./state -prune -o -type f -print) | while IFS= read -r rel; do
+		[ "$rel" = ./system.dae ] && continue
+		mkdir -p "$work/${rel%/*}" 2>/dev/null
+		cp -p "/etc/honk/$rel" "$work/$rel" 2>/dev/null
 	done
 	cp "$candidate" "$work/system.dae" || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
 	# 主配置没 include system.dae 时，保存成功也不会生效，直接拒绝。
 	[ -n "$(config_includes_system "$work/config.dae")" ] || { echo '{"ok":false,"message":"system_config_not_included"}'; return 1; }
+	[ "$(config_owner "$work/config.dae")" != unknown ] || { echo '{"ok":false,"message":"config_layout_unsupported"}'; return 1; }
 	"$HONK_CORE" config validate --config "$work/config.dae" >/dev/null 2>&1 || { echo '{"ok":false,"message":"config_invalid"}'; return 1; }
 
 	system_written_hash=$(sha256sum "$sys" | awk '{print $1}')
@@ -1334,8 +1341,8 @@ write_system_config() {
 	managed_core_pid >/dev/null 2>&1 && was_running=1
 	mv -f "$pending" "$sys" || { rm -f "$pending"; echo '{"ok":false,"message":"system_config_write_failed"}'; return 1; }
 	uci set honk.main.system_managed=0 && uci commit honk || {
-		cp -p "$work/orig-system.dae" "$sys"
-		echo '{"ok":false,"message":"settings_commit_failed_rolled_back"}'; return 1
+		system_rollback "$sys" "$work/orig-system.dae" "$system_written_hash" "$old_managed" "$was_running"
+		printf '{"ok":false,"message":"settings_commit_failed_%s"}\n' "$(system_rollback_state)"; return 1
 	}
 
 	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 30 >/dev/null 2>&1; then
@@ -1356,6 +1363,7 @@ panel_managed_system() {
 		json_load "$request" 2>/dev/null || { echo '{"ok":false,"message":"invalid_request"}'; return 1; }
 		json_get_var dry_run dry_run
 		json_get_var expect expect
+		json_get_var base_hash base
 	fi
 	case "$dry_run" in 1|true) dry_run=1 ;; *) dry_run=0 ;; esac
 	load_settings
@@ -1376,18 +1384,23 @@ panel_managed_system() {
 		json_add_boolean ok 1
 		json_add_string message preview
 		json_add_string sha256 "$preview_hash"
+		json_add_string base "$(sha256sum /etc/honk/system.dae 2>/dev/null | awk '{print $1}')"
 		json_add_string content "$(cat "$preview")"
 		json_dump
 		return 0
 	fi
-	[ -z "$expect" ] || [ "$expect" = "$preview_hash" ] || { echo '{"ok":false,"message":"preview_changed"}'; return 1; }
+	# 执行必须带预览哈希：没有它就没法保证用户确认的和写进去的是同一份。
+	[ -n "$expect" ] || { echo '{"ok":false,"message":"preview_required"}'; return 1; }
+	[ "$expect" = "$preview_hash" ] || { echo '{"ok":false,"message":"preview_changed"}'; return 1; }
 
 	honk_lock_acquire || { echo '{"ok":false,"message":"operation_in_progress"}'; return 1; }
 	trap 'rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
 	work=$(mktemp -d /tmp/honk-managedbak.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
 	trap 'rm -rf "$work"; rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
-	cp -p /etc/honk/system.dae "$work/orig-system.dae" || { echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
 	orig_hash=$(sha256sum /etc/honk/system.dae | awk '{print $1}')
+	# 预览之后用户又改过文件就不覆盖
+	[ -z "$base_hash" ] || [ "$base_hash" = "$orig_hash" ] || { echo '{"ok":false,"message":"system_config_changed"}'; return 1; }
+	cp -p /etc/honk/system.dae "$work/orig-system.dae" || { echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
 	old_managed=$(uci -q get honk.main.system_managed); [ -n "$old_managed" ] || old_managed=1
 	was_running=0
 	managed_core_pid >/dev/null 2>&1 && was_running=1
