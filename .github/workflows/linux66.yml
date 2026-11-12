@@ -53,8 +53,7 @@ jobs:
           [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cannot resolve $CORE_BRANCH"; exit 1; }
           if [ "$head" = "$CORE_COMMIT" ]; then
             echo "Pin already at $head."
-            # 上游没动但 luci-app-honk 或打包改过时，手工勾 force 重出一次；
-            # 否则只改 LuCI 的修复永远进不了 24.10 的 Release。
+            # 只改 LuCI 时上游 pin 不动，勾 force 才能重出。
             if [ "${{ inputs.force }}" = "true" ]; then
               echo "Force rebuild requested, keeping changed=true."
               exit 0
@@ -262,7 +261,7 @@ jobs:
           test "$(find dist -name '*.ipk' | wc -l)" -ge 8
           ( cd dist && sha256sum ./* > SHA256SUMS )
 
-          # 和稳定版同一种表格：一个架构一行，包名本身就是下载链接，用户不用自己对包名。
+          # 表格里的包名带下载链接，用户不用自己对包名。
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag"
           luci="$(ls dist/luci-app-honk_*_all.ipk | head -n 1)"
           {

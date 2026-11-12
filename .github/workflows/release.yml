@@ -559,7 +559,7 @@ jobs:
           tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
           # main 可能已经推进过：上一次只差打标签，或有人直接往 main 推了提交。
           # 只要它正好是候选提交（或还是 base）就只补缺的那部分，候选提交没变，发布内容不变。
-          # main 在构建期间只进了 CI 提交也算正常：包内容没变，发的就是候选提交那份。
+          # 构建期间只多了 CI 提交时包内容没变，照发。
           case "$remote_sha" in
             "$CANDIDATE_SHA" | "$base") ;;
             *)
