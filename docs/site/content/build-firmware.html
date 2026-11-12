@@ -1,6 +1,6 @@
 <h1>自行编译固件</h1>
 
-<p>自己编固件时，honk 要的两个东西最容易漏：内核选项和依赖模块。这一页把它们列全，照着勾就能编译通过、开机就能起。</p>
+<p>自己编译只要两件事：<b>内核开 <code>DEBUG_INFO_BTF</code></b>，<b>包选进固件一起编</b>。这样出来就是完整的，不用再装 BTF 补丁包，也没有 kmod 版本对不上的问题。</p>
 
 <h2 id="lane">先选通道</h2>
 
@@ -10,37 +10,25 @@
   <tr><td>OpenWrt / ImmortalWrt 24.10</td><td>Linux 6.6 实验通道，<code>.ipk</code></td><td>Linux 6.6.40+</td></tr>
 </table>
 
-<p>两条通道的包不通用，配置备份也不能互导。</p>
+<h2 id="steps">三步</h2>
 
-<h2 id="feeds">把包编进固件</h2>
-
-<p>别「先编固件、再装 ipk」。把包选进 menuconfig 一起编，kmod 依赖会自动带上，和目标内核同源，永远不会出现「源里没有你这版内核的 kmod」。</p>
-
-<pre><code># feeds.conf.default
+<pre><code># 1. feeds.conf.default 加两行
 src-git honk https://github.com/kenzok8/openwrt-honk
-src-git small https://github.com/kenzok8/small              # v2ray-geoip / v2ray-geosite
-src-git vmlinux-btf https://github.com/kenzok8/vmlinux-btf  # 内核没开 BTF 时才需要
+src-git small https://github.com/kenzok8/small     # 提供 v2ray-geoip / v2ray-geosite
 
 ./scripts/feeds update -a
 ./scripts/feeds install -a -p honk
 ./scripts/feeds install -a -p small
-./scripts/feeds install -a -p vmlinux-btf
 
-make menuconfig
+# 2. make menuconfig
 #   Network → Web Servers/Proxies → honk
-#   LuCI → Applications → luci-app-honk</code></pre>
+#   LuCI → Applications → luci-app-honk
+#   Kernel → 打开 CONFIG_DEBUG_INFO_BTF（关键，见下）
 
-<p>honk 与 luci-app-honk 都用 <code>PKG_SOURCE</code> 下载预编译好的核心与 Doona 归档，<b>编译固件不需要 Rust、Zig、Node 工具链</b>，只要能访问 GitHub Releases。</p>
+# 3. 编译
+make -j$(nproc)</code></pre>
 
-<h3 id="deps-source">依赖谁来提供</h3>
-
-<table>
-  <tr><th>依赖</th><th>来源</th><th>选 honk 时自动带上</th></tr>
-  <tr><td><code>kmod-sched-core</code> · <code>kmod-sched-bpf</code> · <code>kmod-veth</code> · <code>kmod-nft-queue</code></td><td>OpenWrt 树内</td><td>会，写在 honk 的 DEPENDS 里</td></tr>
-  <tr><td><code>ip-full</code> · <code>sqlite3-cli</code> · <code>coreutils-stat</code> · <code>ubus</code> · <code>jshn</code> · <code>usign</code> · <code>ca-bundle</code> · <code>jsonfilter</code></td><td>OpenWrt 树内</td><td>会</td></tr>
-  <tr><td><code>v2ray-geoip</code> · <code>v2ray-geosite</code></td><td><code>kenzok8/small</code> 的 <code>v2ray-geodata</code>（<code>kenzok8/wall</code> 也有）</td><td>不会，要加 feeds</td></tr>
-  <tr><td><code>vmlinux-btf</code></td><td><code>kenzok8/vmlinux-btf</code></td><td>不会，有意不设成依赖；内核开 <code>DEBUG_INFO_BTF</code> 则不需要</td></tr>
-</table>
+<p>honk 与 luci-app-honk 都用 <code>PKG_SOURCE</code> 下载预编译好的核心与 Doona 归档，<b>不需要 Rust、Zig、Node 工具链</b>，只要能访问 GitHub Releases。</p>
 
 <h2 id="kernel-config">内核选项</h2>
 
@@ -63,17 +51,27 @@ CONFIG_NFT_CT=y|m
 CONFIG_NFT_QUEUE=y|m
 CONFIG_NETFILTER_NETLINK_QUEUE=y|m</code></pre>
 
-<p>这两项决定能不能少装一个补丁包：</p>
+<p>这两项决定体验上限：</p>
 
-<pre><code>CONFIG_DEBUG_INFO_BTF=y      # 内核自带 BTF，不用再装 vmlinux-btf
+<pre><code>CONFIG_DEBUG_INFO_BTF=y      # 必须。省掉后面装 BTF 补丁包的所有麻烦
 CONFIG_FUNCTION_TRACER=y
 CONFIG_DYNAMIC_FTRACE=y      # 想要「原生 UDP 接收追踪」</code></pre>
 
 <blockquote>cgroup v2 与 <code>CONFIG_CGROUP_BPF</code> 是硬性要求。根 cgroup 的 <code>sock_ops</code> 槽位被旧程序占用也会导致启动失败。</blockquote>
 
-<h2 id="userspace">用户态依赖</h2>
+<h2 id="deps-source">依赖谁来提供</h2>
 
-<p>选进固件即可，不用手工装：<code>ca-bundle</code>、<code>ip-full</code>、<code>ubus</code>、<code>jsonfilter</code>、<code>jshn</code>、<code>sqlite3-cli</code>、<code>usign</code>、<code>coreutils-stat</code>、<code>v2ray-geoip</code>、<code>v2ray-geosite</code>，以及 <code>kmod-sched-core</code>、<code>kmod-sched-bpf</code>、<code>kmod-veth</code>、<code>kmod-nft-queue</code>。</p>
+<table>
+  <tr><th>依赖</th><th>来源</th><th>选 honk 时自动带上</th></tr>
+  <tr><td><code>kmod-sched-core</code> · <code>kmod-sched-bpf</code> · <code>kmod-veth</code> · <code>kmod-nft-queue</code></td><td>OpenWrt 树内</td><td>会，写在 honk 的 DEPENDS 里</td></tr>
+  <tr><td><code>ip-full</code> · <code>sqlite3-cli</code> · <code>coreutils-stat</code> · <code>ubus</code> · <code>jshn</code> · <code>usign</code> · <code>ca-bundle</code> · <code>jsonfilter</code></td><td>OpenWrt 树内</td><td>会</td></tr>
+  <tr><td><code>v2ray-geoip</code> · <code>v2ray-geosite</code></td><td><code>kenzok8/small</code> 的 <code>v2ray-geodata</code>（<code>kenzok8/wall</code> 也有）</td><td>不会，要加 feeds</td></tr>
+  <tr><td><code>vmlinux-btf</code></td><td>—</td><td>编译路径不需要，见下</td></tr>
+</table>
+
+<h3 id="why-no-vmlinux-btf">为什么编译时不用碰 vmlinux-btf</h3>
+
+<p><code>vmlinux-btf</code> 解决的是「固件已经刷好、内核没开 BTF」的情况，靠一个按内核版本编的包补上 BTF 文件。你自己编固件时把 <code>DEBUG_INFO_BTF</code> 打开，BTF 直接来自内核本身，这个包的存在就没意义了，也就不用追着内核版本找包。</p>
 
 <h2 id="pitfalls">编译时常见的坑</h2>
 
@@ -81,14 +79,14 @@ CONFIG_DYNAMIC_FTRACE=y      # 想要「原生 UDP 接收追踪」</code></pre>
   <tr><th>现象</th><th>原因与处理</th></tr>
   <tr><td><code>Makefile:N: /package.mk: No such file or directory</code></td><td><code>$(INCLUDE_DIR)</code> 为空，源码树被改过或在子目录里直接 make。在顶层目录重跑，必要时 <code>make distclean</code></td></tr>
   <tr><td><code>package/kernel/bpf-headers failed to build</code></td><td>这个包由 dae/daed 一类 eBPF 包带进来，honk 不依赖它；同树里去掉那些包就能过</td></tr>
-  <tr><td><code>unable to select packages: kmod-xxx</code></td><td>装包时报的，说明你的源里没有匹配当前内核的 kmod。编固件时选进去就不会遇到</td></tr>
+  <tr><td><code>unable to select packages: kmod-xxx</code></td><td>装包时报的，说明源里没有匹配当前内核的 kmod。编固件时选进去就不会遇到</td></tr>
   <tr><td>用 ImageBuilder 出的固件装 kmod 失败</td><td>ImageBuilder 不重编内核，kmod 只能拿官方源里的，内核一换就对不上</td></tr>
 </table>
 
 <h2 id="verify">编完开机先验三行</h2>
 
 <pre><code>uname -r                                        # 6.12+ 或 6.6.40+
-ls -l /sys/kernel/btf/vmlinux                   # 有 BTF 就不用装补丁包
+ls -l /sys/kernel/btf/vmlinux                   # 有，说明 DEBUG_INFO_BTF 生效
 lsmod | grep -E "sch_ingress|cls_bpf|veth|nft_queue"</code></pre>
 
 <p>三条都对，再到 LuCI「服务 → Honk → 维护 → 系统检查」过一遍，全部通过就能启动。</p>
