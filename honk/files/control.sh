@@ -301,7 +301,7 @@ preflight() {
 	load_settings
 	[ "$enabled" = 1 ] && [ "$initialized" = 1 ] || { fail "请先在 LuCI 里启用并完成初始化"; return 1; }
 	# 只有 system.dae 负责这些字段时才检查 UCI 端口与网络；完整配置自行定义时不碰。
-	if [ "$settings_owner" = system ]; then
+	if [ "$settings_owner" = system ] && system_is_managed; then
 		maintenance_start_guard && check_config && check_network && check_kernel && no_honk_resources && check_conflicts && check_port && {
 			[ "$clash_api_enabled" = 0 ] || check_port "$clash_api_port"
 		}
@@ -423,7 +423,14 @@ render_runtime_system() {
 	printf "}\n"
 }
 
+# 自管模式下 system.dae 归用户，面板一处都不改。
+system_is_managed() {
+	_managed=$(uci -q get honk.main.system_managed)
+	[ -z "$_managed" ] || [ "$_managed" = 1 ]
+}
+
 write_runtime_system() {
+	system_is_managed || { fail "当前为自管模式，面板不改写 system.dae"; return 1; }
 	lan_device=$1
 	lan_ip=$2
 	system_port=${3:-$listen_port}
@@ -485,6 +492,7 @@ settings() {
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
 	load_settings
 	[ "$settings_owner" = system ] || { echo '{"ok":false,"message":"config_settings_owned_by_file"}'; return 1; }
+	system_is_managed || { echo '{"ok":false,"message":"system_config_self_managed"}'; return 1; }
 	. /usr/share/libubox/jshn.sh || { echo '{"ok":false,"message":"jshn_unavailable"}'; return 1; }
 	# Bound stdin to 64KiB (DoS protection); read one extra byte to detect truncation.
 	settings_json=$(head -c 65537)
@@ -919,7 +927,7 @@ clash_system_matches() {
 repair() {
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
 	load_settings
-	if [ "$settings_owner" != system ]; then
+	if [ "$settings_owner" != system ] || ! system_is_managed; then
 		check_config && { echo '{"ok":true,"message":"config_valid"}'; return 0; }
 		echo '{"ok":false,"message":"config_invalid"}'
 		return 1
@@ -1110,6 +1118,7 @@ initialize_preflight() {
 
 initialize() {
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
+	system_is_managed || { echo '{"ok":false,"message":"system_config_self_managed"}'; return 1; }
 	. /usr/share/libubox/jshn.sh || return 1
 	initialize_preflight read_credentials || return 1
 	honk_lock_acquire || { echo '{"ok":false,"message":"operation_in_progress"}'; return 1; }
@@ -1244,6 +1253,107 @@ recover() {
 	echo '{"ok":true,"message":"transaction_recovered"}'
 }
 
+# 自管模式：候选 system.dae 从 stdin 进来，校验的是新文件组成的完整配置。
+write_system_config() {
+	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
+	sys=/etc/honk/system.dae
+	[ -f "$sys" ] && [ ! -L "$sys" ] || { echo '{"ok":false,"message":"system_config_unavailable"}'; return 1; }
+	candidate=$1
+	[ -f "$candidate" ] && [ ! -L "$candidate" ] || { echo '{"ok":false,"message":"system_config_unavailable"}'; return 1; }
+	[ "$(wc -c < "$candidate" 2>/dev/null)" -le 262144 ] 2>/dev/null || { echo '{"ok":false,"message":"content_too_large"}'; return 1; }
+	[ -s "$candidate" ] || { echo '{"ok":false,"message":"content_empty"}'; return 1; }
+
+	honk_lock_acquire || { echo '{"ok":false,"message":"operation_in_progress"}'; return 1; }
+	trap 'honk_lock_release >/dev/null 2>&1' 0
+
+	umask 077
+	work=$(mktemp -d /tmp/honk-syssave.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
+	trap 'rm -rf "$work"; honk_lock_release >/dev/null 2>&1' 0
+	cp -p "$sys" "$work/orig-system.dae" || { echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
+	# include 里的其它文件也要带上，校验的才是真正会跑的那份
+	for cfg_part in /etc/honk/*.dae; do
+		[ -f "$cfg_part" ] && [ "$cfg_part" != "$sys" ] && cp -p "$cfg_part" "$work/"
+	done
+	cp "$candidate" "$work/system.dae" || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
+	"$HONK_CORE" config validate --config "$work/config.dae" >/dev/null 2>&1 || { echo '{"ok":false,"message":"config_invalid"}'; return 1; }
+
+	system_written_hash=$(sha256sum "$sys" | awk '{print $1}')
+	pending=$(mktemp /etc/honk/.system.dae.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
+	cp "$candidate" "$pending" && chmod 0600 "$pending" || { rm -f "$pending"; echo '{"ok":false,"message":"system_config_write_failed"}'; return 1; }
+	[ "$(sha256sum "$sys" | awk '{print $1}')" = "$system_written_hash" ] || { rm -f "$pending"; echo '{"ok":false,"message":"system_config_changed"}'; return 1; }
+
+	old_managed=$(uci -q get honk.main.system_managed)
+	[ -n "$old_managed" ] || old_managed=1
+	was_running=0
+	managed_core_pid >/dev/null 2>&1 && was_running=1
+	mv -f "$pending" "$sys" || { rm -f "$pending"; echo '{"ok":false,"message":"system_config_write_failed"}'; return 1; }
+	uci set honk.main.system_managed=0 && uci commit honk || {
+		cp -p "$work/orig-system.dae" "$sys"
+		echo '{"ok":false,"message":"settings_commit_failed_rolled_back"}'; return 1
+	}
+
+	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 30 >/dev/null 2>&1; then
+		cp -p "$work/orig-system.dae" "$sys"
+		uci set honk.main.system_managed="$old_managed" && uci commit honk
+		honk_lifecycle_start 30 >/dev/null 2>&1 || :
+		echo '{"ok":false,"message":"system_config_start_failed_rolled_back"}'; return 1
+	fi
+	echo '{"ok":true,"message":"system_config_saved"}'
+}
+
+# 切回面板管理：dry_run 只回将要生成的内容，确认后再替换。
+panel_managed_system() {
+	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then echo '{"ok":false,"message":"update_recovery_required"}'; return 1; fi
+	. /usr/share/libubox/jshn.sh || { echo '{"ok":false,"message":"jshn_unavailable"}'; return 1; }
+	request=$(head -c 4096)
+	dry_run=0
+	if [ -n "$request" ]; then
+		json_load "$request" 2>/dev/null || { echo '{"ok":false,"message":"invalid_request"}'; return 1; }
+		json_get_var dry_run dry_run
+	fi
+	case "$dry_run" in 1|true) dry_run=1 ;; *) dry_run=0 ;; esac
+	load_settings
+	system_is_managed && { echo '{"ok":false,"message":"already_panel_managed"}'; return 1; }
+	[ "$initialized" = 1 ] || { echo '{"ok":false,"message":"not_initialized"}'; return 1; }
+	check_network || { echo '{"ok":false,"message":"lan_network_unavailable"}'; return 1; }
+	network_settings || { echo '{"ok":false,"message":"lan_ipv4_unavailable"}'; return 1; }
+
+	umask 077
+	preview=$(mktemp /tmp/honk-managed.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
+	trap 'rm -f "$preview"' 0
+	render_runtime_system "$lan_device" "$lan_ip" "$listen_port" > "$preview" || { echo '{"ok":false,"message":"system_config_write_failed"}'; return 1; }
+
+	if [ "$dry_run" = 1 ]; then
+		json_init
+		json_add_boolean ok 1
+		json_add_string message preview
+		json_add_string content "$(cat "$preview")"
+		json_dump
+		return 0
+	fi
+
+	honk_lock_acquire || { echo '{"ok":false,"message":"operation_in_progress"}'; return 1; }
+	trap 'rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
+	work=$(mktemp -d /tmp/honk-managedbak.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
+	trap 'rm -rf "$work"; rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
+	cp -p /etc/honk/system.dae "$work/orig-system.dae" || { echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
+	was_running=0
+	managed_core_pid >/dev/null 2>&1 && was_running=1
+	mv -f "$preview" /etc/honk/system.dae || { echo '{"ok":false,"message":"system_config_write_failed"}'; return 1; }
+	chmod 0600 /etc/honk/system.dae
+	uci set honk.main.system_managed=1 && uci commit honk || {
+		cp -p "$work/orig-system.dae" /etc/honk/system.dae
+		echo '{"ok":false,"message":"settings_commit_failed_rolled_back"}'; return 1
+	}
+	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 30 >/dev/null 2>&1; then
+		cp -p "$work/orig-system.dae" /etc/honk/system.dae
+		uci set honk.main.system_managed=0 && uci commit honk
+		honk_lifecycle_start 30 >/dev/null 2>&1 || :
+		echo '{"ok":false,"message":"system_config_start_failed_rolled_back"}'; return 1
+	fi
+	echo '{"ok":true,"message":"panel_managed_restored"}'
+}
+
 case "$1" in
 	check)
 		preflight
@@ -1270,11 +1380,17 @@ case "$1" in
 	detach)
 		detach
 		;;
+	write-system)
+		write_system_config "$2"
+		;;
+	panel-managed)
+		panel_managed_system
+		;;
 	recover)
 		recover
 		;;
 	*)
-		echo "usage: $0 {check|diagnose|preflight|local-direct|initialize|settings|repair|detach|recover}" >&2
+		echo "usage: $0 {check|diagnose|preflight|local-direct|initialize|settings|repair|detach|recover|write-system|panel-managed}" >&2
 		exit 2
 		;;
 esac

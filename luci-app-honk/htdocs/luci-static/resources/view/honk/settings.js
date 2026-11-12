@@ -21,6 +21,65 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
+function systemConfigCard() {
+	const textarea = E('textarea', {
+		'class': 'cbi-input-text', 'rows': 18, 'spellcheck': 'false',
+		'style': 'width:100%;font-family:monospace'
+	});
+	const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
+	const saveBtn = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, _('保存并校验'));
+	const preview = E('pre', { 'class': 'honk-note', 'style': 'white-space:pre-wrap;display:none' }, '');
+	const backBtn = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('切回面板管理'));
+
+	honk.systemRead().then(function(result) {
+		textarea.value = (result && result.content) || '';
+	}).catch(function(error) {
+		message.textContent = honk.errorMessage(error, _('无法读取 system.dae'));
+	});
+
+	saveBtn.addEventListener('click', function() {
+		saveBtn.disabled = true;
+		message.textContent = _('校验并写入…');
+		honk.systemSave(textarea.value).then(honk.ensureOk).then(function(result) {
+			message.textContent = honk.resultMessage(result, _('已保存，面板不再改写 system.dae'));
+			window.setTimeout(function() { location.reload(); }, 1200);
+		}).catch(function(error) {
+			message.textContent = honk.errorMessage(error, _('保存失败，已回滚'));
+		}).finally(function() { saveBtn.disabled = false; });
+	});
+
+	let previewed = false;
+	backBtn.addEventListener('click', function() {
+		backBtn.disabled = true;
+		if (!previewed) {
+			honk.systemPanel(true).then(honk.ensureOk).then(function(result) {
+				preview.textContent = (result && result.content) || '';
+				preview.style.display = '';
+				previewed = true;
+				message.textContent = _('上面是面板将生成的 system.dae，确认后再次点击替换。');
+			}).catch(function(error) {
+				message.textContent = honk.errorMessage(error, _('无法生成面板配置'));
+			}).finally(function() { backBtn.disabled = false; });
+			return;
+		}
+		honk.systemPanel(false).then(honk.ensureOk).then(function() {
+			message.textContent = _('已交回面板管理');
+			window.setTimeout(function() { location.reload(); }, 1200);
+		}).catch(function(error) {
+			message.textContent = honk.errorMessage(error, _('切回失败，已回滚'));
+		}).finally(function() { backBtn.disabled = false; });
+	});
+
+	return E('div', { 'class': 'honk-card' }, [
+		E('h3', { 'class': 'honk-card-title' }, _('system.dae（直接编辑）')),
+		E('p', { 'class': 'honk-note' }, _('保存后面板不再改写这个文件，LAN、端口和 Clash API 也在文件里设置。写坏配置会在启动失败时自动回滚。')),
+		textarea,
+		E('div', { 'class': 'cbi-page-actions' }, [ saveBtn, backBtn ]),
+		preview,
+		message
+	]);
+}
+
 function field(label, control, help) {
 	const controlId = control.id || (control.querySelector && control.querySelector('input, select, textarea') || {}).id;
 	const cell = E('div', { 'class': 'cbi-value-field' }, [ control ]);
@@ -96,6 +155,11 @@ return view.extend({
 		section.appendChild(field(_('Clash API port'), clashPortInput));
 		section.appendChild(field(_('Clash API secret'), clashSecretInput));
 		section.appendChild(E('p', { 'class': 'honk-note' }, data.status && data.status.clash_api_secret_set ? _('A secret is set. Leave blank to keep it. Use your existing HTTPS reverse proxy for external access.') : _('A secret is required when enabling Clash API. Use 6–128 letters, numbers, dots, underscores or hyphens.')));
+		/* 自管时面板设置不再生效，隐藏表单只留编辑器。 */
+		const selfManaged = !!(data.status && data.status.system_managed === false);
+		if (selfManaged) {
+			section.style.display = 'none';
+		}
 		section.appendChild(E('div', { 'class': 'cbi-page-actions' }, save));
 		section.appendChild(message);
 		section.addEventListener('submit', function(ev) {
@@ -141,6 +205,19 @@ return view.extend({
 			E('p', { 'class': 'honk-header-sub' }, _('Network interface, listen port and boot behaviour for the Honk service.'))
 		]));
 		page.appendChild(section);
+		if (selfManaged) {
+			page.appendChild(systemConfigCard());
+		} else {
+			const advanced = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('高级：直接编辑 system.dae'));
+			advanced.addEventListener('click', function() {
+				page.replaceChild(systemConfigCard(), section);
+				advanced.remove();
+			});
+			page.appendChild(E('div', { 'class': 'honk-card' }, [
+				E('p', { 'class': 'honk-note' }, _('改为自管后会停止面板生成 system.dae，保存即生效。')),
+				E('div', { 'class': 'cbi-page-actions' }, advanced)
+			]));
+		}
 		return page;
 	}
 });

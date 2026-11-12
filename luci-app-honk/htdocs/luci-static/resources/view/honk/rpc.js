@@ -67,6 +67,18 @@ const callConfigDraftRead = rpc.declare({
 const callLanCandidates = rpc.declare({ object: 'honk', method: 'lan_candidates', expect: { '': {} } });
 const callConfigValidate = rpc.declare({ object: 'honk', method: 'config_validate', params: [ 'content' ], expect: { '': {} } });
 const callConfigSave = rpc.declare({ object: 'honk', method: 'config_save', params: [ 'content' ], expect: { '': {} } });
+const callSystemRead = rpc.declare({
+	object: 'honk', method: 'system_read', expect: { }
+});
+
+const callSystemSave = rpc.declare({
+	object: 'honk', method: 'system_save', params: [ 'content' ], expect: { }
+});
+
+const callSystemPanel = rpc.declare({
+	object: 'honk', method: 'system_panel', params: [ 'dry_run' ], expect: { }
+});
+
 const callConfigApply = rpc.declare({ object: 'honk', method: 'config_apply', expect: { '': {} } });
 const callConfigDetach = rpc.declare({ object: 'honk', method: 'config_detach', params: [ 'dry_run' ], expect: { '': {} } });
 const callRepair = rpc.declare({ object: 'honk', method: 'repair', expect: { '': {} } });
@@ -565,6 +577,9 @@ return baseclass.extend({
 	lanCandidates: callLanCandidates,
 	configValidate: callConfigValidate,
 	configSave: callConfigSave,
+	systemRead: callSystemRead,
+	systemSave: callSystemSave,
+	systemPanel: callSystemPanel,
 	configApply: callConfigApply,
 	configDetach: callConfigDetach,
 	repair: callRepair,

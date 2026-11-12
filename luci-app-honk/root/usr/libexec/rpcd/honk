@@ -158,6 +158,9 @@ status() {
 	json_add_boolean boot_enabled "$boot_enabled"
 	json_add_boolean running "$running"
 	json_add_string settings_owner "$settings_owner"
+	system_managed=$(uci -q get honk.main.system_managed)
+	[ -n "$system_managed" ] || system_managed=1
+	json_add_boolean system_managed "$system_managed"
 	json_add_boolean config_pending "$config_pending"
 	json_add_boolean draft_pending "$draft_pending"
 	json_add_boolean legacy_draft "$legacy_draft"
@@ -950,6 +953,33 @@ config_read() {
 	json_dump
 }
 
+system_save() {
+	request=$(cat)
+	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	json_get_var system_content content
+	system_bytes=$(printf '%s' "$system_content" | wc -c)
+	case "$system_bytes" in ''|*[!0-9]*) emit_result false invalid_request; return 1 ;; esac
+	[ "$system_bytes" -le "$DAE_UPLOAD_LIMIT" ] || { emit_result false content_too_large; return 1; }
+	[ "$system_bytes" -gt 0 ] || { emit_result false content_empty; return 1; }
+	umask 077
+	system_candidate=$(mktemp /tmp/honk-system-candidate.XXXXXX) || { emit_result false temporary_storage_unavailable; return 1; }
+	trap 'rm -f "$system_candidate"' 0
+	printf '%s' "$system_content" > "$system_candidate" || { emit_result false system_config_write_failed; return 1; }
+	exec "$CONTROL" write-system "$system_candidate"
+}
+
+system_read() {
+	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then emit_result false update_recovery_required; return 1; fi
+	[ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] || { emit_result false system_config_unavailable; return 1; }
+	system_content=$(cat /etc/honk/system.dae; printf '\001') || { emit_result false system_read_failed; return 1; }
+	system_content=${system_content%?}
+	json_init
+	json_add_boolean ok 1
+	json_add_string message system_config
+	json_add_string content "$system_content"
+	json_dump
+}
+
 # 只读草稿，不触发任何应用。source=legacy 时读旧 manual-config.dae（用户明确选择才调）。
 config_draft_read() {
 	request=$(cat)
@@ -1182,7 +1212,7 @@ config_apply() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_detach":{"dry_run":"Boolean"},"repair":{},"recover":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_detach":{"dry_run":"Boolean"},"system_read":{},"system_save":{"content":"String"},"system_panel":{"dry_run":"Boolean"},"repair":{},"recover":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -1233,6 +1263,15 @@ list)
 				;;
 			config_detach)
 				exec "$CONTROL" detach
+				;;
+			system_read)
+				system_read
+				;;
+			system_save)
+				system_save
+				;;
+			system_panel)
+				exec "$CONTROL" panel-managed
 				;;
 			repair)
 				exec "$CONTROL" repair

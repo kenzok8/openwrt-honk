@@ -431,7 +431,7 @@ load_uci_values() {
 	uci_show=$(uci_run -q show honk 2>/dev/null) || return 1
 	printf '%s\n' "$uci_show" | awk -F= '
 		/^honk\.main=/ { main++ ; next }
-		/^honk\.main\.(enabled|boot_enabled|initialized|config_mode|config_file|listen_port|lan_network|geoip_url|geosite_url|geo_auto|geo_auto_freq|clash_api_enabled|clash_api_port|clash_api_secret)=/ { next }
+		/^honk\.main\.(enabled|boot_enabled|initialized|config_mode|config_file|listen_port|lan_network|geoip_url|geosite_url|geo_auto|geo_auto_freq|clash_api_enabled|clash_api_port|clash_api_secret|system_managed)=/ { next }
 		/^honk\.main\./ { bad=1; next }
 		/^honk\.[A-Za-z0-9_.-]+=/ { bad=1; next }
 		END { exit (bad || main != 1) }
@@ -856,7 +856,9 @@ validate_candidate() {
 	config_tree=$candidate/etc/honk
 	mkdir -p "$temp_dir/uci-tmp" || return 1
 	load_uci_values uci "$uci_dir" || return 1
-	if [ "$(config_owner "$config_tree/config.dae")" != system ]; then
+	u_system_managed=$(get_uci system_managed 2>/dev/null || printf 1)
+	[ -n "$u_system_managed" ] || u_system_managed=1
+	if [ "$(config_owner "$config_tree/config.dae")" != system ] || [ "$u_system_managed" = 0 ]; then
 		validate_config_tree "$config_tree" '' '' "$u_port" "$u_initialized" || return 2
 		if [ "$state" = present ] || { [ "$state" = preview ] && { [ -e "$config_tree/state/honk.db" ] || [ -L "$config_tree/state/honk.db" ]; }; }; then
 			archive_sqlite_check "$config_tree/state/honk.db" || return 1
@@ -1065,7 +1067,9 @@ restore() {
 	fi
 	[ "$old_running" != 1 ] || [ "$restore_initialized" = 1 ] || { error running_service_requires_initialized_restore; return 1; }
 	[ "$(sha_of "$RESTORE")" = "$archive_hash" ] || { error restore_archive_changed; return 1; }
-	if [ "$(config_owner "$restore_stage/etc/honk/config.dae")" = system ]; then
+	restore_managed=$(get_uci system_managed 2>/dev/null || printf 1)
+	[ -n "$restore_managed" ] || restore_managed=1
+	if [ "$(config_owner "$restore_stage/etc/honk/config.dae")" = system ] && [ "$restore_managed" = 1 ]; then
 		restore_nfqueue=$(sed -n 's/^    nfqueue_enable: \(true\|false\)$/\1/p' "$restore_stage/etc/honk/system.dae" 2>/dev/null | head -n 1)
 		case "$restore_nfqueue" in true|false) ;; *) restore_nfqueue=true ;; esac
 		write_live_system "$restore_stage/etc/honk/system.dae" "$candidate_device" "$candidate_ip" "$u_port" "$restore_initialized" "$restore_nfqueue" || { error system_config_render_failed; return 1; }
@@ -1075,6 +1079,7 @@ restore() {
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.boot_enabled=$old_boot" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.initialized=$restore_initialized" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set honk.main.config_file=/etc/honk/config.dae || { error restore_profile_stage_failed; return 1; }
+	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.system_managed=$restore_managed" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" commit honk || { error restore_profile_stage_failed; return 1; }
 	load_uci_values uci "$uci_dir" || { error restore_profile_stage_failed; return 1; }
 	[ "$u_enabled:$u_boot:$u_initialized" = "$old_enabled:$old_boot:$restore_initialized" ] || { error restore_profile_stage_failed; return 1; }
@@ -1155,6 +1160,7 @@ reset_data() {
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.clash_api_enabled=0 || { error reset_profile_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.clash_api_port=9090 || { error reset_profile_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.clash_api_secret= || { error reset_profile_stage_failed; return 1; }
+	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.system_managed=1 || { error reset_profile_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" commit honk || { error reset_profile_stage_failed; return 1; }
 	load_uci_values uci "$reset_uci" || { error reset_profile_stage_failed; return 1; }
 	. /lib/functions/network.sh || { error lan_network_unavailable; return 1; }
