@@ -394,21 +394,29 @@ jobs:
             echo "::error::candidate and auto_publish cannot both be true"
             exit 1
           fi
+          version_tag=$(sh ci/release-tag.sh)
+
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           elif [ "${{ inputs.candidate }}" = true ]; then
-            echo "tag=candidate-r${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+            echo "tag=candidate-${version_tag#v}-$(printf '%s' "${{ github.sha }}" | cut -c1-12)" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ inputs.auto_publish }}" = true ]; then
-            existing_tag=$(git ls-remote --tags origin | awk -v suffix='-r${{ github.run_id }}' '$2 ~ ("^refs/tags/v.*" suffix "$") {sub("refs/tags/", "", $2); print $2}' | head -1)
-            echo "tag=${existing_tag:-v$(TZ=Asia/Shanghai date +%Y.%m.%d)-r${{ github.run_id }}}" >> "$GITHUB_OUTPUT"
+            remote_tag=$(git ls-remote --tags origin "refs/tags/$version_tag" | awk '{print $1}')
+            if [ -n "$remote_tag" ] && [ "$remote_tag" != "${{ github.sha }}" ]; then
+              echo "::error::tag $version_tag 已指向 $remote_tag，不覆盖；请先提高包版本"
+              exit 1
+            fi
+            echo "tag=$version_tag" >> "$GITHUB_OUTPUT"
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
-            # Suffix with run_id so two dispatches on the same day don't share
-            # a tag (the release action updates the release but never moves the
-            # git tag, leaving tag and release out of sync).
-            echo "tag=v$(TZ=Asia/Shanghai date +%Y.%m.%d)-r${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+            remote_tag=$(git ls-remote --tags origin "refs/tags/$version_tag" | awk '{print $1}')
+            if [ -n "$remote_tag" ] && [ "$remote_tag" != "${{ github.sha }}" ]; then
+              echo "::error::tag $version_tag 已指向 $remote_tag；重跑同一版请复用该 tag，新版本请先提高包版本"
+              exit 1
+            fi
+            echo "tag=$version_tag" >> "$GITHUB_OUTPUT"
             echo "prerelease=${{ github.event.inputs.prerelease }}" >> "$GITHUB_OUTPUT"
           fi
 

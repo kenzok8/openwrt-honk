@@ -251,15 +251,25 @@ jobs:
           set -euo pipefail
           version='${{ needs.pin.outputs.version }}'
           [ -n "$version" ] || { echo "::error::cannot read version"; exit 1; }
-          tag="linux66-${version}-r${{ github.run_id }}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           find artifacts -path '*sdk24*' -name '*.ipk' -exec cp -v {} dist/ \;
           find artifacts -path '*honk-linux66-*' -name 'honk-core-*.tar.gz' -exec cp -v {} dist/ \;
           find artifacts -path '*honk-linux66-*' -name 'generated-linux66-*' -exec cp -v {} dist/ \;
           test "$(find dist -name '*.ipk' | wc -l)" -ge 8
           ( cd dist && sha256sum ./* > SHA256SUMS )
+
+          # tag 跟包版本走，不用 run ID；同日多版由包版本自身区分。
+          honk_ver=$(ls dist/honk_*_x86_64.ipk | head -n 1 | sed 's|^.*/honk_||; s|_.*$||; s|-r[0-9]*$||')
+          luci_ver=$(ls dist/luci-app-honk_*_all.ipk | head -n 1 | sed 's|^.*/luci-app-honk_||; s|_.*$||; s|-r[0-9]*$||')
+          version=$(printf '%s\n%s\n' "$honk_ver" "$luci_ver" | sort -V | tail -n 1)
+          tag="linux66-$version"
+          remote_tag=$(git ls-remote --tags origin "refs/tags/$tag" | awk '{print $1}')
+          if [ -n "$remote_tag" ]; then
+            echo "::error::tag $tag 已存在（$remote_tag）；重跑同一版直接复用，新版本请先提高包版本"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag"
           luci="$(ls dist/luci-app-honk_*_all.ipk | head -n 1)"

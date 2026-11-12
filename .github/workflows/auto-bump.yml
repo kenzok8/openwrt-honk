@@ -264,8 +264,8 @@ jobs:
             sleep 30
           done
           [ "${result%% *}" = completed ] || { echo "::error::release run $run_id timed out"; exit 1; }
-          release_tag=$(gh release list --limit 100 --json tagName --jq ".[].tagName | select(endswith(\"-r$run_id\"))" | head -1)
-          [ -n "$release_tag" ] || { echo "::error::release for run $run_id is missing"; exit 1; }
+          release_tag=$(sh ci/release-tag.sh)
+          gh release view "$release_tag" >/dev/null 2>&1 || { echo "::error::release $release_tag is missing"; exit 1; }
           git -c credential.helper='!gh auth git-credential' push origin --delete "$STAGING" || true
 
           {
