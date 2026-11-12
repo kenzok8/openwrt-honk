@@ -44,7 +44,7 @@ function systemConfigCard(selfManaged) {
 			message.textContent = honk.resultMessage(result, _('已保存，面板不再改写 system.dae'));
 			window.setTimeout(function() { location.reload(); }, 1200);
 		}).catch(function(error) {
-			message.textContent = honk.errorMessage(error, _('保存失败，已回滚'));
+			message.textContent = honk.errorMessage(error, _('保存失败，请查看系统状态'));
 		}).finally(function() { saveBtn.disabled = false; });
 	});
 
@@ -70,7 +70,7 @@ function systemConfigCard(selfManaged) {
 			message.textContent = _('已交回面板管理');
 			window.setTimeout(function() { location.reload(); }, 1200);
 		}).catch(function(error) {
-			message.textContent = honk.errorMessage(error, _('切回失败，已回滚'));
+			message.textContent = honk.errorMessage(error, _('切回失败，请查看系统状态'));
 		}).finally(function() { backBtn.disabled = false; });
 	});
 
