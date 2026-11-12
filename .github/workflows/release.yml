@@ -559,9 +559,18 @@ jobs:
           tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
           # main 可能已经推进过：上一次只差打标签，或有人直接往 main 推了提交。
           # 只要它正好是候选提交（或还是 base）就只补缺的那部分，候选提交没变，发布内容不变。
+          # main 在构建期间只进了 CI 提交也算正常：包内容没变，发的就是候选提交那份。
           case "$remote_sha" in
             "$CANDIDATE_SHA" | "$base") ;;
-            *) echo "::error::main 已变动：main=${remote_sha}，期望 ${base}" ; exit 1 ;;
+            *)
+              git fetch --quiet origin "$remote_sha" 2>/dev/null || { echo "::error::main 已变动：main=${remote_sha}，期望 ${base}" ; exit 1; }
+              if git merge-base --is-ancestor "$CANDIDATE_SHA" "$remote_sha" &&
+                 git diff --quiet "$CANDIDATE_SHA" "$remote_sha" -- honk luci-app-honk ci/pins.env ci/pins-linux66.env; then
+                echo "main 之后只多了非包内容的提交（${remote_sha}），按候选提交发布"
+              else
+                echo "::error::main 已变动：main=${remote_sha}，期望 ${base}" ; exit 1
+              fi
+              ;;
           esac
           if [ -n "$tag_sha" ] && [ "$tag_sha" != "$CANDIDATE_SHA" ]; then
             echo "::error::标签 ${TAG} 已指向 ${tag_sha}，不是本次候选提交"
@@ -576,7 +585,7 @@ jobs:
           if [ -z "$tag_sha" ]; then
             git tag "$TAG" "$CANDIDATE_SHA"
           fi
-          if [ "$remote_sha" = "$CANDIDATE_SHA" ]; then
+          if [ "$remote_sha" != "$base" ]; then
             refs="refs/tags/$TAG:refs/tags/$TAG"
           elif [ -n "$tag_sha" ]; then
             refs="$CANDIDATE_SHA:refs/heads/main"
