@@ -45,7 +45,6 @@ elif command -v opkg >/dev/null 2>&1; then
 			END { if (installed) print version }
 		')
 	fi
-	# 索引缓存直接读：opkg 命令在刷索引时会抢锁，抢不到就报不出最新版。
 	latest=$(
 		for _list in /var/opkg-lists/*; do
 			[ "${_list%.sig}" = "$_list" ] || continue

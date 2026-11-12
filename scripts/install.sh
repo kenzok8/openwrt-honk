@@ -295,7 +295,6 @@ main() {
 
 	echo "安装 honk、luci-app-honk 及所需依赖包"
 	install_rc=0
-	# 依赖只能从设备自己的源解析，全新设备不刷索引会整片 unresolved。
 	if [ "$PM" = apk ]; then
 		apk update >/dev/null 2>&1 || echo "apk update 失败，依赖可能解析不到。" >&2
 	else

@@ -261,7 +261,6 @@ jobs:
           test "$(find dist -name '*.ipk' | wc -l)" -ge 8
           ( cd dist && sha256sum ./* > SHA256SUMS )
 
-          # 表格里的包名带下载链接，用户不用自己对包名。
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag"
           luci="$(ls dist/luci-app-honk_*_all.ipk | head -n 1)"
           {
