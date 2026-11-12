@@ -10,23 +10,48 @@
     {
       "group": "开始使用",
       "items": [
-        { "page": "index.html", "title": "概览" },
-        { "page": "install.html", "title": "安装与升级" },
-        { "page": "kernel.html", "title": "内核与 BTF" }
+        {
+          "page": "index.html",
+          "title": "概览"
+        },
+        {
+          "page": "install.html",
+          "title": "安装与升级"
+        },
+        {
+          "page": "kernel.html",
+          "title": "内核与 BTF"
+        },
+        {
+          "page": "build-firmware.html",
+          "title": "自行编译固件"
+        }
       ]
     },
     {
       "group": "日常使用",
       "items": [
-        { "page": "config.html", "title": "初始化与配置" }
+        {
+          "page": "config.html",
+          "title": "初始化与配置"
+        }
       ]
     },
     {
       "group": "参考",
       "items": [
-        { "page": "security.html", "title": "安全与权限" },
-        { "page": "troubleshooting.html", "title": "常见问题" },
-        { "page": "development.html", "title": "构建与发布" }
+        {
+          "page": "security.html",
+          "title": "安全与权限"
+        },
+        {
+          "page": "troubleshooting.html",
+          "title": "常见问题"
+        },
+        {
+          "page": "development.html",
+          "title": "构建与发布"
+        }
       ]
     }
   ]

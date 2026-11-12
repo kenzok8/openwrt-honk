@@ -45,6 +45,7 @@
 
 - 稳定版核心要求 **Linux 6.12+**，目前公开安装入口对应 **OpenWrt / ImmortalWrt 25.12**；安装脚本会先检查内核。
 - 稳定版提供 `.apk`（25.12 / 内核 6.12+）。**24.10** 走 Linux 6.6 实验通道，提供 `.ipk`，内核要求 6.6.40+，安装方式见下。
+- 自己编固件的话，内核选项、依赖模块和常见的编译报错都写在[自行编译固件](https://kenzok8.github.io/openwrt-honk/build-firmware.html)。
 
 ### Linux 6.6 实验兼容通道
 
