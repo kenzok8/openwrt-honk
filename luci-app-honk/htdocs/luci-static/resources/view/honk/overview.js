@@ -238,7 +238,7 @@ return view.extend({
 			card.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Service settings')));
 			/* 字段归属由当前配置决定，非 system.dae 提供时这些设置只读。 */
 			const owner = status.settings_owner || 'unknown';
-			if (owner !== 'system') {
+			if (owner !== 'system' || status.system_managed === false) {
 				[ networkSelect, portInput, clashEnabledInput, clashPortInput, clashSecretInput ].forEach(function(input) {
 					input.disabled = true;
 				});

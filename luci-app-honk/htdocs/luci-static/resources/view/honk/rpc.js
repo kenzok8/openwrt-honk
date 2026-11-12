@@ -76,7 +76,7 @@ const callSystemSave = rpc.declare({
 });
 
 const callSystemPanel = rpc.declare({
-	object: 'honk', method: 'system_panel', params: [ 'dry_run' ], expect: { }
+	object: 'honk', method: 'system_panel', params: [ 'dry_run', 'expect' ], expect: { }
 });
 
 const callConfigApply = rpc.declare({ object: 'honk', method: 'config_apply', expect: { '': {} } });

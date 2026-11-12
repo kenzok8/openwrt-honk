@@ -560,10 +560,11 @@ validate_config_tree() {
 	expected_ip=$3
 	expected_port=$4
 	expected_initialized=$5
+	skip_schema=${6:-0}
 	main=$config_root/config.dae
 	system=$config_root/system.dae
 	[ -f "$main" ] && [ ! -L "$main" ] && [ -f "$system" ] && [ ! -L "$system" ] || return 1
-	if [ "$(config_owner "$main")" != system ]; then
+	if [ "$skip_schema" = 1 ] || [ "$(config_owner "$main")" != system ]; then
 		"$HONK_CORE" config validate --config "$main" >/dev/null 2>&1 || return 2
 		find "$config_root" -type l -print 2>/dev/null | grep -q . && return 2
 		find "$config_root" ! -type f ! -type d -print 2>/dev/null | grep -q . && return 2
@@ -859,7 +860,9 @@ validate_candidate() {
 	u_system_managed=$(get_uci system_managed 2>/dev/null || printf 1)
 	[ -n "$u_system_managed" ] || u_system_managed=1
 	if [ "$(config_owner "$config_tree/config.dae")" != system ] || [ "$u_system_managed" = 0 ]; then
-		validate_config_tree "$config_tree" '' '' "$u_port" "$u_initialized" || return 2
+		managed_skip=0
+		[ "$u_system_managed" = 0 ] && managed_skip=1
+		validate_config_tree "$config_tree" '' '' "$u_port" "$u_initialized" "$managed_skip" || return 2
 		if [ "$state" = present ] || { [ "$state" = preview ] && { [ -e "$config_tree/state/honk.db" ] || [ -L "$config_tree/state/honk.db" ]; }; }; then
 			archive_sqlite_check "$config_tree/state/honk.db" || return 1
 		fi
@@ -1067,7 +1070,7 @@ restore() {
 	fi
 	[ "$old_running" != 1 ] || [ "$restore_initialized" = 1 ] || { error running_service_requires_initialized_restore; return 1; }
 	[ "$(sha_of "$RESTORE")" = "$archive_hash" ] || { error restore_archive_changed; return 1; }
-	restore_managed=$(get_uci system_managed 2>/dev/null || printf 1)
+	restore_managed=$(uci -c "$uci_dir" -q get honk.main.system_managed 2>/dev/null || printf 1)
 	[ -n "$restore_managed" ] || restore_managed=1
 	if [ "$(config_owner "$restore_stage/etc/honk/config.dae")" = system ] && [ "$restore_managed" = 1 ]; then
 		restore_nfqueue=$(sed -n 's/^    nfqueue_enable: \(true\|false\)$/\1/p' "$restore_stage/etc/honk/system.dae" 2>/dev/null | head -n 1)

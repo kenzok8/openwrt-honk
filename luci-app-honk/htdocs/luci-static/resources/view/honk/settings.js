@@ -21,7 +21,7 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
-function systemConfigCard() {
+function systemConfigCard(selfManaged) {
 	const textarea = E('textarea', {
 		'class': 'cbi-input-text', 'rows': 18, 'spellcheck': 'false',
 		'style': 'width:100%;font-family:monospace'
@@ -49,12 +49,14 @@ function systemConfigCard() {
 	});
 
 	let previewed = false;
+	let previewHash = '';
 	backBtn.addEventListener('click', function() {
 		backBtn.disabled = true;
 		if (!previewed) {
 			honk.systemPanel(true).then(honk.ensureOk).then(function(result) {
 				preview.textContent = (result && result.content) || '';
 				preview.style.display = '';
+				previewHash = (result && result.sha256) || '';
 				previewed = true;
 				message.textContent = _('上面是面板将生成的 system.dae，确认后再次点击替换。');
 			}).catch(function(error) {
@@ -62,7 +64,7 @@ function systemConfigCard() {
 			}).finally(function() { backBtn.disabled = false; });
 			return;
 		}
-		honk.systemPanel(false).then(honk.ensureOk).then(function() {
+		honk.systemPanel(false, previewHash).then(honk.ensureOk).then(function() {
 			message.textContent = _('已交回面板管理');
 			window.setTimeout(function() { location.reload(); }, 1200);
 		}).catch(function(error) {
@@ -70,11 +72,17 @@ function systemConfigCard() {
 		}).finally(function() { backBtn.disabled = false; });
 	});
 
+	const actions = [ saveBtn ];
+	if (selfManaged)
+		actions.push(backBtn);
+
 	return E('div', { 'class': 'honk-card' }, [
 		E('h3', { 'class': 'honk-card-title' }, _('system.dae（直接编辑）')),
-		E('p', { 'class': 'honk-note' }, _('保存后面板不再改写这个文件，LAN、端口和 Clash API 也在文件里设置。写坏配置会在启动失败时自动回滚。')),
+		E('p', { 'class': 'honk-note' }, selfManaged
+			? _('保存后面板不再改写这个文件，LAN、端口和 Clash API 也在文件里设置。写坏配置会在启动失败时自动回滚。')
+			: _('保存即进入自管模式，面板之后不再生成这个文件。')),
 		textarea,
-		E('div', { 'class': 'cbi-page-actions' }, [ saveBtn, backBtn ]),
+		E('div', { 'class': 'cbi-page-actions' }, actions),
 		preview,
 		message
 	]);
@@ -206,11 +214,11 @@ return view.extend({
 		]));
 		page.appendChild(section);
 		if (selfManaged) {
-			page.appendChild(systemConfigCard());
+			page.appendChild(systemConfigCard(true));
 		} else {
 			const advanced = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('高级：直接编辑 system.dae'));
 			advanced.addEventListener('click', function() {
-				page.replaceChild(systemConfigCard(), section);
+				page.replaceChild(systemConfigCard(false), section);
 				advanced.remove();
 			});
 			page.appendChild(E('div', { 'class': 'honk-card' }, [
