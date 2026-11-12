@@ -2,13 +2,9 @@
 
 <p>自己编译只要两件事：<b>内核开 <code>DEBUG_INFO_BTF</code></b>，<b>包选进固件一起编</b>。这样出来就是完整的，不用再装 BTF 补丁包，也没有 kmod 版本对不上的问题。</p>
 
-<h2 id="lane">先选通道</h2>
+<h2 id="lane">先确认能编</h2>
 
-<table>
-  <tr><th>你的固件</th><th>用哪个</th><th>内核要求</th></tr>
-  <tr><td>OpenWrt / ImmortalWrt 25.12</td><td>稳定通道，<code>.apk</code></td><td>Linux 6.12+</td></tr>
-  <tr><td>OpenWrt / ImmortalWrt 24.10</td><td>Linux 6.6 实验通道，<code>.ipk</code></td><td>Linux 6.6.40+</td></tr>
-</table>
+<p><b>自己编固件只适用 25.12（内核 6.12+）。</b>24.10 的内核 6.6 带不动稳定通道的核心，那一边请直接用实验源的 <code>.ipk</code>，见<a href="install.html">安装与升级</a>。</p>
 
 <h2 id="steps">三步</h2>
 
