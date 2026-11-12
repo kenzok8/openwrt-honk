@@ -1265,7 +1265,7 @@ system_rollback() {
 	fi
 	uci set honk.main.system_managed="$_rs_managed" >/dev/null 2>&1 && uci commit honk >/dev/null 2>&1 || :
 	_rs_ready=0
-	if [ "$_rs_running" = 1 ]; then honk_lifecycle_start 30 >/dev/null 2>&1 && _rs_ready=1; fi
+	if [ "$_rs_running" = 1 ]; then honk_lifecycle_start 15 >/dev/null 2>&1 && _rs_ready=1; fi
 	_rs_now=$(sha256sum "$_rs_file" 2>/dev/null | awk '{print $1}')
 	_rs_flag=$(uci -q get honk.main.system_managed); [ -n "$_rs_flag" ] || _rs_flag=1
 	if [ "$_rs_now" = "$_rs_hash" ] && [ "$_rs_flag" = "$_rs_managed" ] &&
@@ -1321,7 +1321,11 @@ write_system_config() {
 
 	umask 077
 	work=$(mktemp -d /tmp/honk-syssave.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
-	trap 'rm -rf "$work"; honk_lock_release >/dev/null 2>&1' 0
+	# 备份放稳定路径：进程被中断时也要能把文件和开关还原
+	committed=0
+	prev=/etc/honk/.system-prev.dae
+	cp -p "$sys" "$prev" || { rm -rf "$work"; echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
+	trap 'if [ "$committed" != 1 ]; then cp -p "$prev" "$sys" 2>/dev/null; [ -z "${old_managed:-}" ] || uci set honk.main.system_managed="$old_managed" >/dev/null 2>&1; uci commit honk >/dev/null 2>&1; logger -t honk "save interrupted, restored system.dae"; fi; rm -f "$prev"; rm -rf "$work"; honk_lock_release >/dev/null 2>&1' 0
 	cp -p "$sys" "$work/orig-system.dae" || { echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
 	# 整棵树带过来，include 到子目录时才校验得到实际生效的那份
 	find /etc/honk -path /etc/honk/state -prune -o -type f -print > "$work/files.txt" || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
@@ -1353,10 +1357,11 @@ write_system_config() {
 		printf '{"ok":false,"message":"settings_commit_failed_%s"}\n' "$(system_rollback_state)"; return 1
 	}
 
-	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 30 >/dev/null 2>&1; then
+	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 12 >/dev/null 2>&1; then
 		system_rollback "$sys" "$work/orig-system.dae" "$system_written_hash" "$old_managed" "$was_running"
 		printf '{"ok":false,"message":"system_config_start_failed_%s"}\n' "$(system_rollback_state)"; return 1
 	fi
+	committed=1
 	echo '{"ok":true,"message":"system_config_saved"}'
 }
 
@@ -1404,7 +1409,10 @@ panel_managed_system() {
 	honk_lock_acquire || { echo '{"ok":false,"message":"operation_in_progress"}'; return 1; }
 	trap 'rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
 	work=$(mktemp -d /tmp/honk-managedbak.XXXXXX) || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
-	trap 'rm -rf "$work"; rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
+	committed=0
+	prev=/etc/honk/.system-prev.dae
+	cp -p /etc/honk/system.dae "$prev" || { rm -rf "$work"; rm -f "$preview"; echo '{"ok":false,"message":"system_config_backup_failed"}'; return 1; }
+	trap 'if [ "$committed" != 1 ]; then cp -p "$prev" /etc/honk/system.dae 2>/dev/null; [ -z "${old_managed:-}" ] || uci set honk.main.system_managed="$old_managed" >/dev/null 2>&1; uci commit honk >/dev/null 2>&1; logger -t honk "panel-managed switch interrupted, restored system.dae"; fi; rm -f "$prev"; rm -rf "$work"; rm -f "$preview"; honk_lock_release >/dev/null 2>&1' 0
 	orig_hash=$(sha256sum /etc/honk/system.dae | awk '{print $1}')
 	# 预览之后用户又改过文件就不覆盖
 	[ "$base_hash" = "$orig_hash" ] || { echo '{"ok":false,"message":"system_config_changed"}'; return 1; }
@@ -1419,11 +1427,12 @@ panel_managed_system() {
 		printf '{"ok":false,"message":"settings_commit_failed_%s"}\n' "$(system_rollback_state)"
 		return 1
 	}
-	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 30 >/dev/null 2>&1; then
+	if [ "$was_running" = 1 ] && ! honk_lifecycle_restart 12 >/dev/null 2>&1; then
 		system_rollback /etc/honk/system.dae "$work/orig-system.dae" "$orig_hash" "$old_managed" "$was_running"
 		printf '{"ok":false,"message":"system_config_start_failed_%s"}\n' "$(system_rollback_state)"
 		return 1
 	fi
+	committed=1
 	echo '{"ok":true,"message":"panel_managed_restored"}'
 }
 
