@@ -9,6 +9,10 @@ on:
         description: '构建后发布到 Release 和实验源（关闭则只出 artifact）'
         type: boolean
         default: false
+      force:
+        description: '上游没有新提交也重新构建（改了 LuCI 或打包时需要）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +53,12 @@ jobs:
           [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cannot resolve $CORE_BRANCH"; exit 1; }
           if [ "$head" = "$CORE_COMMIT" ]; then
             echo "Pin already at $head."
+            # 上游没动但 luci-app-honk 或打包改过时，手工勾 force 重出一次；
+            # 否则只改 LuCI 的修复永远进不了 24.10 的 Release。
+            if [ "${{ inputs.force }}" = "true" ]; then
+              echo "Force rebuild requested, keeping changed=true."
+              exit 0
+            fi
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
