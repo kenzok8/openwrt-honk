@@ -13,6 +13,8 @@ fi
 (
 	if command -v apk >/dev/null 2>&1; then
 		flock -n /tmp/luci-app-honk.apk.lock apk update
+	elif command -v opkg >/dev/null 2>&1; then
+		flock -n /tmp/luci-app-honk.opkg.lock opkg update
 	fi
 ) >/dev/null 2>&1 </dev/null &
 
