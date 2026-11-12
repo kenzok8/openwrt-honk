@@ -33,13 +33,21 @@ service_running() {
 	honk_lifecycle_managed_pid >/dev/null 2>&1
 }
 
-# 源列表里某个镜像卡住时，索引刷新会把整把 opkg 锁长期占住，面板随之误报。
+# 镜像卡住时 opkg update 会一直占着锁；这里给它上闸，超时直接掐掉。
 pkg_update() {
-	if command -v timeout >/dev/null 2>&1; then
-		timeout 180 "$@"
-	else
-		"$@"
+	_limit=$1; shift
+	"$@" &
+	_pid=$!
+	( sleep "$_limit"; kill -TERM "$_pid" 2>/dev/null ) &
+	_watch=$!
+	wait "$_pid" 2>/dev/null
+	_rc=$?
+	kill -TERM "$_watch" 2>/dev/null
+	wait "$_watch" 2>/dev/null
+	if [ "$_rc" != 0 ]; then
+		echo "note: 索引刷新超时或被中断（${_limit}s），改用现有缓存继续"
 	fi
+	return 0
 }
 
 restore_service_state() {
@@ -100,7 +108,7 @@ fi
 	if command -v apk >/dev/null 2>&1; then
 		(
 			flock 9
-			pkg_update apk update 2>&1
+			apk list "$PKG" 2>/dev/null | grep -q "^$PKG-" || pkg_update 60 apk update 2>&1
 			ver=$(apk list "$PKG" 2>/dev/null | awk -v p="$PKG" '$1 ~ "^" p "-[0-9]" { v=$1; sub("^" p "-", "", v); print v }' | sort -V | tail -1)
 			if [ -n "$ver" ]; then
 				constraint="$PKG=$ver"
@@ -133,7 +141,7 @@ fi
 	elif command -v opkg >/dev/null 2>&1; then
 		(
 			flock 9
-			pkg_update opkg update 2>&1
+			opkg list "$PKG" 2>/dev/null | grep -q "^$PKG - " || pkg_update 60 opkg update 2>&1
 			opkg install "$PKG" 2>&1
 			exit 0
 		) 9>/tmp/luci-app-honk.opkg.lock

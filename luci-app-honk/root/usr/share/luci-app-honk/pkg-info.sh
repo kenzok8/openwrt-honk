@@ -45,7 +45,16 @@ elif command -v opkg >/dev/null 2>&1; then
 			END { if (installed) print version }
 		')
 	fi
-	latest=$(opkg list "$PKG" 2>/dev/null | awk -F' - ' -v p="$PKG" '$1 == p { print $2 }' | sort -V | tail -1)
+	# 索引缓存直接读：opkg 命令在刷索引时会抢锁，抢不到就报不出最新版。
+	latest=$(
+		for _list in /var/opkg-lists/*; do
+			[ "${_list%.sig}" = "$_list" ] || continue
+			zcat "$_list" 2>/dev/null || cat "$_list" 2>/dev/null
+		done | awk -v p="$PKG" '
+			$1 == "Package:" { cur = $2 }
+			cur == p && $1 == "Version:" { print $2 }
+		' | sort -V | tail -1
+	)
 fi
 
 printf '%s\t%s\n' "$installed" "$latest"
