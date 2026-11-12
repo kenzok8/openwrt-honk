@@ -51,13 +51,28 @@ CONFIG_NFT_CT=y|m
 CONFIG_NFT_QUEUE=y|m
 CONFIG_NETFILTER_NETLINK_QUEUE=y|m</code></pre>
 
-<p>这两项决定体验上限：</p>
+<p>BTF 是启动必需项，honk 加载 eBPF 时要拿它当目标描述。自己编固件最省事的做法是直接开内核 BTF：</p>
 
-<pre><code>CONFIG_DEBUG_INFO_BTF=y      # 必须。省掉后面装 BTF 补丁包的所有麻烦
-CONFIG_FUNCTION_TRACER=y
-CONFIG_DYNAMIC_FTRACE=y      # 想要「原生 UDP 接收追踪」</code></pre>
+<pre><code>CONFIG_DEBUG_INFO_BTF=y</code></pre>
+
+<p>不开也能跑，但要另外提供 BTF 文件（<code>vmlinux-btf</code> 包或 <code>HONK_VMLINUX_BTF</code>），多一层维护。</p>
+
+<p>想要「原生 UDP 接收追踪」再补这两项，缺了只降级、不影响启动：</p>
+
+<pre><code>CONFIG_FUNCTION_TRACER=y
+CONFIG_DYNAMIC_FTRACE=y</code></pre>
 
 <blockquote>cgroup v2 与 <code>CONFIG_CGROUP_BPF</code> 是硬性要求。根 cgroup 的 <code>sock_ops</code> 槽位被旧程序占用也会导致启动失败。</blockquote>
+
+<h2 id="bpffs">bpffs 必须挂载</h2>
+
+<p>eBPF map 只能固定在 bpffs，普通目录不行。标准 OpenWrt 由 <code>/etc/init.d/boot</code> 自动挂载，自编或精简固件要确认：</p>
+
+<pre><code>grep " /sys/fs/bpf " /proc/mounts || mount -t bpf bpf /sys/fs/bpf</code></pre>
+
+<p>没能自动挂载的，写进 <code>/etc/fstab</code> 一劳永逸：</p>
+
+<pre><code>bpf /sys/fs/bpf bpf defaults 0 0</code></pre>
 
 <h2 id="deps-source">依赖谁来提供</h2>
 
@@ -87,6 +102,7 @@ CONFIG_DYNAMIC_FTRACE=y      # 想要「原生 UDP 接收追踪」</code></pre>
 
 <pre><code>uname -r                                        # 6.12+ 或 6.6.40+
 ls -l /sys/kernel/btf/vmlinux                   # 有，说明 DEBUG_INFO_BTF 生效
-lsmod | grep -E "sch_ingress|cls_bpf|veth|nft_queue"</code></pre>
+lsmod | grep -E "sch_ingress|cls_bpf|veth|nft_queue"
+grep " /sys/fs/bpf " /proc/mounts               # 有，说明 bpffs 已挂</code></pre>
 
-<p>三条都对，再到 LuCI「服务 → Honk → 维护 → 系统检查」过一遍，全部通过就能启动。</p>
+<p>四条都对，再到 LuCI「服务 → Honk → 维护 → 系统检查」过一遍，全部通过就能启动。</p>
