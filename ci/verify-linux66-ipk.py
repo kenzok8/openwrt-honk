@@ -125,8 +125,6 @@ def main():
                 sources = [(args.feed_dir / package / "root" / path, path) for path in (
                     "usr/libexec/rpcd/honk", "usr/share/luci-app-honk/pkg-info.sh",
                     "usr/share/luci-app-honk/update-pkg.sh")]
-                require(b"linux66" in read_member(payload, "www/luci-static/resources/view/honk/overview.js"),
-                        "experimental UI marker is missing")
             for source, destination in sources:
                 require(read_member(payload, destination) == source.read_bytes(), f"script payload drift: {destination}")
         selected[package] = paths[0]

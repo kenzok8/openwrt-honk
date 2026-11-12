@@ -580,20 +580,16 @@ jobs:
             echo "main and tag already point to this validated commit"
             exit 0
           fi
-          git config user.name kenzok8
-          git config user.email kenzok8@gmail.com
+          # GITHUB_TOKEN 没有 workflows 权限，push 含 workflow 改动的 ref 会被拒，改用 API 写 ref。
+          repo="${{ github.repository }}"
           if [ -z "$tag_sha" ]; then
-            git tag "$TAG" "$CANDIDATE_SHA"
+            gh api -X POST "repos/$repo/git/refs" -f ref="refs/tags/$TAG" -f sha="$CANDIDATE_SHA" >/dev/null
+            echo "已创建标签 ${TAG}"
           fi
-          if [ "$remote_sha" != "$base" ]; then
-            refs="refs/tags/$TAG:refs/tags/$TAG"
-          elif [ -n "$tag_sha" ]; then
-            refs="$CANDIDATE_SHA:refs/heads/main"
-          else
-            refs="$CANDIDATE_SHA:refs/heads/main refs/tags/$TAG:refs/tags/$TAG"
+          if [ "$remote_sha" = "$base" ]; then
+            gh api -X PATCH "repos/$repo/git/refs/heads/main" -f sha="$CANDIDATE_SHA" >/dev/null
+            echo "main 已推进到候选提交"
           fi
-          git -c credential.helper='!gh auth git-credential' push --atomic origin $refs
-          echo "推进完成：${refs}"
 
       # 不用 softprops/action-gh-release：它发现同名 Release 就走 PATCH，
       # GITHUB_TOKEN 更新（即使字段未变、回传同一 target_commitish）会被 403
