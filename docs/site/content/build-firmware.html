@@ -18,12 +18,12 @@
 
 <pre><code># feeds.conf.default
 src-git honk https://github.com/kenzok8/openwrt-honk
-src-git wall https://github.com/kenzok8/wall                # v2ray-geoip / v2ray-geosite
+src-git small https://github.com/kenzok8/small              # v2ray-geoip / v2ray-geosite
 src-git vmlinux-btf https://github.com/kenzok8/vmlinux-btf  # 内核没开 BTF 时才需要
 
 ./scripts/feeds update -a
 ./scripts/feeds install -a -p honk
-./scripts/feeds install -a -p wall
+./scripts/feeds install -a -p small
 ./scripts/feeds install -a -p vmlinux-btf
 
 make menuconfig
@@ -38,7 +38,7 @@ make menuconfig
   <tr><th>依赖</th><th>来源</th><th>选 honk 时自动带上</th></tr>
   <tr><td><code>kmod-sched-core</code> · <code>kmod-sched-bpf</code> · <code>kmod-veth</code> · <code>kmod-nft-queue</code></td><td>OpenWrt 树内</td><td>会，写在 honk 的 DEPENDS 里</td></tr>
   <tr><td><code>ip-full</code> · <code>sqlite3-cli</code> · <code>coreutils-stat</code> · <code>ubus</code> · <code>jshn</code> · <code>usign</code> · <code>ca-bundle</code> · <code>jsonfilter</code></td><td>OpenWrt 树内</td><td>会</td></tr>
-  <tr><td><code>v2ray-geoip</code> · <code>v2ray-geosite</code></td><td><code>kenzok8/wall</code> 的 <code>v2ray-geodata</code></td><td>不会，要加 feeds</td></tr>
+  <tr><td><code>v2ray-geoip</code> · <code>v2ray-geosite</code></td><td><code>kenzok8/small</code> 的 <code>v2ray-geodata</code>（<code>kenzok8/wall</code> 也有）</td><td>不会，要加 feeds</td></tr>
   <tr><td><code>vmlinux-btf</code></td><td><code>kenzok8/vmlinux-btf</code></td><td>不会，有意不设成依赖；内核开 <code>DEBUG_INFO_BTF</code> 则不需要</td></tr>
 </table>
 
