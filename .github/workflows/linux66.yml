@@ -242,7 +242,8 @@ jobs:
           set -euo pipefail
           version='${{ needs.pin.outputs.version }}'
           [ -n "$version" ] || { echo "::error::cannot read version"; exit 1; }
-          echo "tag=linux66-${version}-r${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          tag="linux66-${version}-r${{ github.run_id }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           find artifacts -path '*sdk24*' -name '*.ipk' -exec cp -v {} dist/ \;
@@ -251,60 +252,91 @@ jobs:
           test "$(find dist -name '*.ipk' | wc -l)" -ge 8
           ( cd dist && sha256sum ./* > SHA256SUMS )
 
+          # 和稳定版同一种表格：一个架构一行，包名本身就是下载链接，用户不用自己对包名。
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag"
+          luci="$(ls dist/luci-app-honk_*_all.ipk | head -n 1)"
+          {
+            printf '# openwrt-honk %s\n\n' "$tag"
+            cat <<'MD'
+          **Linux 6.6 实验通道，给 OpenWrt / ImmortalWrt 24.10（opkg / IPK）。**
+
+          | 项 | 值 |
+          | :--- | :--- |
+          | 适用系统 | OpenWrt / ImmortalWrt 24.10（opkg，`.ipk`） |
+          | 最低内核 | Linux 6.6.40，更低的装上也起不来 |
+          | 已验证 | 官方 OpenWrt 24.10.8（内核 6.6.144）：安装、启停、重启、升级、真实流量 |
+          | 不适用 | 25.12 及以上（apk / `.apk`），请用主 Release |
+          | 实验源 | `https://down.dllkids.xyz/openwrt-feed/honk/24.10/<arch>/` |
+
+          ## 装之前先自查
+
+          ```sh
+          uname -r                                                  # 需要 6.6.40 或更高
+          ls /sys/kernel/btf/vmlinux 2>/dev/null || echo "缺 BTF"     # 没有就得先补
+          ```
+
+          内核偏低或没有 BTF 时，honk 启动检查会直接拒绝。缺 BTF 装与 `uname -r` 同版本的包：
+          https://github.com/kenzok8/vmlinux-btf/releases/tag/latest
+
+          ## 📦 SDK 24.10 · 实验版 (IPK)
+
+          | 架构 | honk | luci-app-honk |
+          | :--- | :--- | :--- |
+          MD
+            for arch in x86_64 aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76 \
+                        aarch64_generic arm_cortex-a7_neon-vfpv4 arm_cortex-a9; do
+              pkg="$(ls dist/honk_*_"$arch".ipk 2>/dev/null | head -n 1 || true)"
+              if [ -n "$pkg" ]; then
+                echo "| \`$arch\` | [$(basename "$pkg")]($base/$(basename "$pkg")) | [$(basename "$luci")]($base/$(basename "$luci")) |"
+              else
+                echo "| \`$arch\` | — | — |"
+              fi
+            done
+            cat <<'MD'
+
+          ## 安装
+
+          最省事是跑安装脚本，它会按你的架构挑包，缺 BTF 时还会自动补对应内核版本的那份：
+
+          ```sh
+          wget -O - https://cdn.jsdelivr.net/gh/kenzok8/openwrt-honk@main/scripts/install.sh | ash
+          ```
+
+          手动装：从上表下自己架构的两个包到 `/tmp`，再 `cd /tmp && opkg install ./honk_*.ipk ./luci-app-honk_*_all.ipk`。
+
+          ## 本页其他文件
+
+          | 文件 | 用途 |
+          | :--- | :--- |
+          | `honk-core-*-linux66-*.tar.gz` | 兼容核心，已打进 ipk，单下只用于排查 |
+          | `generated-linux66-*` | 本次构建的 pin 与来源信息 |
+          | `SHA256SUMS` | 校验值 |
+
+          ## 已知限制
+
+          - 实验通道，不是稳定版。配置备份与 25.12 通道不能互导，恢复会报 `incompatible_core_version`
+          - 需要与该内核匹配的 `kmod-*`，以及内置 BTF 或按 `uname -r` 精确匹配的外部 BTF
+          - 只在这版内核上验证过 6.6 通道；其余架构编译通过不等于真机验收
+          - 出问题请带 `uname -r`、`cat /etc/openwrt_release` 和 `logread | grep honk`
+          MD
+          } > notes.md
+          cat notes.md
+
       - name: Publish experimental release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          target_commitish: main
-          # 标题直接写清适用面：只有 24.10 / IPK 用户能装，25.12 用户看到标签名会找错。
-          name: Linux 6.6 实验版 ${{ steps.meta.outputs.version }}（OpenWrt 24.10 · 内核 6.6.40+）
-          prerelease: true
-          body: |
-            **Linux 6.6 实验通道包，给 OpenWrt / ImmortalWrt 24.10（opkg / IPK）用。**
-
-            | 项 | 值 |
-            | :--- | :--- |
-            | 适用系统 | OpenWrt / ImmortalWrt 24.10（opkg，`.ipk`） |
-            | 最低内核 | Linux 6.6.40，更低的装上也起不来 |
-            | 已验证 | 官方 OpenWrt 24.10.8（内核 6.6.144）：安装、启停、重启、升级、真实流量 |
-            | 不适用 | 25.12 及以上（apk / `.apk`），请用主 Release |
-            | 实验源 | `https://down.dllkids.xyz/openwrt-feed/honk/24.10/<arch>/` |
-
-            ## 装之前先自查
-
-            ```sh
-            uname -r                                  # 需要 6.6.40 或更高
-            ls /sys/kernel/btf/vmlinux 2>/dev/null || echo "缺 BTF"   # 没有就得先补
-            ```
-
-            内核偏低或没有 BTF 时，honk 启动检查会直接拒绝。缺 BTF 装与 `uname -r` 同版本的包：
-            https://github.com/kenzok8/vmlinux-btf/releases/tag/latest
-
-            ## 安装
-
-            ```sh
-            opkg update
-            opkg install ./honk_<版本>_<架构>.ipk ./luci-app-honk_<版本>_all.ipk
-            ```
-
-            ## 本页文件
-
-            | 文件 | 用途 |
-            | :--- | :--- |
-            | `honk_*_<架构>.ipk` | 核心包，7 个架构 |
-            | `luci-app-honk_*_all.ipk` | LuCI 面板，noarch |
-            | `honk-core-*-linux66-*.tar.gz` | 兼容核心，已打进 ipk，单下只用于排查 |
-            | `generated-linux66-*` | 本次构建的 pin 与来源信息 |
-            | `SHA256SUMS` | 校验值 |
-
-            ## 已知限制
-
-            - 实验通道，不是稳定版。配置备份与 25.12 通道不能互导，恢复会报 `incompatible_core_version`
-            - 需要与该内核匹配的 `kmod-*`，以及内置 BTF 或按 `uname -r` 精确匹配的外部 BTF
-            - 只在这版内核上验证过 6.6 通道；其余架构编译通过不等于真机验收
-            - 出问题请带 `uname -r`、`cat /etc/openwrt_release` 和 `logread | grep honk`
-          files: dist/*
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          if gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$repo" --yes
+          fi
+          gh release create "$TAG" --repo "$repo" \
+            --target main \
+            --title "Linux 6.6 实验版 ${RELEASE_VERSION}（OpenWrt 24.10 · 内核 6.6.40+）" \
+            --notes-file notes.md --prerelease --latest=false dist/*
 
       - name: Upload IPKs to the experimental feed path
         env:
