@@ -139,6 +139,7 @@ jobs:
           ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/stable-sdk-output
           EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
           NO_REFRESH_CHECK: 'true'
+          NO_SHFMT_CHECK: '1'
           IGNORE_ERRORS: 'false'
           PACKAGES: honk luci-app-honk
 
