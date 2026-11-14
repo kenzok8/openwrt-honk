@@ -4,6 +4,11 @@ on:
   # main 的构建由 tag 的 Build & Release 覆盖，这里只在 PR 和手动时跑。
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_stable_x86_64_package:
+        description: 'Build an x86_64 SDK test package and upload artifacts only'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,6 +66,102 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: honk-core-x86_64
-          path: artifacts/cache/honk-core-*.tar.gz
+          path: |
+            artifacts/cache/honk-core-*.tar.gz
+            honk/generated-stage.mk
+            honk/generated-provenance.json
+          if-no-files-found: error
+          retention-days: 7
+
+
+  stable-sdk-x86_64:
+    name: Build stable x86_64 test packages (artifact only)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_stable_x86_64_package }}
+    needs: [source-build, core-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: honk-core-x86_64
+          path: artifacts/core
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: honk-source-build
+          path: artifacts/source
+
+      - name: Prepare isolated local feed with the freshly built core
+        run: |
+          set -euo pipefail
+          feed="$GITHUB_WORKSPACE/artifacts/stable-sdk-feed"
+          mkdir -p "$feed/dl"
+          cp -a honk "$feed/honk"
+          cp -a luci-app-honk "$feed/luci-app-honk"
+
+          core_archive=$(find artifacts/core/artifacts/cache -maxdepth 1 -type f \
+            -name 'honk-core-*-x86_64.tar.gz' -print -quit)
+          doona_archive=$(find artifacts/source/artifacts/cache -maxdepth 1 -type f \
+            -name 'doona-*.tar.gz' -print -quit)
+          test -n "$core_archive"
+          test -n "$doona_archive"
+          cp "$core_archive" "$feed/dl/"
+          cp "$doona_archive" "$feed/dl/"
+          cp artifacts/core/honk/generated-stage.mk "$feed/honk/generated-stage.mk"
+          cp artifacts/core/honk/generated-provenance.json "$feed/honk/generated-provenance.json"
+          cp artifacts/source/luci-app-honk/generated-doona-stage.mk \
+            "$feed/luci-app-honk/generated-doona-stage.mk"
+          printf '\nPKG_SOURCE_URL:=file:///feed/dl/\n' >> "$feed/honk/generated-stage.mk"
+          printf '\nPKG_SOURCE_URL:=file:///feed/dl/\n' >> \
+            "$feed/luci-app-honk/generated-doona-stage.mk"
+
+      - name: Check out fixed SDK action
+        uses: actions/checkout@v7
+        with:
+          repository: kenzok8/gh-action-sdk
+          ref: 44f98c51d04aebd1aa79fe4f603559c1ec2085da
+          path: .sdk-action
+          persist-credentials: false
+
+      - name: Build stable x86_64 OpenWrt 25.12 packages
+        uses: ./.sdk-action
+        env:
+          ARCH: x86_64-openwrt-25.12
+          CONTAINER: immortalwrt/sdk
+          FEEDNAME: honk
+          FEED_DIR: ${{ github.workspace }}/artifacts/stable-sdk-feed
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/stable-sdk-output
+          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
+          NO_REFRESH_CHECK: 'true'
+          IGNORE_ERRORS: 'false'
+          PACKAGES: honk luci-app-honk
+
+      - name: Collect and require both test packages
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/stable-sdk-packages
+          for package in honk luci-app-honk; do
+            find artifacts/stable-sdk-output/bin/packages -type f -size +0c \
+              \( -name "$package*.apk" -o -name "$package*.ipk" \) \
+              -exec cp {} artifacts/stable-sdk-packages/ \;
+            find artifacts/stable-sdk-packages -type f -size +0c \
+              \( -name "$package*.apk" -o -name "$package*.ipk" \) | grep -q .
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: honk-stable-sdk25.12-x86_64-${{ github.sha }}
+          path: |
+            artifacts/stable-sdk-packages/*.apk
+            artifacts/stable-sdk-packages/*.ipk
+            artifacts/core/artifacts/cache/honk-core-*-x86_64.tar.gz
+            artifacts/core/honk/generated-stage.mk
+            artifacts/core/honk/generated-provenance.json
           if-no-files-found: error
           retention-days: 7
