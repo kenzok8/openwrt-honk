@@ -949,11 +949,13 @@ config_read() {
 	json_init
 	json_add_boolean ok 1
 	json_add_string message config_loaded
+	[ "$(config_owner /etc/honk/config.dae)" = system ] && json_add_boolean legacy_system 1 || json_add_boolean legacy_system 0
 	json_add_string content "$config_content"
 	json_dump
 }
 
 system_save() {
+	[ "$(config_owner /etc/honk/config.dae)" = system ] || { emit_result false system_config_not_included; return 1; }
 	request=$(cat)
 	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
 	json_get_var system_content content
@@ -969,6 +971,7 @@ system_save() {
 }
 
 system_read() {
+	[ "$(config_owner /etc/honk/config.dae)" = system ] || { emit_result false system_config_not_included; return 1; }
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then emit_result false update_recovery_required; return 1; fi
 	[ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] || { emit_result false system_config_unavailable; return 1; }
 	system_content=$(cat /etc/honk/system.dae; printf '\001') || { emit_result false system_read_failed; return 1; }
@@ -1075,6 +1078,129 @@ validate_config_candidate() {
 	return 1
 }
 
+# 只展开历史默认的独立 system 引用；复杂结构留给用户原文编辑。
+config_merge_candidate() {
+	merge_main=/etc/honk/config.dae
+	merge_system=/etc/honk/system.dae
+	merge_error=config_merge_not_applicable
+	[ -f "$merge_main" ] && [ ! -L "$merge_main" ] && [ -f "$merge_system" ] && [ ! -L "$merge_system" ] || return 1
+	merge_config_hash=$(sha256sum "$merge_main" | awk '{print $1}') || return 1
+	merge_system_hash=$(sha256sum "$merge_system" | awk '{print $1}') || return 1
+	[ "$(wc -c < "$merge_main")" -le "$DAE_UPLOAD_LIMIT" ] && [ "$(wc -c < "$merge_system")" -le "$DAE_UPLOAD_LIMIT" ] || return 1
+	[ "$(head -n 3 "$merge_main")" = "$(printf 'include {\n    system.dae\n}')" ] || return 1
+	tail -n +4 "$merge_main" | awk '
+		/^[[:space:]]*#/ { next }
+		/(^|[^[:alnum:]_])(include|global|experimental)([^[:alnum:]_]|$)/ { exit 1 }
+		/[\047"][^\047"]*[\047"][[:space:]]*\{/ { exit 1 }
+	' || return 1
+	awk '
+		/^[[:space:]]*(#.*)?$/ { next }
+		/^[[:space:]]*include[[:space:]]*\{/ { exit 1 }
+		/^[[:space:]]*(data_dir|ui|log_file|path)[[:space:]]*:/ {
+			value = $0; sub(/^[^:]*:[[:space:]]*/, "", value)
+			sub(/^[\047"]/, "", value)
+			if (value !~ /^\// && value !~ /^([\047"])?[[:space:]]*(#.*)?$/) exit 1
+		}
+		/^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{[[:space:]]*(#.*)?$/ {
+			if (depth == 0) {
+				name = $0; sub(/^[[:space:]]*/, "", name); sub(/[[:space:]]*\{.*/, "", name)
+				if (name == "global") global++
+				else if (name == "experimental") experimental++
+				else exit 1
+			}
+			depth++; next
+		}
+		/^[[:space:]]*}[[:space:]]*(#.*)?$/ { if (--depth < 0) exit 1; next }
+		/[{}]/ { exit 1 }
+		{ if (depth == 0) exit 1 }
+		END { if (depth != 0 || global != 1 || experimental > 1) exit 1 }
+	' "$merge_system" || return 1
+	umask 077
+	merge_dir=$(mktemp -d /etc/honk/.config-merge.XXXXXX) || { merge_error=config_write_failed; return 1; }
+	merge_name=$(basename "$merge_dir")
+	config_candidate=/etc/honk/$merge_name.dae
+	(set -C; { cat "$merge_system"; printf '\n'; tail -n +4 "$merge_main"; } > "$config_candidate") || {
+		rm -rf "$merge_dir"; rm -f "$config_candidate"; merge_error=config_write_failed; return 1
+	}
+	rmdir "$merge_dir" && chmod 0600 "$config_candidate" || { rm -rf "$merge_dir"; rm -f "$config_candidate"; merge_error=config_write_failed; return 1; }
+	[ "$(wc -c < "$config_candidate")" -le "$DAE_UPLOAD_LIMIT" ] || { rm -f "$config_candidate"; merge_error=config_too_large; return 1; }
+	if [ "$(sha256sum "$merge_main" | awk '{print $1}')" != "$merge_config_hash" ] ||
+		[ "$(sha256sum "$merge_system" | awk '{print $1}')" != "$merge_system_hash" ]; then
+		rm -f "$config_candidate"; merge_error=config_merge_source_changed; return 1
+	fi
+	if ! validate_config_candidate; then
+		rm -f "$config_candidate"; merge_error=config_merge_validation_failed; return 1
+	fi
+	merge_candidate_hash=$(sha256sum "$config_candidate" | awk '{print $1}')
+}
+
+config_merge_guard() {
+	merge_guard_error=
+	[ -n "$1" ] || return 0
+	if [ ! -f /etc/honk/config.dae ] || [ -L /etc/honk/config.dae ] ||
+		[ ! -f /etc/honk/system.dae ] || [ -L /etc/honk/system.dae ] ||
+		[ "$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')" != "$1" ] ||
+		[ "$(sha256sum /etc/honk/system.dae 2>/dev/null | awk '{print $1}')" != "$2" ]; then
+		merge_guard_error=config_merge_source_changed
+		return 1
+	fi
+	if [ "$(sha256sum "$4" 2>/dev/null | awk '{print $1}')" != "$3" ]; then
+		merge_guard_error=config_merge_preview_changed
+		return 1
+	fi
+}
+
+config_merge_preview() {
+	config_candidate=
+	trap 'rm -f "$config_candidate"' 0
+	trap 'exit 1' HUP INT TERM
+	config_merge_candidate || { emit_result false "$merge_error"; return 1; }
+	if ! config_merge_guard "$merge_config_hash" "$merge_system_hash" "$merge_candidate_hash" "$config_candidate"; then
+		rm -f "$config_candidate"; emit_result false "$merge_guard_error"; return 1
+	fi
+	merge_content=$(cat "$config_candidate"; printf '\001')
+	merge_content=${merge_content%?}
+	rm -f "$config_candidate"
+	json_init
+	json_add_boolean ok 1
+	json_add_string message config_merge_preview
+	json_add_string content "$merge_content"
+	json_add_string config_sha256 "$merge_config_hash"
+	json_add_string system_sha256 "$merge_system_hash"
+	json_add_string candidate_sha256 "$merge_candidate_hash"
+	json_dump
+}
+
+config_merge_apply() {
+	merge_request=$(head -c 2049)
+	[ "$(printf '%s' "$merge_request" | wc -c)" -le 2048 ] && json_load "$merge_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+	for merge_key in config_sha256 system_sha256 candidate_sha256; do
+		json_get_type merge_hash_type "$merge_key"
+		[ "$merge_hash_type" = string ] || { emit_result false invalid_request; return 1; }
+	done
+	json_get_var requested_config_hash config_sha256
+	json_get_var requested_system_hash system_sha256
+	json_get_var requested_candidate_hash candidate_sha256
+	for merge_hash in "$requested_config_hash" "$requested_system_hash" "$requested_candidate_hash"; do
+		[ "$(printf '%s' "$merge_hash" | wc -c)" -eq 64 ] || { emit_result false invalid_request; return 1; }
+		case "$merge_hash" in *[!0-9a-f]*) emit_result false invalid_request; return 1 ;; esac
+	done
+	begin_mutation
+	config_candidate=
+	merge_file=
+	trap 'rm -f "$config_candidate" "$merge_file"; honk_lock_release >/dev/null 2>&1' 0
+	trap 'exit 1' HUP INT TERM
+	config_merge_candidate || { emit_result false "$merge_error"; return 1; }
+	merge_file=$config_candidate
+	if ! config_merge_guard "$requested_config_hash" "$requested_system_hash" "$requested_candidate_hash" "$merge_file"; then
+		rm -f "$merge_file"; emit_result false "$merge_guard_error"; return 1
+	fi
+	config_apply_candidate "$merge_file" "$requested_config_hash" "$requested_system_hash" "$requested_candidate_hash"
+	merge_apply_status=$?
+	rm -f "$merge_file"
+	return "$merge_apply_status"
+}
+
 config_validate() {
 	config_candidate_from_request
 	case "$?" in
@@ -1130,7 +1256,15 @@ config_save() {
 
 config_apply() {
 	begin_mutation
-	draft_path=/etc/honk/config-draft.dae
+	config_apply_candidate /etc/honk/config-draft.dae "" "" ""
+}
+
+# 合并候选与普通草稿共用应用事务，不替换用户已有的草稿。
+config_apply_candidate() {
+	draft_path=$1
+	apply_expected_config=$2
+	apply_expected_system=$3
+	apply_expected_candidate=$4
 	[ -f "$draft_path" ] && [ ! -L "$draft_path" ] || { emit_result false config_draft_missing; return 1; }
 	activate_dir=$(mktemp -d /etc/honk/.config-activate.XXXXXX) || { emit_result false config_write_failed; return 1; }
 	activate_file=/etc/honk/.config-${activate_dir##*.config-activate.}.dae
@@ -1142,6 +1276,9 @@ config_apply() {
 		rm -f "$activate_file"
 		[ -n "$config_validation" ] && printf '%s\n' "$config_validation" || emit_result false config_validation_unavailable
 		return 1
+	fi
+	if ! config_merge_guard "$apply_expected_config" "$apply_expected_system" "$apply_expected_candidate" "$activate_file"; then
+		rm -f "$activate_file"; emit_result false "$merge_guard_error"; return 1
 	fi
 	candidate_hash=$(sha256sum "$activate_file" | awk '{print $1}')
 	old_hash=$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')
@@ -1166,10 +1303,14 @@ config_apply() {
 		emit_result false service_stop_unconfirmed
 		return 1
 	fi
-	if [ "$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')" != "$old_hash" ]; then
+	apply_source_changed=0
+	[ "$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')" = "$old_hash" ] || apply_source_changed=1
+	config_merge_guard "$apply_expected_config" "$apply_expected_system" "$apply_expected_candidate" "$activate_file" || apply_source_changed=1
+	if [ "$apply_source_changed" = 1 ]; then
 		if [ "$old_running" = 1 ]; then honk_lifecycle_start 20 || { emit_result false config_changed_concurrently_restart_failed; return 1; }; fi
 		rm -rf "$backup_dir" "$activate_file"
-		emit_result false config_changed_concurrently
+		[ -n "$merge_guard_error" ] || merge_guard_error=config_changed_concurrently
+		emit_result false "$merge_guard_error"
 		return 1
 	fi
 	if ! mv -f "$activate_file" /etc/honk/config.dae; then
@@ -1212,7 +1353,7 @@ config_apply() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_detach":{"dry_run":"Boolean"},"system_read":{},"system_save":{"content":"String"},"system_panel":{"dry_run":"Boolean","expect":"String","base":"String"},"repair":{},"recover":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_merge_preview":{},"config_merge_apply":{"config_sha256":"String","system_sha256":"String","candidate_sha256":"String"},"config_detach":{"dry_run":"Boolean"},"system_read":{},"system_save":{"content":"String"},"system_panel":{"dry_run":"Boolean","expect":"String","base":"String"},"repair":{},"recover":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -1257,6 +1398,12 @@ list)
 				;;
 			config_save)
 				config_save
+				;;
+			config_merge_preview)
+				config_merge_preview
+				;;
+			config_merge_apply)
+				config_merge_apply
 				;;
 			config_apply)
 				config_apply

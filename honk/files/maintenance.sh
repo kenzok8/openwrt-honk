@@ -442,8 +442,8 @@ load_uci_values() {
 	u_initialized=$(get_uci initialized) || return 1
 	u_config_mode=$(get_uci config_mode 2>/dev/null || printf managed)
 	u_config=$(get_uci config_file) || return 1
-	u_port=$(get_uci listen_port) || return 1
-	u_network=$(get_uci lan_network) || return 1
+	u_port=$(get_uci listen_port 2>/dev/null || printf 9527)
+	u_network=$(get_uci lan_network 2>/dev/null || printf lan)
 	u_clash_enabled=$(get_uci clash_api_enabled 2>/dev/null || printf 0)
 	u_clash_port=$(get_uci clash_api_port 2>/dev/null || printf 9090)
 	u_clash_secret=$(get_uci clash_api_secret 2>/dev/null || true)
@@ -453,17 +453,7 @@ load_uci_values() {
 	case "$u_config_mode" in ''|managed|manual) ;; *) return 1 ;; esac
 	case "$u_geo_auto:$u_geo_auto_freq" in 0:daily|0:weekly|1:daily|1:weekly) ;; *) return 1 ;; esac
 	[ "$u_config" = /etc/honk/config.dae ] || return 1
-	case "$u_port" in ''|*[!0-9]*) return 1 ;; esac
-	[ "$u_port" -ge 1024 ] && [ "$u_port" -le 65535 ] || return 1
-	case "$u_network" in ''|*[!A-Za-z0-9_.-]*) return 1 ;; esac
-	case "$u_clash_enabled" in 0|1) ;; *) return 1 ;; esac
-	case "$u_clash_port" in ''|*[!0-9]*) return 1 ;; esac
-	[ "$u_clash_port" -ge 1024 ] && [ "$u_clash_port" -le 65535 ] || return 1
-	if [ "$u_clash_enabled" = 1 ]; then
-		[ "$u_initialized" = 1 ] && [ "$u_clash_port" != "$u_port" ] || return 1
-		case "$u_clash_secret" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
-		[ "${#u_clash_secret}" -ge 6 ] && [ "${#u_clash_secret}" -le 128 ] || return 1
-	fi
+	# 旧端口和网络选项仅随备份保留，不再作为运行配置的校验来源。
 }
 
 check_sqlite() {
@@ -857,75 +847,16 @@ validate_candidate() {
 	config_tree=$candidate/etc/honk
 	mkdir -p "$temp_dir/uci-tmp" || return 1
 	load_uci_values uci "$uci_dir" || return 1
-	u_system_managed=$(get_uci system_managed 2>/dev/null || printf 1)
-	[ -n "$u_system_managed" ] || u_system_managed=1
-	if [ "$(config_owner "$config_tree/config.dae")" != system ] || [ "$u_system_managed" = 0 ]; then
-		managed_skip=0
-		[ "$u_system_managed" = 0 ] && managed_skip=1
-		validate_config_tree "$config_tree" '' '' "$u_port" "$u_initialized" "$managed_skip" || return 2
-		if [ "$state" = present ] || { [ "$state" = preview ] && { [ -e "$config_tree/state/honk.db" ] || [ -L "$config_tree/state/honk.db" ]; }; }; then
-			archive_sqlite_check "$config_tree/state/honk.db" || return 1
-		fi
-		if [ -f "$config_tree/state/honk.db" ] && [ ! -L "$config_tree/state/honk.db" ]; then
-			restore_initialized=1
-		else
-			restore_initialized=0
-		fi
-		return 0
-	fi
-	. /lib/functions/network.sh || return 1
-	candidate_device=
-	candidate_ip=
-	network_get_device candidate_device "$u_network" || return 1
-	network_get_ipaddr candidate_ip "$u_network" || return 1
-	if [ "$identity" = archive ]; then
-		archive_lan=$(sed -n "s/^    lan_interface: '\([^']*\)'$/\1/p" "$config_tree/system.dae")
-		archive_listen=$(sed -n "s/^        listen: '\([^']*\)'$/\1/p" "$config_tree/system.dae")
-		validate_config_tree "$config_tree" "$archive_lan" "${archive_listen%:*}" "${archive_listen##*:}" "$u_initialized" || return 2
-	else
-		validate_config_tree "$config_tree" "$candidate_device" "$candidate_ip" "$u_port" "$u_initialized" || return 2
-	fi
+	# 配置文件包含运行值，旧管理标志不再触发 UCI 重生或字段覆盖。
+	validate_config_tree "$config_tree" '' '' "$u_port" "$u_initialized" 1 || return 2
 	if [ "$state" = present ] || { [ "$state" = preview ] && { [ -e "$config_tree/state/honk.db" ] || [ -L "$config_tree/state/honk.db" ]; }; }; then
 		archive_sqlite_check "$config_tree/state/honk.db" || return 1
 	fi
-	mkdir -p "$temp_dir/shadow/etc" "$temp_dir/shadow-data" || return 1
-	chmod 0700 "$temp_dir/shadow" "$temp_dir/shadow/etc" "$temp_dir/shadow-data" || return 1
-	cp -pR "$config_tree" "$temp_dir/shadow/etc/honk" || return 1
-	find "$temp_dir/shadow" -type d -exec chmod 0700 {} + || return 1
-	find "$temp_dir/shadow/etc/honk" -type f -exec chmod 0600 {} + || return 1
-	find "$temp_dir/shadow/etc/honk" -type l -print 2>/dev/null | grep -q . && return 2
-	find "$temp_dir/shadow/etc/honk" ! -type f ! -type d -print 2>/dev/null | grep -q . && return 2
-	shadow_port=$(unused_loopback_port) || return 1
-	rewrite_shadow_system "$temp_dir/shadow/etc/honk/system.dae" "$temp_dir/shadow-data" "$shadow_port" || return 2
-	chmod 0600 "$temp_dir/shadow/etc/honk"/*.dae 2>/dev/null || true
-	if [ "$state" = present ] || { [ "$state" = preview ] && [ -f "$config_tree/state/honk.db" ]; }; then
-		mkdir -p "$temp_dir/shadow-data/state" || return 1
-		cp "$config_tree/state/honk.db" "$temp_dir/shadow-data/state/honk.db" || return 1
-		chmod 0600 "$temp_dir/shadow-data/state/honk.db" || return 1
+	if [ -f "$config_tree/state/honk.db" ] && [ ! -L "$config_tree/state/honk.db" ]; then
+		restore_initialized=1
+	else
+		restore_initialized=0
 	fi
-	mock_config=$temp_dir/shadow/etc/honk/config.dae
-	mock_log=$temp_dir/mock.log
-	response_file=$temp_dir/discovery.json
-	DAE_LOCATION_ASSET=/usr/share/v2ray "$HONK_CORE" --config "$mock_config" --mock-ebpf > "$mock_log" 2>&1 &
-	mock_pid=$!
-	mock_ready=0
-	attempt=0
-	while [ "$attempt" -lt 15 ]; do
-		if ! kill -0 "$mock_pid" 2>/dev/null; then return 1; fi
-		if curl -fsS --noproxy '*' --connect-timeout 1 --max-time 2 "http://127.0.0.1:$shadow_port/api" -o "$response_file" 2>/dev/null; then
-			mock_identity_ok || return 1
-			mock_ready=1
-			break
-		fi
-		sleep 1
-		attempt=$((attempt + 1))
-	done
-	[ "$mock_ready" = 1 ] || return 1
-	setup_required=$(jsonfilter -i "$response_file" -e '@.auth.setup_required' 2>/dev/null)
-	case "$setup_required" in true) restore_initialized=0 ;; false) restore_initialized=1 ;; *) return 1 ;; esac
-	[ "$state" != absent ] || [ "$restore_initialized" = 0 ] || return 1
-	mock_identity_ok || return 1
-	stop_mock || return 1
 	return 0
 }
 
@@ -1072,12 +1003,7 @@ restore() {
 	[ "$(sha_of "$RESTORE")" = "$archive_hash" ] || { error restore_archive_changed; return 1; }
 	restore_managed=$(uci -c "$uci_dir" -q get honk.main.system_managed 2>/dev/null || printf 1)
 	[ -n "$restore_managed" ] || restore_managed=1
-	if [ "$(config_owner "$restore_stage/etc/honk/config.dae")" = system ] && [ "$restore_managed" = 1 ]; then
-		restore_nfqueue=$(sed -n 's/^    nfqueue_enable: \(true\|false\)$/\1/p' "$restore_stage/etc/honk/system.dae" 2>/dev/null | head -n 1)
-		case "$restore_nfqueue" in true|false) ;; *) restore_nfqueue=true ;; esac
-		write_live_system "$restore_stage/etc/honk/system.dae" "$candidate_device" "$candidate_ip" "$u_port" "$restore_initialized" "$restore_nfqueue" || { error system_config_render_failed; return 1; }
-		chmod 0600 "$restore_stage/etc/honk/system.dae" || { error system_config_render_failed; return 1; }
-	fi
+
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.enabled=$old_enabled" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.boot_enabled=$old_boot" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.initialized=$restore_initialized" || { error restore_profile_stage_failed; return 1; }
@@ -1166,12 +1092,8 @@ reset_data() {
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.system_managed=1 || { error reset_profile_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" commit honk || { error reset_profile_stage_failed; return 1; }
 	load_uci_values uci "$reset_uci" || { error reset_profile_stage_failed; return 1; }
-	. /lib/functions/network.sh || { error lan_network_unavailable; return 1; }
-	reset_device=
-	reset_ip=
-	network_get_device reset_device "$u_network" || { error lan_network_unavailable; return 1; }
-	network_get_ipaddr reset_ip "$u_network" || { error lan_network_unavailable; return 1; }
-	write_live_system "$reset_stage/etc/honk/system.dae" "$reset_device" "$reset_ip" "$u_port" "$u_initialized" true || { error system_config_render_failed; return 1; }
+	# 重置保留一个未引用的兼容文件，不再依赖旧网络选项生成运行配置。
+	write_live_system "$reset_stage/etc/honk/system.dae" br-lan 127.0.0.1 "$u_port" 0 true || { error system_config_render_failed; return 1; }
 	chmod 0600 "$reset_stage/etc/honk/system.dae" || { error system_config_render_failed; return 1; }
 	reset_candidate=$temp_dir/reset-candidate
 	mkdir -p "$reset_candidate/etc" || { error reset_stage_failed; return 1; }

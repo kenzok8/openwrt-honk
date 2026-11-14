@@ -1533,3 +1533,126 @@ msgstr "核心与兼容信息不匹配，请重新安装 Honk。"
 
 msgid "Kernel BTF is missing. Install vmlinux-btf matching your firmware, or use firmware with built-in BTF."
 msgstr "缺少内核 BTF，请安装与固件匹配的 vmlinux-btf，或使用自带 BTF 的固件。"
+
+msgid "A source file changed. Refresh the merge preview."
+msgstr "来源文件已变化，请重新预览合并。"
+
+msgid "Could not merge the configuration."
+msgstr "无法合并配置。"
+
+msgid "Could not preview the merge."
+msgstr "无法预览合并。"
+
+msgid "Could not read system.dae."
+msgstr "无法读取 system.dae。"
+
+msgid "Could not save system.dae."
+msgstr "无法保存 system.dae。"
+
+msgid "Edit configuration"
+msgstr "编辑配置"
+
+msgid "Edit legacy system.dae"
+msgstr "编辑旧 system.dae"
+
+msgid "First setup settings saved."
+msgstr "已保存首次引导设置。"
+
+msgid "LAN and API settings are managed in the configuration file."
+msgstr "LAN 和 API 设置由配置文件管理。"
+
+msgid "LAN, listen ports and API settings are managed in the configuration file."
+msgstr "LAN、监听端口和 API 设置由配置文件管理。"
+
+msgid "Legacy system.dae"
+msgstr "旧 system.dae"
+
+msgid "Merge and start Honk"
+msgstr "合并并启动 Honk"
+
+msgid "Merge configuration"
+msgstr "合并配置"
+
+msgid "Merged configuration preview"
+msgstr "合并后的配置预览"
+
+msgid "Preview merging system.dae"
+msgstr "预览合并 system.dae"
+
+msgid "Preview the merge on the configuration page."
+msgstr "请在配置页预览合并。"
+
+msgid "Runtime settings are managed in config.dae."
+msgstr "运行设置由 config.dae 管理。"
+
+msgid "Save and validate"
+msgstr "保存并校验"
+
+msgid "The active configuration no longer uses system.dae. Edit config.dae instead."
+msgstr "当前配置不再引用 system.dae，请编辑 config.dae。"
+
+msgid "The active configuration still includes this legacy file. Edit it here, or preview merging it on the configuration page."
+msgstr "当前配置仍引用此旧文件，可直接编辑，或在配置页预览合并。"
+
+msgid "The editor changed. Preview the merge again."
+msgstr "编辑器内容已变化，请重新预览合并。"
+
+msgid "The merged candidate changed. Refresh the preview."
+msgstr "合并候选已变化，请重新预览。"
+
+msgid "The merged configuration did not pass validation. The existing files were kept."
+msgstr "合并配置未通过校验，原文件已保留。"
+
+msgid "These settings are used only by the first setup wizard. Later changes belong in config.dae."
+msgstr "这些选项只用于首次引导，之后请在 config.dae 中修改。"
+
+msgid "This file has been customized. Use the configuration page instead of the first setup wizard."
+msgstr "文件已自定义，请在配置页编辑，不使用首次引导。"
+
+msgid "This file is still included by the active configuration. Saving validates it and restarts Honk if it is running."
+msgstr "当前配置仍引用此文件，保存时会校验；服务运行中时会重启。"
+
+msgid "This layout cannot be merged automatically. Keep editing the existing files."
+msgstr "此布局无法自动合并，请继续编辑原文件。"
+
+msgid "This replaces config.dae and starts Honk. system.dae and any existing draft are kept."
+msgstr "将替换 config.dae 并启动 Honk，旧 system.dae 和已有草稿会保留。"
+
+msgid "Update the Honk core together with this package. Its configuration diagnostics are incomplete."
+msgstr "请同时更新 Honk 核心，当前核心缺少所需的配置诊断字段。"
+
+msgid "system.dae saved."
+msgstr "system.dae 已保存。"
+
+msgid "This configuration still uses system.dae. Preview a merge or keep editing the existing file."
+msgstr "当前配置仍使用 system.dae，可预览合并，也可继续编辑原文件。"
+
+msgid "Configuration is valid. No file was rewritten."
+msgstr "配置校验通过，未重写文件。"
+
+msgid "Configuration validation failed. Check the service logs."
+msgstr "配置校验失败，请检查服务日志。"
+
+msgid "The installed default template is missing. Reinstall Honk."
+msgstr "缺少安装默认模板，请重新安装 Honk。"
+
+msgid "Could not back up config.dae. No configuration was replaced."
+msgstr "无法备份 config.dae，未替换配置。"
+
+msgid "config.dae is missing or is not a regular file."
+msgstr "config.dae 缺失或不是普通文件。"
+
+msgid "config.dae changed during setup. Nothing was overwritten."
+msgstr "配置在初始化期间发生变化，未覆盖文件。"
+
+msgid "Could not prepare the first setup configuration."
+msgstr "无法生成首次引导配置。"
+
+msgid "The first setup configuration could not be validated or started."
+msgstr "首次引导配置未通过校验或无法启动。"
+
+msgid "Could not install the first setup configuration. Check the service logs."
+msgstr "无法写入首次引导配置，请检查服务日志。"
+
+msgid "Could not finish initialization. Check the configuration and service logs."
+msgstr "初始化未完成，请检查配置和服务日志。"

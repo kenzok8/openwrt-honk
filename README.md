@@ -122,6 +122,10 @@ wget -qO- https://down.dllkids.xyz/openwrt-feed/openwrt-feed-setup.sh | sh
 
 在 LuCI「服务 → Honk」初始化服务，运行系统检查后启动。Doona 界面仅在已初始化、正在运行且 API 就绪时开放。
 
+新装默认使用一份完整的 `/etc/honk/config.dae`，包含 `global`、`experimental`、节点、路由和 DNS。概览页的 LAN、端口和 Clash API 选项只供首次引导使用；初始化后在配置页编辑配置，启动和修复不会按旧 UCI 值重建这些字段。
+
+升级会保留原配置。仍引用 `system.dae` 的用户可在配置编辑器预览合并，确认后才应用；旧文件和已有草稿会保留。复杂 include 不自动展开，仍按原文件运行。备份恢复也保留文件内的接口和监听值，不再按本机 UCI 自动改写。
+
 节点与订阅直接写进 `/etc/honk/config.dae`（`node { label: 'share-link' }` 或 `subscription { tag: 'url' }`），重载 Honk 后生效；路由、DNS 与订阅也可以只在 Doona 面板里管。
 
 > 管理入口和 API 只应在可信 LAN 内使用。若 LuCI 走未加密的 HTTP，浏览器到路由器之间的登录信息和 API 流量没有传输加密，请勿把管理页面暴露到互联网。

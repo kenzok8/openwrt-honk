@@ -80,6 +80,11 @@ const callSystemPanel = rpc.declare({
 });
 
 const callConfigApply = rpc.declare({ object: 'honk', method: 'config_apply', expect: { '': {} } });
+const callConfigMergePreview = rpc.declare({ object: 'honk', method: 'config_merge_preview', expect: { '': {} } });
+const callConfigMergeApply = rpc.declare({
+	object: 'honk', method: 'config_merge_apply',
+	params: [ 'config_sha256', 'system_sha256', 'candidate_sha256' ], expect: { '': {} }
+});
 const callConfigDetach = rpc.declare({ object: 'honk', method: 'config_detach', params: [ 'dry_run' ], expect: { '': {} } });
 const callRepair = rpc.declare({ object: 'honk', method: 'repair', expect: { '': {} } });
 const callRecover = rpc.declare({ object: 'honk', method: 'recover', expect: { '': {} } });
@@ -253,10 +258,11 @@ function localClashUi(status, secret) {
 		const query = [
 			'host=' + encodeURIComponent(host),
 			'hostname=' + encodeURIComponent(host),
-			'port=' + encodeURIComponent(port),
-			'secret=' + encodeURIComponent(secret || '')
-		].join('&');
-		return base + '?' + query + '#/proxies';
+			'port=' + encodeURIComponent(port)
+		];
+		if (typeof secret === 'string')
+			query.push('secret=' + encodeURIComponent(secret));
+		return base + '?' + query.join('&') + '#/proxies';
 	}
 	catch (e) {
 		return null;
@@ -278,6 +284,25 @@ function tokenMessage(token) {
 		settings_saved: _('Settings saved and applied.'),
 		initialized: _('Honk initialized.'),
 		administrator_initialized: _('Honk initialized.'),
+		config_valid: _('Configuration is valid. No file was rewritten.'),
+		config_invalid: _('Configuration validation failed. Check the service logs.'),
+		default_config_unavailable: _('The installed default template is missing. Reinstall Honk.'),
+		main_config_backup_failed: _('Could not back up config.dae. No configuration was replaced.'),
+		main_config_unavailable: _('config.dae is missing or is not a regular file.'),
+		main_config_changed_concurrently: _('config.dae changed during setup. Nothing was overwritten.'),
+		default_config_render_failed: _('Could not prepare the first setup configuration.'),
+		candidate_config_invalid: _('The first setup configuration could not be validated or started.'),
+		main_config_write_failed: _('Could not install the first setup configuration. Check the service logs.'),
+		uci_commit_failed_main_restore_pending: _('Could not finish initialization. Check the configuration and service logs.'),
+		runtime_settings_owned_by_file: _('LAN and API settings are managed in the configuration file.'),
+		configuration_page_merge_preview_required: _('Preview the merge on the configuration page.'),
+		custom_config_requires_configuration_page: _('This file has been customized. Use the configuration page instead of the first setup wizard.'),
+		nfqueue_runtime_unavailable: _('Update the Honk core together with this package. Its configuration diagnostics are incomplete.'),
+		config_merge_not_applicable: _('This layout cannot be merged automatically. Keep editing the existing files.'),
+		config_merge_validation_failed: _('The merged configuration did not pass validation. The existing files were kept.'),
+		config_merge_source_changed: _('A source file changed. Refresh the merge preview.'),
+		config_merge_preview_changed: _('The merged candidate changed. Refresh the preview.'),
+		system_config_not_included: _('The active configuration no longer uses system.dae. Edit config.dae instead.'),
 		system_config_healthy: _('System check passed.'),
 		system_config_repaired: _('Repair completed.'),
 		backup_created: _('Backup created.'),
@@ -581,6 +606,8 @@ return baseclass.extend({
 	systemSave: callSystemSave,
 	systemPanel: callSystemPanel,
 	configApply: callConfigApply,
+	configMergePreview: callConfigMergePreview,
+	configMergeApply: callConfigMergeApply,
 	configDetach: callConfigDetach,
 	repair: callRepair,
 	recover: callRecover,

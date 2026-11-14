@@ -21,15 +21,13 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
-function systemConfigCard(selfManaged) {
+function systemConfigCard() {
 	const textarea = E('textarea', {
 		'class': 'cbi-input-text', 'rows': 18, 'spellcheck': 'false',
 		'style': 'width:100%;font-family:monospace'
 	});
 	const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 	const saveBtn = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, _('保存并校验'));
-	const preview = E('pre', { 'class': 'honk-note', 'style': 'white-space:pre-wrap;display:none' }, '');
-	const backBtn = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, _('切回面板管理'));
 
 	honk.systemRead().then(function(result) {
 		textarea.value = (result && result.content) || '';
@@ -48,44 +46,12 @@ function systemConfigCard(selfManaged) {
 		}).finally(function() { saveBtn.disabled = false; });
 	});
 
-	let previewed = false;
-	let previewHash = '';
-	let previewBase = '';
-	backBtn.addEventListener('click', function() {
-		backBtn.disabled = true;
-		if (!previewed) {
-			honk.systemPanel(true).then(honk.ensureOk).then(function(result) {
-				preview.textContent = (result && result.content) || '';
-				preview.style.display = '';
-				previewHash = (result && result.sha256) || '';
-				previewBase = (result && result.base) || '';
-				previewed = true;
-				message.textContent = _('上面是面板将生成的 system.dae，确认后再次点击替换。');
-			}).catch(function(error) {
-				message.textContent = honk.errorMessage(error, _('无法生成面板配置'));
-			}).finally(function() { backBtn.disabled = false; });
-			return;
-		}
-		honk.systemPanel(false, previewHash, previewBase).then(honk.ensureOk).then(function() {
-			message.textContent = _('已交回面板管理');
-			window.setTimeout(function() { location.reload(); }, 1200);
-		}).catch(function(error) {
-			message.textContent = honk.errorMessage(error, _('切回失败，请查看系统状态'));
-		}).finally(function() { backBtn.disabled = false; });
-	});
-
-	const actions = [ saveBtn ];
-	if (selfManaged)
-		actions.push(backBtn);
 
 	return E('div', { 'class': 'honk-card' }, [
 		E('h3', { 'class': 'honk-card-title' }, _('system.dae（直接编辑）')),
-		E('p', { 'class': 'honk-note' }, selfManaged
-			? _('保存后面板不再改写这个文件，LAN、端口和 Clash API 也在文件里设置。写坏配置会在启动失败时自动回滚。')
-			: _('保存即进入自管模式，面板之后不再生成这个文件。')),
+		E('p', { 'class': 'honk-note' }, _('The active configuration still includes this legacy file. Edit it here, or preview merging it on the configuration page.')),
 		textarea,
-		E('div', { 'class': 'cbi-page-actions' }, actions),
-		preview,
+		E('div', { 'class': 'cbi-page-actions' }, [ saveBtn ]),
 		message
 	]);
 }
@@ -118,6 +84,19 @@ return view.extend({
 	render: function(data) {
 		honk.installStyles();
 		const page = E('div', { 'class': 'cbi-map honk-page' });
+		if (data.status && data.status.initialized) {
+			page.appendChild(E('div', { 'class': 'honk-header' }, [
+				E('h2', {}, _('Settings')),
+				E('p', { 'class': 'honk-header-sub' }, _('Runtime settings are managed in config.dae.'))
+			]));
+			page.appendChild(E('div', { 'class': 'honk-card' }, [
+				E('a', { 'class': 'cbi-button', 'href': L.url('admin/services/honk/configuration') + '#edit' }, _('Edit configuration'))
+			]));
+			if (data.status.settings_owner === 'system')
+				page.appendChild(systemConfigCard());
+			return page;
+		}
+
 		const section = E('form', { 'class': 'honk-card' });
 		const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network', 'id': 'honk-lan-network' });
 		const portInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'id': 'honk-listen-port', 'min': '1024', 'max': '65535', 'step': '1' });
@@ -144,15 +123,6 @@ return view.extend({
 
 		section.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Honk settings')));
 
-		/* 配置自带 global/experimental 时这些值归文件，后端会拒绝写入。 */
-		const owner = (data.status && data.status.settings_owner) || 'unknown';
-		if (owner !== 'system') {
-			[ networkSelect, portInput, clashEnabledInput, clashPortInput, clashSecretInput ].forEach(function(input) {
-				input.disabled = true;
-			});
-			save.disabled = true;
-			clashSwitch.syncSwitch();
-		}
 		if (data.statusError)
 			section.appendChild(E('div', { 'class': 'alert-message' }, _('Could not read current settings: %s').format(data.statusError)));
 		if (data.networkError)
@@ -165,11 +135,6 @@ return view.extend({
 		section.appendChild(field(_('Clash API port'), clashPortInput));
 		section.appendChild(field(_('Clash API secret'), clashSecretInput));
 		section.appendChild(E('p', { 'class': 'honk-note' }, data.status && data.status.clash_api_secret_set ? _('A secret is set. Leave blank to keep it. Use your existing HTTPS reverse proxy for external access.') : _('A secret is required when enabling Clash API. Use 6–128 letters, numbers, dots, underscores or hyphens.')));
-		/* 自管时面板设置不再生效，隐藏表单只留编辑器。 */
-		const selfManaged = !!(data.status && data.status.system_managed === false);
-		if (selfManaged) {
-			section.style.display = 'none';
-		}
 		section.appendChild(E('div', { 'class': 'cbi-page-actions' }, save));
 		section.appendChild(message);
 		section.addEventListener('submit', function(ev) {
@@ -202,7 +167,7 @@ return view.extend({
 			message.textContent = _('Saving…');
 			honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret).then(honk.ensureOk).then(function(result) {
 				clashSecretInput.value = '';
-				message.textContent = honk.resultMessage(result, _('Settings saved and applied.'));
+				message.textContent = honk.resultMessage(result, _('First setup settings saved.'));
 			}).catch(function(error) {
 				message.textContent = honk.errorMessage(error, _('Save failed. Check the settings and system status.'));
 			}).finally(function() {
@@ -212,22 +177,10 @@ return view.extend({
 
 		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Settings')),
-			E('p', { 'class': 'honk-header-sub' }, _('Network interface, listen port and boot behaviour for the Honk service.'))
+			E('p', { 'class': 'honk-header-sub' }, _('These settings are used only by the first setup wizard. Later changes belong in config.dae.'))
 		]));
 		page.appendChild(section);
-		if (selfManaged) {
-			page.appendChild(systemConfigCard(true));
-		} else {
-			const advanced = E('button', { 'class': 'cbi-button', 'type': 'button' }, _('高级：直接编辑 system.dae'));
-			advanced.addEventListener('click', function() {
-				page.replaceChild(systemConfigCard(false), section);
-				advanced.remove();
-			});
-			page.appendChild(E('div', { 'class': 'honk-card' }, [
-				E('p', { 'class': 'honk-note' }, _('改为自管后会停止面板生成 system.dae，保存即生效。')),
-				E('div', { 'class': 'cbi-page-actions' }, advanced)
-			]));
-		}
+
 		return page;
 	}
 });
