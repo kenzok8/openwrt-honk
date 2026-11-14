@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           feed="$GITHUB_WORKSPACE/artifacts/stable-sdk-feed"
-          mkdir -p "$feed/dl"
+          mkdir -p "$feed/dl" "$GITHUB_WORKSPACE/artifacts/stable-sdk-output"
           cp -a honk "$feed/honk"
           cp -a luci-app-honk "$feed/luci-app-honk"
 
