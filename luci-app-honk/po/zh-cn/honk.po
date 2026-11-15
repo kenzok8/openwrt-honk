@@ -1668,3 +1668,15 @@ msgstr "没有可用的 LAN 候选，请先在系统中配置 LAN 接口再重�
 
 msgid "This permanently clears subscriptions, nodes, policies, DNS data, history and cache. The administrator account is kept, and Honk stops."
 msgstr "会永久清除订阅、节点、策略、DNS 数据、历史与缓存；管理员账号保留，Honk 会停止。"
+
+msgid "LAN interface"
+msgstr "LAN 接口"
+
+msgid "Listen address"
+msgstr "监听地址"
+
+msgid "Clash API"
+msgstr "Clash API"
+
+msgid "Effective values read from the configuration file. Edit them in the configuration page."
+msgstr "以下数值取自配置文件，修改请到配置页。"

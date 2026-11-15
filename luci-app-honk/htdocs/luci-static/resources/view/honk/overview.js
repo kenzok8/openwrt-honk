@@ -209,12 +209,33 @@ return view.extend({
 		}
 
 		function renderServiceSettings(status) {
-			if (status.initialized)
+			if (status.initialized) {
+				/* 运行字段归 config.dae，这里只展示实际生效值，改去配置页。 */
+				const rows = [
+					E('div', { 'class': 'honk-kv' }, [
+						E('span', { 'class': 'honk-kv-key' }, _('LAN interface')),
+						E('span', { 'class': 'honk-kv-value' }, status.runtime_lan || status.lan_network || '—')
+					]),
+					E('div', { 'class': 'honk-kv' }, [
+						E('span', { 'class': 'honk-kv-key' }, _('Listen address')),
+						E('span', { 'class': 'honk-kv-value' }, status.runtime_listen || '—')
+					]),
+					E('div', { 'class': 'honk-kv' }, [
+						E('span', { 'class': 'honk-kv-key' }, _('Clash API')),
+						E('span', { 'class': 'honk-kv-value' }, status.clash_api_enabled
+							? _('enabled on port %s').format(status.clash_api_port)
+							: _('disabled'))
+					])
+				];
 				return E('section', { 'class': 'honk-card' }, [
 					E('h3', { 'class': 'honk-card-title' }, _('Configuration')),
-					E('p', { 'class': 'honk-note' }, _('LAN, listen ports and API settings are managed in the configuration file.')),
-					E('a', { 'class': 'cbi-button', 'href': L.url('admin/services/honk/configuration') + '#edit' }, _('Edit configuration'))
+					E('p', { 'class': 'honk-note' }, _('Effective values read from the configuration file. Edit them in the configuration page.')),
+					E('div', { 'class': 'honk-kv-list' }, rows),
+					E('div', { 'class': 'honk-actions' }, [
+						E('a', { 'class': 'cbi-button', 'href': L.url('admin/services/honk/configuration') + '#edit' }, _('Edit configuration'))
+					])
 				]);
+			}
 			const card = E('section', { 'class': 'honk-card' });
 			const form = E('form');
 			const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network', 'id': 'honk-lan-network' });

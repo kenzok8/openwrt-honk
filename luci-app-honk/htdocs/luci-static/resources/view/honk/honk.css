@@ -1204,3 +1204,26 @@ html[data-darkmode="true"] .honk-page .honk-log-output {
 		max-height: 60vh;
 	}
 }
+
+/* 概览页只读展示运行配置 */
+.honk-kv-list {
+	display: grid;
+	gap: 6px;
+	margin: 8px 0 14px;
+}
+
+.honk-kv {
+	display: flex;
+	gap: 12px;
+	align-items: baseline;
+}
+
+.honk-kv-key {
+	min-width: 120px;
+	opacity: 0.7;
+}
+
+.honk-kv-value {
+	font-family: monospace;
+	word-break: break-all;
+}

@@ -52,7 +52,7 @@ lock_owner_invalid() {
 
 status() {
 	local core_lane
-	local enabled initialized boot_enabled running api_url api_ready core_version core_commit doona_version kernel lan_network listen_port errors listen clash_api_enabled clash_api_port clash_api_secret clash_api_url clash_api_ready clash_ui_ready clash_secret_set settings_owner api_enabled core_ready config_pending draft_pending legacy_draft detach_backup clash_listen_addr
+	local enabled initialized boot_enabled running api_url api_ready core_version core_commit doona_version kernel lan_network listen_port errors listen runtime_lan clash_api_enabled clash_api_port clash_api_secret clash_api_url clash_api_ready clash_ui_ready clash_secret_set settings_owner api_enabled core_ready config_pending draft_pending legacy_draft detach_backup clash_listen_addr
 	config_load honk
 	config_get_bool enabled main enabled 0
 	config_get_bool initialized main initialized 0
@@ -109,6 +109,8 @@ status() {
 		clash_api_enabled=1
 		clash_api_port=${clash_listen_addr##*:}
 	fi
+	# 概览页展示实际生效值：LAN 接口与监听地址都来自核心解析结果。
+	runtime_lan=$(printf '%s' "$runtime_config" | jsonfilter -e '@.runtime.lan_interfaces[*]' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
 	case "$listen" in
 		''|*[!0-9.:]*) listen="127.0.0.1:$listen_port" ;;
 	esac
@@ -184,6 +186,8 @@ status() {
 	json_add_string doona_version "$doona_version"
 	json_add_string kernel "$kernel"
 	json_add_string lan_network "$lan_network"
+	json_add_string runtime_lan "$runtime_lan"
+	json_add_string runtime_listen "$listen"
 	case "$listen_port" in
 		''|*[!0-9]*) listen_port=0 ;;
 	esac
