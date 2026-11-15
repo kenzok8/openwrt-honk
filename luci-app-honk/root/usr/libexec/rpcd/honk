@@ -66,6 +66,8 @@ status() {
 	if is_managed_core "$managed_pid"; then running=1; else running=0; fi
 	# 只有 system.dae 负责这些字段时，UCI 里的端口/密钥才有意义。
 	settings_owner=$(config_owner /etc/honk/config.dae)
+	includes_system=0
+	[ -n "$(config_includes_system /etc/honk/config.dae)" ] && includes_system=1
 	api_enabled=0
 	clash_api_enabled=0
 	clash_api_port=0
@@ -158,6 +160,7 @@ status() {
 	json_add_boolean boot_enabled "$boot_enabled"
 	json_add_boolean running "$running"
 	json_add_string settings_owner "$settings_owner"
+	json_add_boolean includes_system "$includes_system"
 	system_managed=$(uci -q get honk.main.system_managed)
 	[ -n "$system_managed" ] || system_managed=1
 	json_add_boolean system_managed "$system_managed"
@@ -212,7 +215,7 @@ ensure_runner_ready() {
 
 start_job() {
 	job_operation=$1
-	job_request=
+	job_request=$2
 	case "$job_operation" in backup|restore|reset|update_check|update_apply) ;; *) emit_result false invalid_operation; return 1 ;; esac
 	if [ "$job_operation" = update_apply ]; then
 		update_gate_result=$("$UPDATE" gate 2>/dev/null) || { emit_result false update_check_failed; return 1; }
@@ -235,6 +238,11 @@ start_job() {
 	job_dir=$JOBS/$job_id
 	mkdir "$job_dir" || { emit_result false job_storage_unavailable; return 1; }
 	chmod 0700 "$job_dir" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	if [ -n "$job_request" ]; then
+		job_request_text=$(printf '%s' "$job_request" | tr '|' ' ')
+		printf '%s\n' "$job_request_text" > "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+		chmod 0600 "$job_dir/request" || { rm -rf "$job_dir"; emit_result false job_storage_unavailable; return 1; }
+	fi
 
 	json_init
 	json_add_string state running
@@ -474,6 +482,13 @@ validate_proxy_nodes() (
 	fi
 	# 候选原样作为被测配置，落盘路径与 API 由我们写的 system.dae 提供。
 	cp -p "$candidate" "$temp/config.dae" || { rm -rf "$temp"; return 1; }
+	# 单文件布局的 native_api 在 config.dae 里，system.dae 盖不住：
+	# 改成临时端口 + 匿名只读，才能拿到 nodes/groups。
+	sed -i -e "s#^        listen: .*#        listen: '127.0.0.1:$port'#" \
+		-e "s#^        password_auth: .*#        password_auth: false#" \
+		-e "s#^        allow_anonymous_loopback: .*#        allow_anonymous_loopback: true#" \
+		-e "s#^        config_write: .*#        config_write: false#" \
+		"$temp/config.dae" 2>/dev/null || :
 	chmod 0600 "$temp/config.dae" || { rm -rf "$temp"; return 1; }
 	cat > "$temp/system.dae" <<EOF
 global {
@@ -662,8 +677,11 @@ add_subscription() {
 	cfg=/etc/honk/config.dae
 	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
 	begin_mutation
-	# 快捷追加只支持系统托管结构；自带 global/experimental 或 include 其他文件一律拒绝。
-	[ "$(config_owner "$cfg")" = system ] || { emit_result false quick_add_unsupported; return 1; }
+	# system（旧 include 布局）与 file（完整单文件）都支持追加；混合/不规范布局拒绝。
+	case "$(config_owner "$cfg")" in
+		system|file) ;;
+		*) emit_result false quick_add_unsupported; return 1 ;;
+	esac
 	original_hash=$(sha256sum "$cfg" | awk '{print $1}')
 
 	if grep -qF "$sub_tag:" "$cfg" || grep -qF "'$sub_name':" "$cfg"; then
@@ -721,8 +739,11 @@ add_nodes() {
 	cfg=/etc/honk/config.dae
 	[ -f "$cfg" ] || { emit_result false config_missing; return 1; }
 	begin_mutation
-	# 快捷追加只支持系统托管结构；自带 global/experimental 或 include 其他文件一律拒绝。
-	[ "$(config_owner "$cfg")" = system ] || { emit_result false quick_add_unsupported; return 1; }
+	# system（旧 include 布局）与 file（完整单文件）都支持追加；混合/不规范布局拒绝。
+	case "$(config_owner "$cfg")" in
+		system|file) ;;
+		*) emit_result false quick_add_unsupported; return 1 ;;
+	esac
 	original_hash=$(sha256sum "$cfg" | awk '{print $1}')
 
 	node_prefix="node_$(hexdump -n 4 -e '4/1 "%02x"' /dev/urandom)_"
@@ -950,12 +971,13 @@ config_read() {
 	json_add_boolean ok 1
 	json_add_string message config_loaded
 	[ "$(config_owner /etc/honk/config.dae)" = system ] && json_add_boolean legacy_system 1 || json_add_boolean legacy_system 0
+	[ -n "$(config_includes_system /etc/honk/config.dae)" ] && json_add_boolean includes_system 1 || json_add_boolean includes_system 0
 	json_add_string content "$config_content"
 	json_dump
 }
 
 system_save() {
-	[ "$(config_owner /etc/honk/config.dae)" = system ] || { emit_result false system_config_not_included; return 1; }
+	[ -n "$(config_includes_system /etc/honk/config.dae)" ] || { emit_result false system_config_not_included; return 1; }
 	request=$(cat)
 	json_load "$request" 2>/dev/null || { emit_result false invalid_request; return 1; }
 	json_get_var system_content content
@@ -971,7 +993,7 @@ system_save() {
 }
 
 system_read() {
-	[ "$(config_owner /etc/honk/config.dae)" = system ] || { emit_result false system_config_not_included; return 1; }
+	[ -n "$(config_includes_system /etc/honk/config.dae)" ] || { emit_result false system_config_not_included; return 1; }
 	if [ -e /etc/.honk-update/journal ] || [ -L /etc/.honk-update/journal ]; then emit_result false update_recovery_required; return 1; fi
 	[ -f /etc/honk/system.dae ] && [ ! -L /etc/honk/system.dae ] || { emit_result false system_config_unavailable; return 1; }
 	system_content=$(cat /etc/honk/system.dae; printf '\001') || { emit_result false system_read_failed; return 1; }
@@ -1030,6 +1052,9 @@ lan_candidates() {
 		case "$lan_l3:$lan_device" in *[!A-Za-z0-9_.:-]*) continue ;; esac
 		[ -n "$lan_l3" ] || continue
 		lan_ip=$(printf '%s' "$lan_status" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+		# 重置目标必须是可用的 LAN：排除 loopback 与无 IPv4
+		case "$lan_l3" in lo|lo:*) continue ;; esac
+		case "$lan_ip" in ''|127.*|*[!0-9.]*) continue ;; esac
 		json_add_object ""
 		json_add_string network "$lan_name"
 		json_add_string l3_device "$lan_l3"
@@ -1128,6 +1153,21 @@ config_merge_candidate() {
 		[ "$(sha256sum "$merge_system" | awk '{print $1}')" != "$merge_system_hash" ]; then
 		rm -f "$config_candidate"; merge_error=config_merge_source_changed; return 1
 	fi
+	# 只覆盖面板实际生成过的两种写法：带引号或不带引号的单值
+	merge_lan_dev=$(sed -n "s/^    lan_interface:[[:space:]]*'\{0,1\}\([^',#[:space:]]*\)'\{0,1\}[[:space:]]*\(#.*\)\{0,1\}$/\1/p" "$config_candidate" 2>/dev/null | head -n 1)
+	case "$merge_lan_dev" in
+		''|*[!A-Za-z0-9_.:-]*)
+			rm -f "$config_candidate"
+			merge_error=lan_interface_unavailable
+			return 1
+			;;
+	esac
+	merge_wan_dev=
+	if . /lib/functions/network.sh 2>/dev/null; then
+		network_get_device merge_wan_dev wan 2>/dev/null || merge_wan_dev=
+	fi
+	case "$merge_wan_dev" in ''|*[!A-Za-z0-9_.:-]*) merge_wan_dev= ;; esac
+	"$CONTROL" local-direct-file "$config_candidate" "$merge_lan_dev" "$merge_wan_dev" >/dev/null 2>&1 || { rm -f "$config_candidate"; merge_error=local_direct_render_failed; return 1; }
 	if ! validate_config_candidate; then
 		rm -f "$config_candidate"; merge_error=config_merge_validation_failed; return 1
 	fi
@@ -1353,7 +1393,7 @@ config_apply_candidate() {
 
 case "$1" in
 list)
-		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_merge_preview":{},"config_merge_apply":{"config_sha256":"String","system_sha256":"String","candidate_sha256":"String"},"config_detach":{"dry_run":"Boolean"},"system_read":{},"system_save":{"content":"String"},"system_panel":{"dry_run":"Boolean","expect":"String","base":"String"},"repair":{},"recover":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
+		echo '{"status":{},"check":{},"initialize":{"username":"String","password":"String"},"start":{},"stop":{},"restart":{},"settings":{"lan_network":"String","listen_port":"Integer","boot_enabled":"Boolean","clash_api_enabled":"Boolean","clash_api_port":"Integer","clash_api_secret":"String"},"add_subscription":{"name":"String","url":"String"},"probe_subscription":{"url":"String"},"reset_admin":{},"add_nodes":{"links":"String"},"import_dae":{},"config_read":{},"config_draft_read":{},"lan_candidates":{},"config_validate":{"content":"String"},"config_save":{"content":"String"},"config_apply":{},"config_merge_preview":{},"config_merge_apply":{"config_sha256":"String","system_sha256":"String","candidate_sha256":"String"},"config_detach":{"dry_run":"Boolean"},"system_read":{},"system_save":{"content":"String"},"system_panel":{"dry_run":"Boolean","expect":"String","base":"String"},"repair":{},"recover":{},"backup":{},"restore":{},"restore_prepare":{},"reset":{"lan_device":"String","lan_ip":"String"},"job_status":{"job_id":"String"},"logs":{"source":"String","level":"String","limit":"Integer"},"update_check":{},"update_apply":{}}'
 		;;
 	call)
 		case "$2" in
@@ -1437,7 +1477,17 @@ list)
 				restore_prepare
 				;;
 			reset)
-				start_job reset
+				reset_request=$(head -c 512)
+				reset_device=
+				reset_ip=
+				if [ -n "$reset_request" ]; then
+					json_load "$reset_request" 2>/dev/null || { emit_result false invalid_request; return 1; }
+					json_get_var reset_device lan_device
+					json_get_var reset_ip lan_ip
+				fi
+				case "$reset_device" in ''|*[!A-Za-z0-9_.:-]*) emit_result false invalid_request; return 1 ;; esac
+				case "$reset_ip" in ''|*[!0-9.]*) emit_result false invalid_request; return 1 ;; esac
+				start_job reset "$reset_device|$reset_ip"
 				;;
 			job_status)
 				job_status

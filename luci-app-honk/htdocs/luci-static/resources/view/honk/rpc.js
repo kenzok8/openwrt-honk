@@ -92,7 +92,7 @@ const callBackup = rpc.declare({ object: 'honk', method: 'backup', expect: { '':
 const callRestore = rpc.declare({ object: 'honk', method: 'restore', expect: { '': {} } });
 const callRestorePrepare = rpc.declare({ object: 'honk', method: 'restore_prepare', expect: { '': {} } });
 const callResetAdmin = rpc.declare({ object: 'honk', method: 'reset_admin', expect: { '': {} } });
-const callReset = rpc.declare({ object: 'honk', method: 'reset', expect: { '': {} } });
+const callReset = rpc.declare({ object: 'honk', method: 'reset', params: [ 'lan_device', 'lan_ip' ], expect: { '': {} } });
 const callJobStatus = rpc.declare({
 	object: 'honk',
 	method: 'job_status',

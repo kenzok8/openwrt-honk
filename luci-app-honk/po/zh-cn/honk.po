@@ -716,20 +716,20 @@ msgstr "立即刷新"
 msgid "Refreshing status…"
 msgstr "正在刷新状态……"
 
-msgid "Repair"
-msgstr "修复"
+msgid "Validate configuration"
+msgstr "校验配置"
 
-msgid "Repair completed."
-msgstr "修复已完成。"
+msgid "Configuration checked."
+msgstr "配置已校验。"
 
-msgid "Repair failed."
-msgstr "修复失败。"
+msgid "Configuration check failed."
+msgstr "配置校验失败。"
 
-msgid "Repair replaces missing or damaged Honk system files and does not overwrite user configuration."
-msgstr "修复会补齐或替换缺失、损坏的 Honk 系统文件，不会覆盖用户配置。"
+msgid "Validates the configuration and reports the result. No files are rewritten."
+msgstr "校验配置并报告结果，不改写文件。"
 
-msgid "Repairing…"
-msgstr "正在修复……"
+msgid "Validating…"
+msgstr "正在校验……"
 
 msgid "Required when enabling. Use 6–128 letters, numbers, dots, underscores or hyphens."
 msgstr "启用时必填，6–128 位字母、数字、点、下划线或连字符。"
@@ -896,8 +896,8 @@ msgstr "订阅与节点需使用 Honk 支持的协议，不支持 SSR。"
 msgid "Switching to panel management…"
 msgstr "正在改由面板接管…"
 
-msgid "System check and repair"
-msgstr "系统检查与修复"
+msgid "System check and configuration validation"
+msgstr "系统检查与配置校验"
 
 msgid "System check failed."
 msgstr "系统检查失败。"
@@ -1656,3 +1656,15 @@ msgstr "无法写入首次引导配置，请检查服务日志。"
 
 msgid "Could not finish initialization. Check the configuration and service logs."
 msgstr "初始化未完成，请检查配置和服务日志。"
+
+msgid "Confirm the LAN target"
+msgstr "确认重置目标"
+
+msgid "Reset writes these values into config.dae. Confirm the interface and address are still correct."
+msgstr "重置会把下列网络与地址写入 config.dae，请确认识别到的接口和地址仍然正确。"
+
+msgid "No active LAN candidate. Configure a LAN interface before resetting."
+msgstr "没有可用的 LAN 候选，请先在系统中配置 LAN 接口再重置。"
+
+msgid "This permanently clears subscriptions, nodes, policies, DNS data, history and cache. The administrator account is kept, and Honk stops."
+msgstr "会永久清除订阅、节点、策略、DNS 数据、历史与缓存；管理员账号保留，Honk 会停止。"

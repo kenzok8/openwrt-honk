@@ -92,7 +92,7 @@ return view.extend({
 			page.appendChild(E('div', { 'class': 'honk-card' }, [
 				E('a', { 'class': 'cbi-button', 'href': L.url('admin/services/honk/configuration') + '#edit' }, _('Edit configuration'))
 			]));
-			if (data.status.settings_owner === 'system')
+			if (data.status.includes_system)
 				page.appendChild(systemConfigCard());
 			return page;
 		}

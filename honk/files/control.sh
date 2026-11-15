@@ -99,14 +99,21 @@ check_network() {
 	ubus call "network.interface.$lan_network" status >/dev/null 2>&1 || { fail "选择的 LAN 网络在 netifd 里不存在，请在服务设置里重新选择"; return 1; }
 }
 
-# 本机 LAN/WAN 设备地址（跳过链路本地），与 honk 的 local_direct_cidrs 对齐
+# 按设备取本机地址（IPv4+IPv6），跳过链路本地；不依赖 UCI 网络名。
+# WAN 设备名，用于把本机公网地址也纳入直连；取不到就跳过。
+network_wan_device() {
+	. /lib/functions/network.sh 2>/dev/null || return 0
+	wan_dev=
+	network_get_device wan_dev wan 2>/dev/null || return 0
+	case "$wan_dev" in ''|*[!A-Za-z0-9_.:-]*) return 0 ;; esac
+	printf '%s\n' "$wan_dev"
+}
+
 local_direct_addresses() {
 	list=''
-	. /lib/functions/network.sh
-	for net in "$lan_network" wan; do
-		network_get_device dev "$net" || continue
-		case "$dev" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
-		for addr in $(ip -o addr show dev "$dev" 2>/dev/null | awk '/inet6? / { split($4, a, "/"); print a[1] }'); do
+	for dev in "$@"; do
+		case "$dev" in ''|*[!A-Za-z0-9_.:-]*) continue ;; esac
+		for addr in $(ip -o addr show dev "$dev" 2>/dev/null | awk '{ print $4 }' | cut -d/ -f1); do
 			case "$addr" in fe80:*|169.254.*) continue ;; esac
 			case "$addr" in ''|*[!0-9a-fA-F:.]*) continue ;; esac
 			[ "${#addr}" -le 45 ] || continue
@@ -117,27 +124,29 @@ local_direct_addresses() {
 	printf '%s\n' "$list"
 }
 
-# 把标记区块换成当前本机地址，honk 的 LAN self-protection 检查才认
+# 只在显式时机（首次引导、重置、合并预览）把本机地址写进标记区块；启动不调用。
 sync_local_direct() {
+	target=${1:-/etc/honk/config.dae}
 	begin='    # honk:local-direct-begin'
 	end='    # honk:local-direct-end'
-	grep -qxF "$begin" /etc/honk/config.dae || return 0
-	grep -qxF "$end" /etc/honk/config.dae || return 0
-	ips=$(local_direct_addresses)
+	[ -f "$target" ] && [ ! -L "$target" ] || return 1
+	grep -qxF "$begin" "$target" || return 0
+	grep -qxF "$end" "$target" || return 0
+	shift
+	ips=$(local_direct_addresses "$@")
 	[ -n "$ips" ] && rule="    dip($ips) && !dport(53) -> direct(must)" || rule=''
-	# honk-core 只认 .dae 后缀，临时文件必须带它
-	temp=/etc/honk/.config.$$.dae
+	# honk-core 只认 .dae 后缀，临时文件必须与目标同目录
+	temp=$(dirname "$target")/.local-direct.$$.dae
 	( umask 077; : > "$temp" ) || return 1
 	awk -v begin="$begin" -v end="$end" -v rule="$rule" '
 		$0 == begin { print; if (rule != "") print rule; skip = 1; next }
 		skip && $0 == end { print; skip = 0; next }
 		skip { next }
 		{ print }
-	' /etc/honk/config.dae > "$temp" || { rm -f "$temp"; return 1; }
-	cmp -s "$temp" /etc/honk/config.dae && { rm -f "$temp"; return 0; }
-	"$HONK_CORE" config validate --config "$temp" >/dev/null 2>&1 || { rm -f "$temp"; return 1; }
+	' "$target" > "$temp" || { rm -f "$temp"; return 1; }
+	cmp -s "$temp" "$target" && { rm -f "$temp"; return 0; }
 	chmod 0600 "$temp"
-	mv -f "$temp" /etc/honk/config.dae || { rm -f "$temp"; return 1; }
+	mv -f "$temp" "$target" || { rm -f "$temp"; return 1; }
 }
 
 check_config() {
@@ -1142,6 +1151,8 @@ EOF
 	[ "$runtime_nfqueue_enable" = true ] || [ "$runtime_nfqueue_enable" = false ] || { echo '{"ok":false,"message":"nfqueue_runtime_unavailable"}'; return 1; }
 	mock_config=$temp_dir/candidate.dae
 	render_initial_config "$lan_device" "$lan_ip" "$runtime_nfqueue_enable" "$old_main" > "$mock_config" || { echo '{"ok":false,"message":"default_config_render_failed"}'; return 1; }
+	wan_device=$(network_wan_device)
+	sync_local_direct "$mock_config" "$lan_device" "$wan_device" || { echo '{"ok":false,"message":"local_direct_render_failed"}'; return 1; }
 	"$HONK_CORE" config validate --config "$mock_config" >/dev/null 2>&1 || { echo '{"ok":false,"message":"candidate_config_invalid"}'; return 1; }
 	lan_url="http://$lan_ip:$listen_port"
 	if ! mock_start "$mock_config" "$mock_log" "$lan_url" "$response_file"; then
@@ -1231,30 +1242,6 @@ system_rollback() {
 
 system_rollback_state() { printf '%s\n' "${rollback_state:-incomplete}"; }
 
-# 只认顶层 include 块里的条目，注释和片段不参与。
-config_includes_system() {
-	awk '
-		BEGIN { inblock = 0 }
-		{
-			line = $0
-			sub(/\r$/, "", line)
-			if (!inblock) {
-				if (line ~ /^[[:space:]]*include[[:space:]]*\{/) { inblock = 1; rest = line; sub(/^[^{]*\{/, "", rest) }
-				else next
-			} else {
-				rest = line
-			}
-			sub(/#.*/, "", rest)
-			n = split(rest, parts, /[},]/)
-			for (i = 1; i <= n; i++) {
-				entry = parts[i]
-				gsub(/^[[:space:]\047"]+|[[:space:]\047"]+$/, "", entry)
-				if (entry == "system.dae") { print "yes"; exit }
-			}
-			if (line ~ /\}/) inblock = 0
-		}
-	' "$1"
-}
 
 # 自管模式：候选 system.dae 以文件路径传入，校验的是新文件组成的完整配置。
 write_system_config() {
@@ -1289,7 +1276,6 @@ write_system_config() {
 	cp "$candidate" "$work/system.dae" || { echo '{"ok":false,"message":"temporary_storage_unavailable"}'; return 1; }
 	# 主配置没 include system.dae 时，保存成功也不会生效，直接拒绝。
 	[ -n "$(config_includes_system "$work/config.dae")" ] || { echo '{"ok":false,"message":"system_config_not_included"}'; return 1; }
-	[ "$(config_owner "$work/config.dae")" != unknown ] || { echo '{"ok":false,"message":"config_layout_unsupported"}'; return 1; }
 	"$HONK_CORE" config validate --config "$work/config.dae" >/dev/null 2>&1 || { echo '{"ok":false,"message":"config_invalid"}'; return 1; }
 
 	system_written_hash=$(sha256sum "$sys" | awk '{print $1}')
@@ -1334,7 +1320,13 @@ case "$1" in
 		;;
 	local-direct)
 		load_settings
-		sync_local_direct
+		network_settings >/dev/null 2>&1 || :
+		sync_local_direct /etc/honk/config.dae "$lan_device" "$(network_wan_device)"
+		;;
+	local-direct-file)
+		load_settings
+		shift
+		sync_local_direct "$@"
 		;;
 	initialize)
 		initialize
@@ -1358,7 +1350,7 @@ case "$1" in
 		recover
 		;;
 	*)
-		echo "usage: $0 {check|diagnose|preflight|local-direct|initialize|settings|repair|detach|recover|write-system|panel-managed}" >&2
+		echo "usage: $0 {check|diagnose|preflight|local-direct|local-direct-file|initialize|settings|repair|detach|recover|write-system|panel-managed}" >&2
 		exit 2
 		;;
 esac

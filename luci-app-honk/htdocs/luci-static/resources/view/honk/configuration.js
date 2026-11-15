@@ -720,7 +720,7 @@ return view.extend({
 					return result;
 				mergeNotice.hidden = !result.legacy_system;
 				mergeBtn.hidden = !result.legacy_system;
-				legacyBtn.hidden = !result.legacy_system;
+				legacyBtn.hidden = !(result.legacy_system || result.includes_system);
 				setEditorContent(result.content || '', message || _('Current configuration loaded from /etc/honk/config.dae.'));
 				return result;
 			});

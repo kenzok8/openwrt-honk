@@ -9,6 +9,7 @@ HONK_CONFIG=$HONK_ROOT/config.dae
 HONK_SYSTEM=$HONK_ROOT/system.dae
 HONK_STATE=$HONK_ROOT/state/honk.db
 HONK_CORE=/usr/bin/honk-core
+CONTROL=/usr/share/honk/control.sh
 IMPORT_PREVIEW_ROOT=/tmp/honk-v2-import
 BACKUP=/tmp/honk-backup.tar.gz
 RESTORE=/tmp/honk-maintenance/restore.tar.gz
@@ -1058,7 +1059,26 @@ restore() {
 	json_result true "" restored
 }
 
+# 重置目标由调用方显式给出，执行时按实时地址复核；不猜网络名或设备名。
+# 目标必须是非 loopback 的活动设备，且该地址确实挂在其上。
+reset_verify_target() {
+	case "$reset_target_device" in ''|lo|lo:*|*[!A-Za-z0-9_.:-]*) return 1 ;; esac
+	case "$reset_target_ip" in ''|127.*|*[!0-9.]*) return 1 ;; esac
+	command -v ip >/dev/null 2>&1 || return 1
+	ip link show dev "$reset_target_device" 2>/dev/null | grep -q "state UP\|,UP\|UP," || return 1
+	ip -o addr show dev "$reset_target_device" 2>/dev/null |
+		awk '{ print $4 }' | cut -d/ -f1 | grep -qxF "$reset_target_ip"
+}
+
+render_reset_config() {
+	sed -e "s#^    lan_interface: br-lan\$#    lan_interface: '$3'#" \
+		-e "s#^        listen: '127\.0\.0\.1:9527'\$#        listen: '$4:$5'#" \
+		"$1" > "$2"
+}
+
 reset_data() {
+	reset_target_device=$1
+	reset_target_ip=$2
 	if foreign_core_running; then error unmanaged_core_running; return 1; fi
 	if managed_core_pid >/dev/null 2>&1; then old_running=1; fi
 	if ! acquire_lock; then error "$lock_error"; return 1; fi
@@ -1078,7 +1098,15 @@ reset_data() {
 	reset_uci=$temp_dir/reset-uci
 	mkdir -p "$reset_stage/etc/honk" "$reset_uci" || { error temporary_storage_unavailable; return 1; }
 	[ -f /usr/share/honk/default-config.dae ] && [ ! -L /usr/share/honk/default-config.dae ] || { error default_config_unavailable; return 1; }
-	cp /usr/share/honk/default-config.dae "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
+	reset_verify_target || { error lan_target_unavailable; return 1; }
+	render_reset_config /usr/share/honk/default-config.dae "$reset_stage/etc/honk/config.dae" "$reset_target_device" "$reset_target_ip" 9527 || { error reset_stage_failed; return 1; }
+	grep -q "^    lan_interface: '$reset_target_device'$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
+	grep -q "^        listen: '$reset_target_ip:9527'$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
+	reset_wan_device=
+	. /lib/functions/network.sh 2>/dev/null || :
+	network_get_device reset_wan_device wan 2>/dev/null || reset_wan_device=
+	case "$reset_wan_device" in ''|*[!A-Za-z0-9_.:-]*) reset_wan_device= ;; esac
+	"$CONTROL" local-direct-file "$reset_stage/etc/honk/config.dae" "$reset_target_device" "$reset_wan_device" || { error local_direct_render_failed; return 1; }
 	chmod 0600 "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" import honk < "$temp_dir/old-uci" || { error reset_profile_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.enabled=0 || { error reset_profile_stage_failed; return 1; }
@@ -1093,7 +1121,7 @@ reset_data() {
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" commit honk || { error reset_profile_stage_failed; return 1; }
 	load_uci_values uci "$reset_uci" || { error reset_profile_stage_failed; return 1; }
 	# 重置保留一个未引用的兼容文件，不再依赖旧网络选项生成运行配置。
-	write_live_system "$reset_stage/etc/honk/system.dae" br-lan 127.0.0.1 "$u_port" 0 true || { error system_config_render_failed; return 1; }
+	write_live_system "$reset_stage/etc/honk/system.dae" "$reset_target_device" "$reset_target_ip" "$u_port" 0 true || { error system_config_render_failed; return 1; }
 	chmod 0600 "$reset_stage/etc/honk/system.dae" || { error system_config_render_failed; return 1; }
 	reset_candidate=$temp_dir/reset-candidate
 	mkdir -p "$reset_candidate/etc" || { error reset_stage_failed; return 1; }
@@ -1111,7 +1139,7 @@ reset_data() {
 	foreign_core_running && { restore_abort unmanaged_core_running; return 1; }
 	checkpoint_sqlite || { restore_abort sqlite_checkpoint_failed; return 1; }
 	rm -rf "$reset_stage/etc/honk" || { restore_abort reset_stage_failed; return 1; }
-	stage_reset_tree "$HONK_ROOT" "$reset_stage/etc/honk" "$reset_candidate/etc/honk/system.dae" /usr/share/honk/default-config.dae || { restore_abort reset_stage_failed; return 1; }
+	stage_reset_tree "$HONK_ROOT" "$reset_stage/etc/honk" "$reset_candidate/etc/honk/system.dae" "$reset_candidate/etc/honk/config.dae" || { restore_abort reset_stage_failed; return 1; }
 	purge_business_state "$reset_stage/etc/honk/state/honk.db" || { restore_abort state_reset_failed; return 1; }
 	reset_archive_state=absent
 	if [ -f "$reset_stage/etc/honk/state/honk.db" ]; then reset_archive_state=present; fi
@@ -1149,12 +1177,12 @@ stage_reset_tree() {
 	stage_source=$1
 	stage_target=$2
 	stage_system=$3
-	stage_default=$4
+	stage_config=$4
 	[ -d "$stage_source" ] && [ ! -L "$stage_source" ] || return 1
 	[ -f "$stage_system" ] && [ ! -L "$stage_system" ] || return 1
-	[ -f "$stage_default" ] && [ ! -L "$stage_default" ] || return 1
+	[ -f "$stage_config" ] && [ ! -L "$stage_config" ] || return 1
 	mkdir -p "$stage_target/state" || return 1
-	cp "$stage_default" "$stage_target/config.dae" || return 1
+	cp "$stage_config" "$stage_target/config.dae" || return 1
 	cp "$stage_system" "$stage_target/system.dae" || return 1
 	chmod 0600 "$stage_target/config.dae" || return 1
 	chmod 0600 "$stage_target/system.dae" || return 1
@@ -1174,7 +1202,7 @@ fi
 case "$1" in
 	backup) backup ;;
 	restore) restore ;;
-	reset) reset_data ;;
+	reset) reset_data "$2" "$3" ;;
 	recover) recover_action ;;
 	*) error invalid_action ;;
 esac
