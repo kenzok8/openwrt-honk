@@ -40,6 +40,14 @@
 
 <p>含额外 include、重复系统块或其他无法确认的结构时，不自动合并，原布局仍可运行。配置页保留旧 <code>system.dae</code> 的编辑入口。恢复备份时保留文件里的接口与监听地址，换设备后需自行确认是否适用。</p>
 
+<h2 id="upgrade-keep">升级时保持原有配置</h2>
+
+<p>本次测试中，包管理器在一种情况下替换了 <code>config.dae</code>：装完包、完成首次引导、但从未启动过服务。此时旧主配置与包内默认文件字节完全相同，升级会被判为“未修改”而直接覆盖。其他已测状态（跑过启动、改过主配置、完整单文件）都保留了原文件。</p>
+
+<p><code>honk</code> 包用两个钩子处理这一种情况：升级前把旧 <code>config.dae</code> 与 <code>system.dae</code> 保存到 <code>/etc/.honk-preupgrade/</code>，升级后仅当以下条件全部成立时才原样写回：无 <code>honk-core</code> 进程、当前 <code>config.dae</code> 就是本包默认模板、<code>system.dae</code> 与保存时一致。写回后校验文件摘要与核心配置校验。</p>
+
+<p>钩子不做任何服务启停，不改 <code>/etc/config/honk</code>，不合并配置。服务是否启动由 <code>enabled</code> 等现有状态与 <code>default_postinst</code> 决定；恢复失败也不会阻止后续默认的 start。写回前会把当前文件快照到同一事务目录，校验失败时从该快照回滚，并区分“已回滚”与“回滚失败”分别记日志。APK 上 <code>pre-upgrade</code> 失败不会中止安装（apk 3 的行为），这种情况下没有副本可写回，配置会保持被替换后的状态。</p>
+
 <h2 id="nodes">加节点与订阅</h2>
 
 <p>两条路，最终都落在 <code>config.dae</code>：</p>
