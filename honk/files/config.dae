@@ -19,6 +19,13 @@ experimental {
         config_write: true
         ui: '/usr/share/doona'
     }
+
+    clash_api {
+        external_controller: '0.0.0.0:9090'
+        external_ui: '/usr/share/honk/zashboard'
+        secret: ''
+        default_mode: Rule
+    }
 }
 
 group {

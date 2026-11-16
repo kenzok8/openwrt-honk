@@ -242,8 +242,6 @@ return view.extend({
 			if (!lanSelect.children.length)
 				lanSelect.appendChild(E('option', { 'value': '' }, _('No network interfaces found')));
 
-			const listenHostInput = E('input', { 'class': 'cbi-input-text', 'type': 'text', 'name': 'listen_host', 'id': 'honk-listen-host', 'autocomplete': 'off' });
-			listenHostInput.value = listenParts[0] || '';
 			const listenPortInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'id': 'honk-listen-port', 'min': '1', 'max': '65535', 'step': '1' });
 			listenPortInput.value = listenParts[1] || (status.listen_port ? String(status.listen_port) : '9527');
 
@@ -273,11 +271,11 @@ return view.extend({
 			if (status.settings_owner !== 'file')
 				card.appendChild(E('p', { 'class': 'honk-note' }, _('This configuration is managed by the panel. Saving keeps the previous layout.')));
 			form.appendChild(field(_('LAN interface'), lanSelect));
-			form.appendChild(field(_('Listen address'), listenHostInput));
 			form.appendChild(field(_('Listen port'), listenPortInput));
 			form.appendChild(field(_('Enable Clash API'), clashSwitch));
 			form.appendChild(field(_('Clash API port'), clashPortInput));
-			form.appendChild(field(_('Clash API secret'), clashSecretInput));
+			form.appendChild(field(_('Clash API secret'), clashSecretInput,
+				status.clash_api_secret_set ? _('A secret is already set. Leave blank to keep it.') : _('Optional. Used by Clash API clients.')));
 			form.appendChild(field(_('Clear saved secret'), clashClearSwitch));
 			form.appendChild(E('p', { 'class': 'honk-note' }, _('Leave the secret blank to keep the saved one. Use your existing HTTPS reverse proxy for external access.')));
 			form.appendChild(E('div', { 'class': 'cbi-page-actions' }, [ save ]));
@@ -286,7 +284,6 @@ return view.extend({
 			form.addEventListener('submit', function(ev) {
 				ev.preventDefault();
 				const device = lanSelect.value;
-				const listenHost = listenHostInput.value.trim();
 				const listenPort = Number(listenPortInput.value);
 				const clashOn = clashEnabledInput.checked;
 				const clashPort = Number(clashPortInput.value);
@@ -294,7 +291,6 @@ return view.extend({
 				const mode = clashClearInput.checked ? 'clear' : (secret ? 'set' : 'keep');
 
 				if (!device) { message.textContent = _('Choose a LAN interface.'); return; }
-				if (!/^[A-Za-z0-9_.:-]+$/.test(listenHost)) { message.textContent = _('Enter a listen address, for example 192.168.3.1 or [::1].'); return; }
 				if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) { message.textContent = _('The listen port must be between 1 and 65535.'); return; }
 				if (clashOn) {
 					if (!Number.isInteger(clashPort) || clashPort < 1 || clashPort > 65535) { message.textContent = _('The Clash API port must be between 1 and 65535.'); return; }
@@ -309,7 +305,6 @@ return view.extend({
 				honk.settings({
 					lan_network: matched ? matched.network : status.lan_network,
 					lan_device: device,
-					listen_host: listenHost,
 					listen_port: listenPort,
 					clash_api_enabled: clashOn,
 					clash_api_port: clashPort,

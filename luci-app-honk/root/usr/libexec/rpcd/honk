@@ -771,7 +771,8 @@ settings_file_render() {
 	/^experimental[ \t]*\{/ { in_exp = 1 }
 	{
 		if (in_exp && need && /^\}/) {
-			printf "    clash_api {\n        external_controller: \047%s:%s\047\n", ch, cp
+			# 新建块必须带 external_ui，否则核心不知道面板在哪，/ui/ 会 404。
+			printf "    clash_api {\n        external_controller: \047%s:%s\047\n        external_ui: \047/usr/share/honk/zashboard\047\n", ch, cp
 			if (sm != "keep") printf "        secret: \047%s\047\n", ss
 			printf "    }\n"
 			need = 0
