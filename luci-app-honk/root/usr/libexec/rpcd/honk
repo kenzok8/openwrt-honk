@@ -1114,7 +1114,9 @@ reset_admin() {
 	if pidof honk-core >/dev/null 2>&1; then
 		honk_lifecycle_stop 30 || { emit_result false service_stop_failed_rolled_back; return 1; }
 	fi
-	reset_data_dir=$(sed -n "s/^[[:space:]]*data_dir:[[:space:]]*'\([^']*\)'.*/\1/p" /etc/honk/system.dae 2>/dev/null | head -n 1)
+	# 单文件布局把 data_dir 写在 config.dae；system.dae 只在旧 include 布局里存在。
+	reset_data_dir=$(sed -n "s/^[[:space:]]*data_dir:[[:space:]]*'\([^']*\)'.*/\1/p" /etc/honk/config.dae 2>/dev/null | head -n 1)
+	[ -n "$reset_data_dir" ] || reset_data_dir=$(sed -n "s/^[[:space:]]*data_dir:[[:space:]]*'\([^']*\)'.*/\1/p" /etc/honk/system.dae 2>/dev/null | head -n 1)
 	[ -n "$reset_data_dir" ] || reset_data_dir=/etc/honk
 	case "$reset_data_dir" in /*) ;; *) reset_data_dir=/etc/honk ;; esac
 	if [ -f "$reset_data_dir/state/honk.db" ]; then
