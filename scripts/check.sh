@@ -132,8 +132,8 @@ for (const method of expected) {
 	if (!block || !block[1].trim() || /unknown_method/.test(block[1]))
 		throw new Error(`RPC method ${method} has no concrete backend case`);
 }
-if (!/params:\s*\[\s*'lan_network',\s*'listen_port',\s*'clash_api_enabled',\s*'clash_api_port',\s*'clash_api_secret'\s*\]/.test(rpcSource))
-	throw new Error('settings RPC parameters do not include Clash API settings');
+if (!/params:\s*\[[^\]]*'lan_device'[^\]]*'listen_host'[^\]]*'clash_host'[^\]]*'clash_api_secret_mode'[^\]]*'expect_sha256'[^\]]*\]/.test(rpcSource))
+	throw new Error('settings RPC parameters do not include file-mode fields');
 NODE
 
 redacted=$(printf '%s\n' \
