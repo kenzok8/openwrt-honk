@@ -100,8 +100,8 @@ return view.extend({
 		const actionMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const setupArea = E('div');
 		let currentStatus = data.status;
-/* 表单加载时的配置摘要；自动刷新后仍用它，避免拿新 SHA 提交旧表单值。 */
-let formSnapshotSha = null;
+		/* 表单加载时的配置摘要；自动刷新后仍用它，避免拿新 SHA 提交旧表单值。 */
+		let formSnapshotSha = null;
 		let busy = false;
 		let setupBusy = false;
 		let settingsBusy = false;

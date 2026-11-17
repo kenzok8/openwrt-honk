@@ -1587,7 +1587,13 @@ list)
 				exec "$CONTROL" initialize
 				;;
 			settings)
-				if [ "$(config_owner /etc/honk/config.dae)" = file ]; then settings_file_apply; else exec "$CONTROL" settings; fi
+				# 首次引导阶段只记意图（UCI），文件仍保持模板，初始化才据此渲染；
+				# 初始化之后才直接编辑 config.dae。
+				if [ "$(config_owner /etc/honk/config.dae)" = file ] && [ "$(uci -q get honk.main.initialized)" = 1 ]; then
+					settings_file_apply
+				else
+					exec "$CONTROL" settings
+				fi
 				;;
 			probe_subscription)
 				probe_subscription
