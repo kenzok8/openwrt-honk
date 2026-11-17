@@ -232,10 +232,29 @@ jobs:
           set -euo pipefail
           rm -rf bundle
           mkdir -p bundle
-          if ! gh release download "$SOURCE_TAG" --pattern '*' --dir bundle; then
-            echo "::error::asset_fetch_failed: cannot download release $SOURCE_TAG (permissions or missing release)"
+          # draft 没有 tag ref，releases/tags 会 404；按 tagName 遍历列表取 ID。
+          release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"\"$SOURCE_TAG\"\") | .id" | head -n 1)
+          if [ -z "${release_id:-}" ]; then
+            echo "::error::asset_fetch_failed: no release with tag $SOURCE_TAG"
             exit 1
           fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+            --jq '.[] | "\(.name) \(.id)"' > assets.txt
+          if [ ! -s assets.txt ]; then
+            echo "::error::asset_fetch_failed: release $release_id has no assets"
+            exit 1
+          fi
+          while read -r name id; do
+            case "$name" in
+              */*|.*|'') echo "::error::asset_fetch_failed: unsafe asset name $name"; exit 1 ;;
+            esac
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "bundle/$name"
+          done < assets.txt
+          rm -f assets.txt
+          echo "downloaded $(ls -1 bundle | wc -l) asset(s) from release $release_id"
+
 
       - name: Verify bundle against the reviewed manifest
         run: |
