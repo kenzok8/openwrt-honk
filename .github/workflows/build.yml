@@ -234,13 +234,13 @@ jobs:
           mkdir -p bundle
           # draft 没有 tag ref，releases/tags 会 404；按 tagName 遍历列表取 ID。
           release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq ".[] | select(.tag_name == \"\"$SOURCE_TAG\"\") | .id" | head -n 1)
+            --jq '.[] | select(.tag_name == "'"$SOURCE_TAG"'") | .id' | head -n 1)
           if [ -z "${release_id:-}" ]; then
             echo "::error::asset_fetch_failed: no release with tag $SOURCE_TAG"
             exit 1
           fi
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
-            --jq '.[] | "\(.name) \(.id)"' > assets.txt
+            --jq '.[] | .name + " " + (.id|tostring)' > assets.txt
           if [ ! -s assets.txt ]; then
             echo "::error::asset_fetch_failed: release $release_id has no assets"
             exit 1
