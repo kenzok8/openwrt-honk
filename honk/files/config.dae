@@ -6,8 +6,8 @@ global {
     allow_insecure: false
     auto_config_kernel_parameter: true
     data_dir: '/etc/honk'
-    # 运行日志写 data_dir 下的文件；清空则只走 logread。
-    log_file: 'honk.log'
+    # 默认只走 logread，由面板日志页读取。需要跨重启排障时再指定持久路径。
+    log_file: ''
     # 节点健康检查目标：经节点访问，用国外可达的地址，避免误判。
     tcp_check_url: 'https://www.gstatic.com/generate_204'
     tcp_check_http_method: HEAD
