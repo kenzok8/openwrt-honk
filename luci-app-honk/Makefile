@@ -13,7 +13,7 @@ PKG_SOURCE:=doona-9dcb9489-355f3716f059.tar.gz
 # Each package Makefile is evaluated on its own, so this tag is defined here too
 # instead of relying on the honk package's variable. It must match honk/Makefile:
 # scripts/check.sh enforces that.
-HONK_SOURCE_TAG?=source-42975766273
+HONK_SOURCE_TAG?=source-verified-20261117
 PKG_SOURCE_URL?=https://github.com/kenzok8/openwrt-honk/releases/download/$(HONK_SOURCE_TAG)
 PKG_SOURCE_SUBDIR:=doona
 PKG_HASH:=355f3716f059904ea5a74969e46af59cf282253101fb7cb27a778a2c620c32de
