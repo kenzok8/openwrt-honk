@@ -1029,7 +1029,7 @@ default_config_matches() {
 render_initial_config() {
 	awk -v device="$1" -v host="$2" -v nfq="$3" -v port="$listen_port" \
 		-v api_enabled="$clash_api_enabled" -v api_port="$clash_api_port" -v api_secret="$clash_api_secret" '
-		/^    lan_interface: br-lan$/ { print "    lan_interface: '\''" device "'\''"; lan++; next }
+		/^    lan_interface: br-lan$/ { print "    lan_interface: " device; lan++; next }
 		/^    nfqueue_enable: (true|false)$/ { print "    nfqueue_enable: " nfq; queue++; next }
 		/^        listen: '\''127\.0\.0\.1:9527'\''$/ { print "        listen: '\''" host ":" port "'\''"; listen++; next }
 		/^    clash_api \{$/ { in_clash = 1; clash++; print; next }

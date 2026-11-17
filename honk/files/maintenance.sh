@@ -1071,7 +1071,7 @@ reset_verify_target() {
 }
 
 render_reset_config() {
-	sed -e "s#^    lan_interface: br-lan\$#    lan_interface: '$3'#" \
+	sed -e "s#^    lan_interface: br-lan\$#    lan_interface: $3#" \
 		-e "s#^        listen: '127\.0\.0\.1:9527'\$#        listen: '$4:$5'#" \
 		"$1" > "$2"
 }
@@ -1100,7 +1100,7 @@ reset_data() {
 	[ -f /usr/share/honk/default-config.dae ] && [ ! -L /usr/share/honk/default-config.dae ] || { error default_config_unavailable; return 1; }
 	reset_verify_target || { error lan_target_unavailable; return 1; }
 	render_reset_config /usr/share/honk/default-config.dae "$reset_stage/etc/honk/config.dae" "$reset_target_device" "$reset_target_ip" 9527 || { error reset_stage_failed; return 1; }
-	grep -q "^    lan_interface: '$reset_target_device'$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
+	grep -q "^    lan_interface: $reset_target_device$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
 	grep -q "^        listen: '$reset_target_ip:9527'$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
 	reset_wan_device=
 	. /lib/functions/network.sh 2>/dev/null || :
