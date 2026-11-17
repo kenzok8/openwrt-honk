@@ -1130,6 +1130,13 @@ reset_data() {
 	validate_candidate "$reset_candidate" "$reset_uci" absent
 	validate_rc=$?
 	[ "$validate_rc" = 0 ] || { [ "$validate_rc" = 2 ] && error default_config_unsupported || error default_config_validation_failed; return 1; }
+	# 重置前留一份旧库，降级或取证时还能取回。
+	reset_db_archive=/etc/honk-pre-reset
+	if [ -f "$HONK_STATE" ] && [ ! -L "$HONK_STATE" ]; then
+		mkdir -p "$reset_db_archive" 2>/dev/null || :
+		chmod 0700 "$reset_db_archive" 2>/dev/null || :
+		cp -p "$HONK_STATE" "$reset_db_archive/honk.db.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || :
+	fi
 	journal_create reset || { error transaction_journal_create_failed; return 1; }
 	if [ "$old_running" = 1 ]; then
 		service_stopped=1

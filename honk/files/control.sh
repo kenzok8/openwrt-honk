@@ -157,6 +157,12 @@ check_config() {
 	config_error=
 	[ "$config_file" = /etc/honk/config.dae ] || { fail "配置路径必须为 /etc/honk/config.dae"; return 1; }
 	[ -f /etc/honk/config.dae ] && [ ! -L /etc/honk/config.dae ] || { fail "/etc/honk/config.dae 不是普通文件（可能被替换成软链）"; return 1; }
+	# 状态库损坏时直接给可执行的提示，不要让核心抛 raw 错误。
+	state_db=/etc/honk/state/honk.db
+	if [ -f "$state_db" ] && [ ! -L "$state_db" ] && command -v sqlite3 >/dev/null 2>&1; then
+		state_check=$(sqlite3 "$state_db" 'PRAGMA quick_check;' 2>/dev/null) || state_check=failed
+		[ "$state_check" = ok ] || { config_error=state_database_corrupt; fail "状态数据库损坏，请到维护页执行重置"; return 1; }
+	fi
 	core_validation_result=$("$HONK_CORE" config validate --config /etc/honk/config.dae) || { fail "config.dae 未通过静态校验，请先修正配置"; return 1; }
 	runtime_nfqueue_enable=$(printf '%s\n' "$core_validation_result" | jsonfilter -e '@.runtime.nfqueue_enable' 2>/dev/null)
 	case "$runtime_nfqueue_enable" in
@@ -1004,11 +1010,18 @@ initialize_preflight() {
 }
 
 # 允许安装模板中由本机地址同步器维护的 local-direct 标记区块变化。
+# 归一只剥渲染器会写回的运行字段，业务规则照原样比对。
 normalize_default_config() {
 	awk '
 		/^    # honk:local-direct-begin$/ { print; inside = 1; next }
 		inside && /^    # honk:local-direct-end$/ { print; inside = 0; next }
 		inside { next }
+		/^    clash_api \{$/ { in_clash = 1; print; next }
+		in_clash && /^    \}$/ { in_clash = 0; print; next }
+		in_clash && /^        (external_controller|secret): / { print "        " substr($0, 9, index($0, ":") - 9) ": <managed>"; next }
+		/^    lan_interface: / { print "    lan_interface: <managed>"; next }
+		/^    nfqueue_enable: (true|false)$/ { print "    nfqueue_enable: <managed>"; next }
+		/^        listen: / { print "        listen: <managed>"; next }
 		{ print }
 		END { if (inside) exit 1 }
 	' "$1"
@@ -1031,7 +1044,7 @@ render_initial_config() {
 		-v api_enabled="$clash_api_enabled" -v api_port="$clash_api_port" -v api_secret="$clash_api_secret" '
 		/^    lan_interface: br-lan$/ { print "    lan_interface: " device; lan++; next }
 		/^    nfqueue_enable: (true|false)$/ { print "    nfqueue_enable: " nfq; queue++; next }
-		/^        listen: '\''127\.0\.0\.1:9527'\''$/ { print "        listen: '\''" host ":" port "'\''"; listen++; next }
+		/^        listen: .*$/ { print "        listen: '\''" host ":" port "'\''"; listen++; next }
 		/^    clash_api \{$/ { in_clash = 1; clash++; print; next }
 		in_clash && /^        external_controller:/ {
 			# 关闭时写空串，等价于核心侧不监听，块本身保留以便再次启用。

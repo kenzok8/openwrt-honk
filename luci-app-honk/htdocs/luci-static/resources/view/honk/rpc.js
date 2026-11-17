@@ -298,6 +298,7 @@ function tokenMessage(token) {
 		configuration_page_merge_preview_required: _('Preview the merge on the configuration page.'),
 		custom_config_requires_configuration_page: _('This file has been customized. Use the configuration page instead of the first setup wizard.'),
 		nfqueue_runtime_unavailable: _('Update the Honk core together with this package. Its configuration diagnostics are incomplete.'),
+	state_database_corrupt: _('状态数据库损坏，请到维护页执行重置后重新初始化。'),
 		config_merge_not_applicable: _('This layout cannot be merged automatically. Keep editing the existing files.'),
 		config_merge_validation_failed: _('The merged configuration did not pass validation. The existing files were kept.'),
 		config_merge_source_changed: _('A source file changed. Refresh the merge preview.'),

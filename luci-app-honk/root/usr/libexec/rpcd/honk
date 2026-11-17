@@ -202,11 +202,16 @@ status() {
 }
 
 service_ready_config() {
-	local enabled initialized
+	local enabled initialized db_state
 	config_load honk
 	config_get_bool enabled main enabled 0
 	config_get_bool initialized main initialized 0
-	[ "$initialized" = 1 ]
+	[ "$initialized" = 1 ] || return 1
+	if [ -f /etc/honk/state/honk.db ] && [ ! -L /etc/honk/state/honk.db ] && command -v sqlite3 >/dev/null 2>&1; then
+		db_state=$(sqlite3 /etc/honk/state/honk.db 'PRAGMA quick_check;' 2>/dev/null) || db_state=failed
+		[ "$db_state" = ok ] || { config_error=state_database_corrupt; return 1; }
+	fi
+	return 0
 }
 
 # 包文件被改坏（丢了执行位）时自己修回来，用户不该为这个去敲 chmod。
@@ -1689,7 +1694,7 @@ list)
 				;;
 			start)
 				begin_mutation
-				if ! service_ready_config; then emit_result false not_initialized; exit 1; fi
+				if ! service_ready_config; then emit_result false "${config_error:-not_initialized}"; exit 1; fi
 				old_enabled=$(uci -q get honk.main.enabled || echo 0)
 				if ! set_enabled 1; then emit_result false settings_write_failed; exit 1; fi
 				managed_pid=$(honk_lifecycle_managed_pid 2>/dev/null)
@@ -1712,7 +1717,7 @@ list)
 				;;
 			restart)
 				begin_mutation
-				if ! service_ready_config; then emit_result false not_initialized; exit 1; fi
+				if ! service_ready_config; then emit_result false "${config_error:-not_initialized}"; exit 1; fi
 				old_enabled=$(uci -q get honk.main.enabled || echo 0)
 				if ! set_enabled 1; then emit_result false settings_write_failed; exit 1; fi
 				if [ -n "$(honk_lifecycle_managed_pid 2>/dev/null)" ]; then

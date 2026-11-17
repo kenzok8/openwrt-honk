@@ -1704,3 +1704,6 @@ msgid "A secret is already set. Leave blank to keep it."
 msgstr "密钥已设置，留空则保留原值。"
 msgid "Optional. Used by Clash API clients."
 msgstr "可留空，供 Clash API 客户端使用。"
+
+msgid "状态数据库损坏，请到维护页执行重置后重新初始化。"
+msgstr "状态数据库损坏，请到维护页执行重置后重新初始化。"
