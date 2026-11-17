@@ -844,6 +844,8 @@ settings_file_apply() {
 	probe_listen=$(echo "$probe" | sed -n 's/^listen=//p')
 	probe_hasclash=$(echo "$probe" | sed -n 's/^hasclash=//p')
 	[ "$(printf '%s\n' "$probe_lan" | grep -c .)" = 1 ] || { emit_result false quick_settings_unsupported; return 1; }
+	# 多值（逗号分隔）无法安全映射回单个设备，交给文本编辑。
+	case "$probe_lan" in *,*) emit_result false quick_settings_unsupported; return 1 ;; esac
 	[ "$(printf '%s\n' "$probe_listen" | grep -c .)" = 1 ] || { emit_result false quick_settings_unsupported; return 1; }
 
 	[ -n "$sf_lan" ] || sf_lan=$probe_lan
@@ -865,8 +867,9 @@ settings_file_apply() {
 
 	if [ "$sf_ce" = 1 ]; then
 		probe_clash=$(echo "$probe" | sed -n 's/^clash=//p')
-		# 面板不再单独暴露 Clash API 绑定地址，与监听地址共用，等价于旧版行为。
-		sf_ch=$sf_lh
+		# 已有绑定地址原样保留，只有新建块时才跟随 Native 监听地址。
+		[ -n "$sf_ch" ] || sf_ch=${probe_clash%:*}
+		[ -n "$sf_ch" ] || sf_ch=$sf_lh
 		[ -n "$sf_cp" ] || sf_cp=${probe_clash##*:}
 		[ -n "$(settings_split_addr "$sf_ch:$sf_cp")" ] || { emit_result false invalid_clash_api_settings; return 1; }
 		case "$sf_cp" in ''|*[!0-9]*) emit_result false invalid_clash_api_settings; return 1 ;; esac

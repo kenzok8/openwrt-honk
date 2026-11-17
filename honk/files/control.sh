@@ -1033,7 +1033,12 @@ render_initial_config() {
 		/^    nfqueue_enable: (true|false)$/ { print "    nfqueue_enable: " nfq; queue++; next }
 		/^        listen: '\''127\.0\.0\.1:9527'\''$/ { print "        listen: '\''" host ":" port "'\''"; listen++; next }
 		/^    clash_api \{$/ { in_clash = 1; clash++; print; next }
-		in_clash && /^        external_controller:/ { print "        external_controller: '\''" host ":" api_port "'\''"; controller++; next }
+		in_clash && /^        external_controller:/ {
+			# 关闭时写空串，等价于核心侧不监听，块本身保留以便再次启用。
+			if (api_enabled == 1) print "        external_controller: '\''" host ":" api_port "'\''"
+			else print "        external_controller: '\'''\''"
+			controller++; next
+		}
 		in_clash && /^        secret:/ { print "        secret: '\''" api_secret "'\''"; secret++; next }
 		in_clash && /^    }$/ { in_clash = 0; print; next }
 		/^experimental \{$/ { in_experimental = 1; depth = 1; print; next }
@@ -1058,7 +1063,7 @@ render_initial_config() {
 		END {
 			if (lan != 1 || queue != 1 || listen != 1) exit 1
 			if (api_enabled == 1 && (clash != 1 || controller != 1 || secret != 1)) exit 1
-			if (api_enabled != 1 && clash != 0) exit 1
+			# 关闭时允许 clash 块存在，块内 controller 会被渲染成空串。
 		}
 	' "${4:-/etc/honk/config.dae}"
 }

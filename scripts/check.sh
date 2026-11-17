@@ -251,7 +251,8 @@ grep -Fq 'UPDATE_LOCK_OWNED=1' honk/files/update.sh
 grep -Fq 'checking_feed' honk/files/job.sh
 
 
-grep -Fq "honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
+grep -Fq 'lan_device: device' luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
+grep -Fq 'expect_sha256: status.config_sha256' luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
 # --- Linux 6.6 实验通道的 pin 保护 ---
 # 官方自动同步只认 ci/pins.env；一旦它也能改实验 pin，第三方核心就会被官方

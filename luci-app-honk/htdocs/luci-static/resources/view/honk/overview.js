@@ -100,6 +100,8 @@ return view.extend({
 		const actionMessage = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 		const setupArea = E('div');
 		let currentStatus = data.status;
+/* 表单加载时的配置摘要；自动刷新后仍用它，避免拿新 SHA 提交旧表单值。 */
+let formSnapshotSha = null;
 		let busy = false;
 		let setupBusy = false;
 		let settingsBusy = false;
@@ -220,6 +222,8 @@ return view.extend({
 			const card = E('section', { 'class': 'honk-card' });
 			const form = E('form');
 			const candidates = data.candidates || [];
+			if (formSnapshotSha === null)
+				formSnapshotSha = status.config_sha256 || '';
 			const currentDevice = status.runtime_lan || status.lan_network || '';
 			const listenParts = splitAddress(status.runtime_listen);
 			const clashParts = splitAddress(status.clash_listen_addr);
@@ -310,8 +314,9 @@ return view.extend({
 					clash_api_port: clashPort,
 					clash_api_secret: secret,
 					clash_api_secret_mode: mode,
-					expect_sha256: status.config_sha256
+					expect_sha256: formSnapshotSha
 				}).then(honk.ensureOk).then(function(result) {
+					formSnapshotSha = null;
 					clashSecretInput.value = '';
 					clashClearInput.checked = false;
 					message.textContent = honk.resultMessage(result, _('Service settings saved.'));
