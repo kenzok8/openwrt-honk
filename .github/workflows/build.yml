@@ -187,7 +187,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: read
+      # draft releases 只对 push 权限可见，这个 job 只读
+      contents: write
     env:
       SOURCE_TAG: ${{ inputs.source_tag }}
       EXPECTED_MANIFEST: ${{ inputs.expected_manifest }}
