@@ -9,12 +9,25 @@ on:
         description: 'Build an x86_64 SDK test package and upload artifacts only'
         type: boolean
         default: false
+      verify_source_only:
+        description: 'Only verify a published source bundle, skip every build job'
+        type: boolean
+        default: false
+      source_tag:
+        description: 'Source tag to verify (required when verify_source_only)'
+        type: string
+        default: ''
+      expected_manifest:
+        description: 'JSON object mapping asset file name to expected sha256'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   source-build:
+    if: ${{ !inputs.verify_source_only }}
     name: Build pinned Doona interface
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -43,6 +56,7 @@ jobs:
           retention-days: 7
 
   core-build:
+    if: ${{ !inputs.verify_source_only }}
     name: Build honk-core (x86_64 smoke)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -76,7 +90,7 @@ jobs:
 
   stable-sdk-x86_64:
     name: Build stable x86_64 test packages (artifact only)
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_stable_x86_64_package }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_stable_x86_64_package && !inputs.verify_source_only }}
     needs: [source-build, core-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -166,3 +180,67 @@ jobs:
             artifacts/core/honk/generated-provenance.json
           if-no-files-found: error
           retention-days: 7
+
+  verify-source:
+    name: Verify published source bundle
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_source_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      EXPECTED_MANIFEST: ${{ inputs.expected_manifest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if [ -z "${SOURCE_TAG:-}" ]; then
+            echo "::error::source_tag is required in verify_source_only mode"
+            exit 1
+          fi
+          case "$SOURCE_TAG" in
+            -*|*[!A-Za-z0-9._-]*|'')
+              echo "::error::source_tag must match ^source-[A-Za-z0-9._-]+$"
+              exit 1
+              ;;
+          esac
+          case "$SOURCE_TAG" in
+            source-?*) ;;
+            *)
+              echo "::error::source_tag must be source- plus at least one character"
+              exit 1
+              ;;
+          esac
+          if [ -z "${EXPECTED_MANIFEST:-}" ]; then
+            echo "::error::expected_manifest is required in verify_source_only mode"
+            exit 1
+          fi
+          if ! printf '%s' "$EXPECTED_MANIFEST" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d, dict) and d'; then
+            echo "::error::expected_manifest is not a non-empty JSON object"
+            exit 1
+          fi
+
+      - name: Fetch the tagged source bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf bundle
+          mkdir -p bundle
+          if ! gh release download "$SOURCE_TAG" --pattern '*' --dir bundle; then
+            echo "::error::asset_fetch_failed: cannot download release $SOURCE_TAG (permissions or missing release)"
+            exit 1
+          fi
+
+      - name: Verify bundle against the reviewed manifest
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-source-bundle.py \
+            --bundle bundle \
+            --manifest "$EXPECTED_MANIFEST" \
+            --tag "$SOURCE_TAG"
