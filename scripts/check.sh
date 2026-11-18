@@ -24,7 +24,7 @@ for script in honk/files/*.sh luci-app-honk/root/usr/libexec/rpcd/honk luci-app-
 done
 sh -n honk/files/honk.init
 sh -n honk/files/90-honk-boot
-for file in luci-app-honk/htdocs/luci-static/resources/view/honk/{rpc,overview,settings,dashboard,configuration,logs,maintenance,converter,sha256}.js; do
+for file in luci-app-honk/htdocs/luci-static/resources/view/honk/{rpc,overview,dashboard,configuration,logs,maintenance,converter,sha256}.js; do
 	node --check "$file"
 done
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
