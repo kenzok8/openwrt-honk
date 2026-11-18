@@ -21,6 +21,41 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
+function systemConfigCard() {
+	const textarea = E('textarea', {
+		'class': 'cbi-input-text', 'rows': 18, 'spellcheck': 'false',
+		'style': 'width:100%;font-family:monospace'
+	});
+	const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
+	const saveBtn = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'button' }, _('保存并校验'));
+
+	honk.systemRead().then(function(result) {
+		textarea.value = (result && result.content) || '';
+	}).catch(function(error) {
+		message.textContent = honk.errorMessage(error, _('无法读取 system.dae'));
+	});
+
+	saveBtn.addEventListener('click', function() {
+		saveBtn.disabled = true;
+		message.textContent = _('校验并写入…');
+		honk.systemSave(textarea.value).then(honk.ensureOk).then(function(result) {
+			message.textContent = honk.resultMessage(result, _('已保存，面板不再改写 system.dae'));
+			window.setTimeout(function() { location.reload(); }, 1200);
+		}).catch(function(error) {
+			message.textContent = honk.errorMessage(error, _('保存失败，请查看系统状态'));
+		}).finally(function() { saveBtn.disabled = false; });
+	});
+
+
+	return E('div', { 'class': 'honk-card' }, [
+		E('h3', { 'class': 'honk-card-title' }, _('system.dae（直接编辑）')),
+		E('p', { 'class': 'honk-note' }, _('The active configuration still includes this legacy file. Edit it here, or preview merging it on the configuration page.')),
+		textarea,
+		E('div', { 'class': 'cbi-page-actions' }, [ saveBtn ]),
+		message
+	]);
+}
+
 function field(label, control, help) {
 	const controlId = control.id || (control.querySelector && control.querySelector('input, select, textarea') || {}).id;
 	const cell = E('div', { 'class': 'cbi-value-field' }, [ control ]);
@@ -49,6 +84,19 @@ return view.extend({
 	render: function(data) {
 		honk.installStyles();
 		const page = E('div', { 'class': 'cbi-map honk-page' });
+		if (data.status && data.status.initialized) {
+			page.appendChild(E('div', { 'class': 'honk-header' }, [
+				E('h2', {}, _('Settings')),
+				E('p', { 'class': 'honk-header-sub' }, _('Runtime settings are managed in config.dae.'))
+			]));
+			page.appendChild(E('div', { 'class': 'honk-card' }, [
+				E('a', { 'class': 'cbi-button', 'href': L.url('admin/services/honk/configuration') + '#edit' }, _('Edit configuration'))
+			]));
+			if (data.status.includes_system)
+				page.appendChild(systemConfigCard());
+			return page;
+		}
+
 		const section = E('form', { 'class': 'honk-card' });
 		const networkSelect = E('select', { 'class': 'cbi-input-select', 'name': 'lan_network', 'id': 'honk-lan-network' });
 		const portInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'id': 'honk-listen-port', 'min': '1024', 'max': '65535', 'step': '1' });
@@ -75,15 +123,6 @@ return view.extend({
 
 		section.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Honk settings')));
 
-		/* 配置自带 global/experimental 时这些值归文件，后端会拒绝写入。 */
-		const owner = (data.status && data.status.settings_owner) || 'unknown';
-		if (owner !== 'system') {
-			[ networkSelect, portInput, clashEnabledInput, clashPortInput, clashSecretInput ].forEach(function(input) {
-				input.disabled = true;
-			});
-			save.disabled = true;
-			clashSwitch.syncSwitch();
-		}
 		if (data.statusError)
 			section.appendChild(E('div', { 'class': 'alert-message' }, _('Could not read current settings: %s').format(data.statusError)));
 		if (data.networkError)
@@ -128,7 +167,7 @@ return view.extend({
 			message.textContent = _('Saving…');
 			honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret).then(honk.ensureOk).then(function(result) {
 				clashSecretInput.value = '';
-				message.textContent = honk.resultMessage(result, _('Settings saved and applied.'));
+				message.textContent = honk.resultMessage(result, _('First setup settings saved.'));
 			}).catch(function(error) {
 				message.textContent = honk.errorMessage(error, _('Save failed. Check the settings and system status.'));
 			}).finally(function() {
@@ -138,9 +177,10 @@ return view.extend({
 
 		page.appendChild(E('div', { 'class': 'honk-header' }, [
 			E('h2', {}, _('Settings')),
-			E('p', { 'class': 'honk-header-sub' }, _('Network interface, listen port and boot behaviour for the Honk service.'))
+			E('p', { 'class': 'honk-header-sub' }, _('These settings are used only by the first setup wizard. Later changes belong in config.dae.'))
 		]));
 		page.appendChild(section);
+
 		return page;
 	}
 });

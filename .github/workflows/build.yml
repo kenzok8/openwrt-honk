@@ -4,12 +4,30 @@ on:
   # main 的构建由 tag 的 Build & Release 覆盖，这里只在 PR 和手动时跑。
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_stable_x86_64_package:
+        description: 'Build an x86_64 SDK test package and upload artifacts only'
+        type: boolean
+        default: false
+      verify_source_only:
+        description: 'Only verify a published source bundle, skip every build job'
+        type: boolean
+        default: false
+      source_tag:
+        description: 'Source tag to verify (required when verify_source_only)'
+        type: string
+        default: ''
+      expected_manifest:
+        description: 'JSON object mapping asset file name to expected sha256'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   source-build:
+    if: ${{ !inputs.verify_source_only }}
     name: Build pinned Doona interface
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -38,6 +56,7 @@ jobs:
           retention-days: 7
 
   core-build:
+    if: ${{ !inputs.verify_source_only }}
     name: Build honk-core (x86_64 smoke)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -61,6 +80,187 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: honk-core-x86_64
-          path: artifacts/cache/honk-core-*.tar.gz
+          path: |
+            artifacts/cache/honk-core-*.tar.gz
+            honk/generated-stage.mk
+            honk/generated-provenance.json
           if-no-files-found: error
           retention-days: 7
+
+
+  stable-sdk-x86_64:
+    name: Build stable x86_64 test packages (artifact only)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_stable_x86_64_package && !inputs.verify_source_only }}
+    needs: [source-build, core-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: honk-core-x86_64
+          path: artifacts/core
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: honk-source-build
+          path: artifacts/source
+
+      - name: Prepare isolated local feed with the freshly built core
+        run: |
+          set -euo pipefail
+          feed="$GITHUB_WORKSPACE/artifacts/stable-sdk-feed"
+          mkdir -p "$feed/dl" "$GITHUB_WORKSPACE/artifacts/stable-sdk-output"
+          cp -a honk "$feed/honk"
+          cp -a luci-app-honk "$feed/luci-app-honk"
+
+          core_archive=$(find artifacts/core/artifacts/cache -maxdepth 1 -type f \
+            -name 'honk-core-*-x86_64.tar.gz' -print -quit)
+          doona_archive=$(find artifacts/source/artifacts/cache -maxdepth 1 -type f \
+            -name 'doona-*.tar.gz' -print -quit)
+          test -n "$core_archive"
+          test -n "$doona_archive"
+          cp "$core_archive" "$feed/dl/"
+          cp "$doona_archive" "$feed/dl/"
+          cp artifacts/core/honk/generated-stage.mk "$feed/honk/generated-stage.mk"
+          cp artifacts/core/honk/generated-provenance.json "$feed/honk/generated-provenance.json"
+          cp artifacts/source/luci-app-honk/generated-doona-stage.mk \
+            "$feed/luci-app-honk/generated-doona-stage.mk"
+          printf '\nPKG_SOURCE_URL:=file:///feed/dl/\n' >> "$feed/honk/generated-stage.mk"
+          printf '\nPKG_SOURCE_URL:=file:///feed/dl/\n' >> \
+            "$feed/luci-app-honk/generated-doona-stage.mk"
+
+      - name: Check out fixed SDK action
+        uses: actions/checkout@v7
+        with:
+          repository: kenzok8/gh-action-sdk
+          ref: 44f98c51d04aebd1aa79fe4f603559c1ec2085da
+          path: .sdk-action
+          persist-credentials: false
+
+      - name: Build stable x86_64 OpenWrt 25.12 packages
+        uses: ./.sdk-action
+        env:
+          ARCH: x86_64-openwrt-25.12
+          CONTAINER: immortalwrt/sdk
+          FEEDNAME: honk
+          FEED_DIR: ${{ github.workspace }}/artifacts/stable-sdk-feed
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/stable-sdk-output
+          EXTRA_FEEDS: src-git|wall|https://github.com/kenzok8/wall
+          NO_REFRESH_CHECK: 'true'
+          NO_SHFMT_CHECK: '1'
+          IGNORE_ERRORS: 'false'
+          PACKAGES: honk luci-app-honk
+
+      - name: Collect and require both test packages
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/stable-sdk-packages
+          for package in honk luci-app-honk; do
+            find artifacts/stable-sdk-output/bin/packages -type f -size +0c \
+              \( -name "$package*.apk" -o -name "$package*.ipk" \) \
+              -exec cp {} artifacts/stable-sdk-packages/ \;
+            find artifacts/stable-sdk-packages -type f -size +0c \
+              \( -name "$package*.apk" -o -name "$package*.ipk" \) | grep -q .
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: honk-stable-sdk25.12-x86_64-${{ github.sha }}
+          path: |
+            artifacts/stable-sdk-packages/*.apk
+            artifacts/stable-sdk-packages/*.ipk
+            artifacts/core/artifacts/cache/honk-core-*-x86_64.tar.gz
+            artifacts/core/honk/generated-stage.mk
+            artifacts/core/honk/generated-provenance.json
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-source:
+    name: Verify published source bundle
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_source_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # draft releases 只对 push 权限可见，这个 job 只读
+      contents: write
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      EXPECTED_MANIFEST: ${{ inputs.expected_manifest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if [ -z "${SOURCE_TAG:-}" ]; then
+            echo "::error::source_tag is required in verify_source_only mode"
+            exit 1
+          fi
+          case "$SOURCE_TAG" in
+            -*|*[!A-Za-z0-9._-]*|'')
+              echo "::error::source_tag must match ^source-[A-Za-z0-9._-]+$"
+              exit 1
+              ;;
+          esac
+          case "$SOURCE_TAG" in
+            source-?*) ;;
+            *)
+              echo "::error::source_tag must be source- plus at least one character"
+              exit 1
+              ;;
+          esac
+          if [ -z "${EXPECTED_MANIFEST:-}" ]; then
+            echo "::error::expected_manifest is required in verify_source_only mode"
+            exit 1
+          fi
+          if ! printf '%s' "$EXPECTED_MANIFEST" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d, dict) and d'; then
+            echo "::error::expected_manifest is not a non-empty JSON object"
+            exit 1
+          fi
+
+      - name: Fetch the tagged source bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf bundle
+          mkdir -p bundle
+          # draft 没有 tag ref，releases/tags 会 404；按 tagName 遍历列表取 ID。
+          release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "'"$SOURCE_TAG"'") | .id' | head -n 1)
+          if [ -z "${release_id:-}" ]; then
+            echo "::error::asset_fetch_failed: no release with tag $SOURCE_TAG"
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+            --jq '.[] | .name + " " + (.id|tostring)' > assets.txt
+          if [ ! -s assets.txt ]; then
+            echo "::error::asset_fetch_failed: release $release_id has no assets"
+            exit 1
+          fi
+          while read -r name id; do
+            case "$name" in
+              */*|.*|'') echo "::error::asset_fetch_failed: unsafe asset name $name"; exit 1 ;;
+            esac
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "bundle/$name"
+          done < assets.txt
+          rm -f assets.txt
+          echo "downloaded $(ls -1 bundle | wc -l) asset(s) from release $release_id"
+
+
+      - name: Verify bundle against the reviewed manifest
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-source-bundle.py \
+            --bundle bundle \
+            --manifest "$EXPECTED_MANIFEST" \
+            --tag "$SOURCE_TAG"

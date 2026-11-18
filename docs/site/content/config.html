@@ -5,13 +5,15 @@
 <h2 id="first-run">首次使用</h2>
 
 <ol>
-  <li>打开 LuCI「服务 → Honk」，在概览页创建管理员账号（用户名 + 8 位以上密码）</li>
+  <li>打开 LuCI「服务 → Honk」，在概览页保存首次引导的 LAN、端口与 API 选项，再创建管理员账号（用户名 + 8 位以上密码）</li>
   <li>点「运行系统检查」，看设备是否满足 eBPF / BTF / 模块 / 端口条件</li>
   <li>确认无误后点「启动」，状态变成运行中</li>
   <li>需要 Web 面板时点「打开 Doona」，它由核心直接提供，不另起服务</li>
 </ol>
 
-<h2 id="settings">服务设置</h2>
+<h2 id="settings">首次引导设置</h2>
+
+<p>这些选项只在安装默认配置上进行首次引导时使用。初始化后，在配置页直接修改 <code>config.dae</code>；手写配置不会被向导覆盖。</p>
 
 <table>
   <tr><th>项</th><th>默认</th><th>说明</th></tr>
@@ -21,27 +23,30 @@
   <tr><td>Clash API 密钥</td><td>空</td><td>启用时必填，6–128 位字母、数字、点、下划线或连字符</td></tr>
 </table>
 
-<p>设置存在 <code>/etc/config/honk</code>，实际生效的配置在 <code>/etc/honk/</code>：</p>
+<p>设置存在 <code>/etc/config/honk</code>，这些选项不再持续生成运行字段，实际生效的配置在 <code>/etc/honk/</code>：</p>
 
 <table>
   <tr><th>路径</th><th>内容</th></tr>
-  <tr><td><code>/etc/honk/config.dae</code></td><td>运行配置：节点、订阅、分组、路由、DNS</td></tr>
-  <tr><td><code>/etc/honk/system.dae</code></td><td>面板托管的 <code>global</code> / <code>experimental</code> 段</td></tr>
+  <tr><td><code>/etc/honk/config.dae</code></td><td>完整运行配置：global、experimental、节点、订阅、分组、路由和 DNS</td></tr>
+  <tr><td><code>/etc/honk/system.dae</code></td><td>保留的旧布局文件；只有被主配置 include 时才生效</td></tr>
   <tr><td><code>/etc/honk/state/</code></td><td>运行状态与缓存</td></tr>
 </table>
 
 <h2 id="ownership">谁在管这份配置</h2>
 
-<p>面板能不能改「服务设置」，取决于 <code>config.dae</code> 的写法：</p>
+<p><code>config.dae</code> 是运行配置的权威来源，启动、重启和修复不按 UCI 重建 <code>global</code> 或 <code>experimental</code>。UCI 继续保存服务状态、Geo 更新及首次引导意图。</p>
 
-<table>
-  <tr><th>写法</th><th>面板行为</th></tr>
-  <tr><td>只有 <code>include { system.dae }</code>（可再带节点/分组等）</td><td>面板可以改端口、LAN、Clash API，改动写进 <code>system.dae</code></td></tr>
-  <tr><td>自己写了 <code>global</code> / <code>experimental</code></td><td>这些设置归你的文件，面板只读</td></tr>
-  <tr><td>两者都有</td><td>面板不猜归属，显示一个「切换为面板管理」按钮，点了会<b>先备份原文件</b>再把这两段交给面板</td></tr>
-</table>
+<p>升级不自动合并现有文件。仍使用规范 <code>include { system.dae }</code> 的配置，可在配置页点击合并预览，检查完整候选后确认应用。应用会启动服务；旧 <code>system.dae</code> 和已有草稿会保留，来源发生变化时必须重新预览。</p>
 
-<p>切换前的弹窗会列出会变动和会保留的项，取消不会改动任何东西。</p>
+<p>含额外 include、重复系统块或其他无法确认的结构时，不自动合并，原布局仍可运行。配置页保留旧 <code>system.dae</code> 的编辑入口。恢复备份时保留文件里的接口与监听地址，换设备后需自行确认是否适用。</p>
+
+<h2 id="upgrade-keep">升级时保持原有配置</h2>
+
+<p>本次测试中，包管理器在一种情况下替换了 <code>config.dae</code>：装完包、完成首次引导、但从未启动过服务。此时旧主配置与包内默认文件字节完全相同，升级会被判为“未修改”而直接覆盖。其他已测状态（跑过启动、改过主配置、完整单文件）都保留了原文件。</p>
+
+<p><code>honk</code> 包用两个钩子处理这一种情况：升级前把旧 <code>config.dae</code> 与 <code>system.dae</code> 保存到 <code>/etc/.honk-preupgrade/</code>，升级后仅当以下条件全部成立时才原样写回：无 <code>honk-core</code> 进程、当前 <code>config.dae</code> 就是本包默认模板、<code>system.dae</code> 与保存时一致。写回后校验文件摘要与核心配置校验。</p>
+
+<p>钩子不做任何服务启停，不改 <code>/etc/config/honk</code>，不合并配置。服务是否启动由 <code>enabled</code> 等现有状态与 <code>default_postinst</code> 决定；恢复失败也不会阻止后续默认的 start。写回前会把当前文件快照到同一事务目录，校验失败时从该快照回滚，并区分“已回滚”与“回滚失败”分别记日志。APK 上 <code>pre-upgrade</code> 失败不会中止安装（apk 3 的行为），这种情况下没有副本可写回，配置会保持被替换后的状态。</p>
 
 <h2 id="nodes">加节点与订阅</h2>
 
@@ -63,6 +68,12 @@
   <li>也可以填自己的 GeoIP / GeoSite 下载地址</li>
   <li>更新失败不会删掉现有数据文件</li>
 </ul>
+
+<h2 id="logs">日志</h2>
+
+<p>默认模板里 <code>log_file</code> 为空，核心日志只写 logread，由面板的<a href="overview.html">日志页</a>读取。</p>
+
+<p>需要在重启后仍能翻查时，可以把 <code>log_file</code> 设成绝对路径或相对 <code>data_dir</code> 的文件名。写入位置在 overlay 上会持续增长，轮转行为取决于所用核心，配置前请先确认。</p>
 
 <h2 id="maintenance">维护页能做什么</h2>
 

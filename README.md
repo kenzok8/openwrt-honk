@@ -122,6 +122,12 @@ wget -qO- https://down.dllkids.xyz/openwrt-feed/openwrt-feed-setup.sh | sh
 
 在 LuCI「服务 → Honk」初始化服务，运行系统检查后启动。Doona 界面仅在已初始化、正在运行且 API 就绪时开放。
 
+新装默认使用一份完整的 `/etc/honk/config.dae`，包含 `global`、`experimental`、节点、路由和 DNS。概览页的 LAN、端口和 Clash API 选项只供首次引导使用；初始化后在配置页编辑配置，启动和修复不会按旧 UCI 值重建这些字段。
+
+升级时包管理器会保留用户改过的主配置和 `system.dae`；仍引用 `system.dae` 的用户可在配置编辑器预览合并，确认后才应用。旧文件和已有草稿会保留。复杂 include 不自动展开，仍按原文件运行。备份恢复也保留文件内的接口和监听值，不再按本机 UCI 自动改写。
+
+从旧布局升级时，包管理器可能在一种情况下替换 `config.dae`：本次测试中，它发生在装完包、完成引导、从未启动过服务的状态下，因为此时旧主配置与包内默认文件字节完全相同。`honk` 包为此在升级前后各跑一次钩子：升级前把旧配置存到 `/etc/.honk-preupgrade/`，升级后若确认无核心运行、当前文件就是本包模板、`system.dae` 未变，就把旧配置原样写回。钩子本身不做任何服务启停：是否启动由 `enabled` 等现有状态和 `default_postinst` 决定，恢复失败也不会阻止后续默认的 start 继续执行。写回失败会回滚并记日志，不改 UCI、不合并。APK 上 `pre-upgrade` 失败时 apk 不会中止安装，这种情况下没有副本可写回，配置会保持被替换后的状态。
+
 节点与订阅直接写进 `/etc/honk/config.dae`（`node { label: 'share-link' }` 或 `subscription { tag: 'url' }`），重载 Honk 后生效；路由、DNS 与订阅也可以只在 Doona 面板里管。
 
 > 管理入口和 API 只应在可信 LAN 内使用。若 LuCI 走未加密的 HTTP，浏览器到路由器之间的登录信息和 API 流量没有传输加密，请勿把管理页面暴露到互联网。

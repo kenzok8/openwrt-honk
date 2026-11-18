@@ -18,7 +18,7 @@
      pub config: PathBuf,
  
      /// Append operational logs to this path, overriding `global.log_file`
-@@ -301,6 +303,84 @@
+@@ -301,6 +303,85 @@
      };
  
      match cmd {
@@ -96,6 +96,7 @@
 +                        "clash_api_listen": config.experimental.clash_api.external_controller,
 +                        "clash_api_secret_set": !config.experimental.clash_api.secret.is_empty(),
 +                        "lan_interfaces": config.global.lan_interface,
++                        "nfqueue_enable": config.global.nfqueue_enable,
 +                    },
 +                })
 +            );

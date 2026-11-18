@@ -117,7 +117,7 @@ const fs = require('fs');
 const rpcSource = fs.readFileSync('luci-app-honk/htdocs/luci-static/resources/view/honk/rpc.js', 'utf8');
 const backend = fs.readFileSync('luci-app-honk/root/usr/libexec/rpcd/honk', 'utf8');
 const acl = JSON.parse(fs.readFileSync('luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json', 'utf8'))['luci-app-honk'];
-const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'add_subscription', 'probe_subscription', 'add_nodes', 'import_dae', 'config_read', 'config_draft_read', 'lan_candidates', 'config_validate', 'config_save', 'config_apply', 'config_detach', 'reset_admin', 'repair', 'recover', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
+const expected = ['status', 'check', 'initialize', 'start', 'stop', 'restart', 'settings', 'add_subscription', 'probe_subscription', 'add_nodes', 'import_dae', 'config_read', 'config_draft_read', 'lan_candidates', 'config_validate', 'config_save', 'config_apply', 'config_merge_preview', 'config_merge_apply', 'config_detach', 'system_read', 'system_save', 'system_panel', 'reset_admin', 'repair', 'recover', 'backup', 'restore', 'restore_prepare', 'reset', 'job_status', 'logs', 'update_check', 'update_apply'];
 const frontend = [...rpcSource.matchAll(/method:\s*'([^']+)'/g)].map(match => match[1]);
 const list = backend.match(/echo '([^']+)'/);
 if (!list) throw new Error('RPC backend has no list method declaration');
@@ -132,8 +132,8 @@ for (const method of expected) {
 	if (!block || !block[1].trim() || /unknown_method/.test(block[1]))
 		throw new Error(`RPC method ${method} has no concrete backend case`);
 }
-if (!/params:\s*\[\s*'lan_network',\s*'listen_port',\s*'clash_api_enabled',\s*'clash_api_port',\s*'clash_api_secret'\s*\]/.test(rpcSource))
-	throw new Error('settings RPC parameters do not include Clash API settings');
+if (!/params:\s*\[[^\]]*'lan_device'[^\]]*'listen_host'[^\]]*'clash_host'[^\]]*'clash_api_secret_mode'[^\]]*'expect_sha256'[^\]]*\]/.test(rpcSource))
+	throw new Error('settings RPC parameters do not include file-mode fields');
 NODE
 
 redacted=$(printf '%s\n' \
@@ -251,7 +251,9 @@ grep -Fq 'UPDATE_LOCK_OWNED=1' honk/files/update.sh
 grep -Fq 'checking_feed' honk/files/job.sh
 
 
-grep -Fq "honk.settings(networkSelect.value, port, clashEnabledInput.checked, clashPort, clashSecret)" luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
+grep -Fq 'lan_device: device' luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
+grep -Fq 'expect_sha256: formSnapshotSha' luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
+grep -Fq 'let formSnapshotSha = null' luci-app-honk/htdocs/luci-static/resources/view/honk/overview.js
 
 # --- Linux 6.6 实验通道的 pin 保护 ---
 # 官方自动同步只认 ci/pins.env；一旦它也能改实验 pin，第三方核心就会被官方
