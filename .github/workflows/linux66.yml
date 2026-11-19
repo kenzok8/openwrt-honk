@@ -283,8 +283,8 @@ jobs:
           tag="linux66-$version"
           remote_tag=$(git ls-remote --tags origin "refs/tags/$tag" | awk '{print $1}')
           if [ -n "$remote_tag" ]; then
-            echo "::error::tag $tag 已存在（$remote_tag）；重跑同一版直接复用，新版本请先提高包版本"
-            exit 1
+            # 同一包版本重出（改了 LuCI 或打包脚本）会撞 tag，发布步骤会先删旧的再建。
+            echo "tag $tag 已存在（$remote_tag），发布时替换"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -368,6 +368,10 @@ jobs:
           repo="$GITHUB_REPOSITORY"
           if gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
             gh release delete "$TAG" --repo "$repo" --yes
+          fi
+          # 旧 tag 会挡住 gh release create；同一包版本只保留最新一次构建的产物。
+          if gh api "repos/$repo/git/refs/tags/$TAG" >/dev/null 2>&1; then
+            gh api -X DELETE "repos/$repo/git/refs/tags/$TAG"
           fi
           gh release create "$TAG" --repo "$repo" \
             --target main \
