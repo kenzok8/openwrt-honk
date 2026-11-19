@@ -65,6 +65,8 @@
   <li><b>手写 <code>config.dae</code></b>：<code>node { label: 'share-link' }</code> 或 <code>subscription { tag: 'url' }</code>，重载后生效</li>
 </ul>
 
+<p>机场校验 User-Agent 时，在订阅表单里填上它要求的 UA，预检和核心拉取会用同一个；留空则走核心默认的 <code>honk/&lt;版本&gt;</code>。更新间隔按天填，默认 1 天，填 0 关闭定时刷新。</p>
+
 <p>路由、DNS 与订阅也可以只在 Doona 面板里管。面板改完会写回同一份配置，LuCI 侧刷新就能看到。</p>
 
 <h2 id="geo">Geo 数据</h2>
