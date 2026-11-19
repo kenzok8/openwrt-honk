@@ -3,6 +3,21 @@ name: Build experimental Linux 6.6 packages
 on:
   schedule:
     - cron: '30 1 * * *'
+  # 标准包的版本号或打包内容一变，24.10 兼容包必须跟着重出。
+  # 否则统一源里只剩 jell 那份按标准源编的包，6.6 机器又会被顶掉。
+  push:
+    branches:
+      - main
+    paths:
+      - 'honk/Makefile'
+      - 'honk/files/**'
+      - 'luci-app-honk/**'
+      - 'ci/build-core.sh'
+      - 'ci/prepare-linux66-package.py'
+      - 'ci/verify-linux66-ipk.py'
+      - '.github/workflows/linux66.yml'
+      # 故意不含 ci/pins-linux66.env：pin 任务自己会提交这个文件，
+      # 列进来会把刚跑完的构建再触发一次。
   workflow_dispatch:
     inputs:
       publish:
@@ -56,6 +71,11 @@ jobs:
             # 只改 LuCI 时上游 pin 不动，勾 force 才能重出。
             if [ "${{ inputs.force }}" = "true" ]; then
               echo "Force rebuild requested, keeping changed=true."
+              exit 0
+            fi
+            # push 触发就是打包内容变了（路径过滤已限定），源码没动也要重出。
+            if [ "${{ github.event_name }}" = "push" ]; then
+              echo "Packaging changed on main; rebuilding the 6.6 lane."
               exit 0
             fi
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -176,8 +196,6 @@ jobs:
           test -s "artifacts/cache/$DOONA_ARCHIVE"
 
       - name: Prepare isolated SDK feed
-        env:
-          LINUX66_VERSION: ${{ needs.pin.outputs.version }}
         run: |
           set -euo pipefail
           cp artifacts/cache/generated-linux66-stage.mk honk/
@@ -229,7 +247,7 @@ jobs:
   publish:
     name: Publish experimental 6.6 packages
     needs: [pin, core, sdk24]
-    if: github.ref == 'refs/heads/main' && needs.pin.outputs.changed == 'true' && (github.event_name == 'schedule' || inputs.publish)
+    if: github.ref == 'refs/heads/main' && needs.pin.outputs.changed == 'true' && (github.event_name == 'schedule' || github.event_name == 'push' || inputs.publish)
     runs-on: ubuntu-latest
     permissions:
       contents: write
