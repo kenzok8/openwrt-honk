@@ -25,6 +25,7 @@ CAPABILITY=$TXN_DIR/capability
 if [ "${HONK_MAINT_LIBRARY:-0}" != 1 ]; then
 	. /usr/share/honk/lock.sh || exit 1
 	. /usr/share/honk/lifecycle.sh || exit 1
+	. /usr/share/honk/geodata.sh || exit 1
 	. /usr/share/libubox/jshn.sh || exit 1
 	[ -r /lib/functions.sh ] && . /lib/functions.sh
 fi
@@ -42,6 +43,24 @@ json_result() {
 error() {
 	json_result false "" "$1"
 	return 1
+}
+
+# 状态库落盘：管理员记录在 SQLite 的 admin 表里，而 WAL 模式下它先写在
+# honk.db-wal 里，要等 checkpoint 才进 honk.db 本身。固件升级或掉电把
+# -wal 弄丢了，管理员记录就没了 —— 面板（Doona）会要求「新建管理员」，
+# 而 LuCI 只看 UCI 的 initialized 标记，两边因此说法不一。
+checkpoint_state() {
+	[ -e "$HONK_STATE" ] || { json_result true "" "state_database_absent"; return 0; }
+	command -v sqlite3 >/dev/null 2>&1 || { error sqlite_missing; return 1; }
+	# 核心还在跑的时候不能删 -wal/-shm（它自己的连接正用着），
+	# 只做一次被动 checkpoint：把 WAL 里的页写回 honk.db。
+	if pidof honk-core >/dev/null 2>&1; then
+		sqlite3 "$HONK_STATE" 'PRAGMA wal_checkpoint(PASSIVE);' >/dev/null 2>&1 || { error sqlite_checkpoint_failed; return 1; }
+		json_result true "" "state_database_checkpointed"
+		return 0
+	fi
+	checkpoint_sqlite || { error sqlite_checkpoint_failed; return 1; }
+	json_result true "" "state_database_checkpointed"
 }
 
 managed_core_pid() {
@@ -590,8 +609,6 @@ validate_system_schema() {
 	[ "$listen_host" = "$expected_ip" ] || [ "$listen_host" = 127.0.0.1 ] || return 1
 	store_subscribe=$(sed -n 's/^    store_subscribe: \(true\|false\)$/\1/p' "$trusted_system")
 	case "$store_subscribe" in true|false) ;; *) return 1 ;; esac
-	nfqueue_enable=$(sed -n 's/^    nfqueue_enable: \(true\|false\)$/\1/p' "$trusted_system")
-	case "$nfqueue_enable" in true|false) ;; *) nfqueue_enable=true ;; esac
 	cat > "$temp_dir/system.expected" <<EOF
 global {
     wan_interface: auto
@@ -601,8 +618,9 @@ global {
     allow_insecure: false
     auto_config_kernel_parameter: true
     data_dir: '/etc/honk'
+    bootstrap_resolver: '127.0.0.1:53'
     store_subscribe: $store_subscribe
-    nfqueue_enable: $nfqueue_enable
+    nfqueue_enable: true
 }
 
 experimental {
@@ -628,7 +646,10 @@ EOF
 	cat >> "$temp_dir/system.expected" <<EOF
 }
 EOF
-	cmp -s "$trusted_system" "$temp_dir/system.expected"
+	# 旧备份里的 system.dae 可能还带着旧版本写死的下载源：去掉那一段再比，
+	# 否则旧备份恢复不了。其它内容一个字节都不动。
+	honk_geodata_strip "$trusted_system" "$temp_dir/system.stripped" || return 1
+	cmp -s "$temp_dir/system.stripped" "$temp_dir/system.expected"
 }
 
 check_tar_members() {
@@ -767,6 +788,7 @@ global {
     allow_insecure: false
     auto_config_kernel_parameter: false
     data_dir: '$shadow_data'
+    bootstrap_resolver: '127.0.0.1:53'
     store_subscribe: false
     nfqueue_enable: false
 }
@@ -791,9 +813,6 @@ write_live_system() {
 	live_ip=$3
 	live_port=$4
 	live_initialized=$5
-	# 第 6 个参数决定 NFQUEUE：false 才关闭，其余按开启。
-	live_nfqueue=$6
-	case "$live_nfqueue" in true|false) ;; *) live_nfqueue=true ;; esac
 	if [ "$live_initialized" = 1 ]; then live_host=$live_ip; else live_host=127.0.0.1; fi
 	cat > "$live_system" <<EOF
 global {
@@ -804,8 +823,9 @@ global {
     allow_insecure: false
     auto_config_kernel_parameter: true
     data_dir: '/etc/honk'
+    bootstrap_resolver: '127.0.0.1:53'
     store_subscribe: true
-    nfqueue_enable: $live_nfqueue
+    nfqueue_enable: true
 }
 
 experimental {
@@ -858,6 +878,7 @@ validate_candidate() {
 	else
 		restore_initialized=0
 	fi
+
 	return 0
 }
 
@@ -1005,6 +1026,10 @@ restore() {
 	restore_managed=$(uci -c "$uci_dir" -q get honk.main.system_managed 2>/dev/null || printf 1)
 	[ -n "$restore_managed" ] || restore_managed=1
 
+	if [ "$(config_owner "$restore_stage/etc/honk/config.dae")" = system ]; then
+		write_live_system "$restore_stage/etc/honk/system.dae" "$candidate_device" "$candidate_ip" "$u_port" "$restore_initialized" || { error system_config_render_failed; return 1; }
+		chmod 0600 "$restore_stage/etc/honk/system.dae" || { error system_config_render_failed; return 1; }
+	fi
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.enabled=$old_enabled" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.boot_enabled=$old_boot" || { error restore_profile_stage_failed; return 1; }
 	uci -c "$uci_dir" -t "$temp_dir/uci-tmp" set "honk.main.initialized=$restore_initialized" || { error restore_profile_stage_failed; return 1; }
@@ -1070,11 +1095,6 @@ reset_verify_target() {
 		awk '{ print $4 }' | cut -d/ -f1 | grep -qxF "$reset_target_ip"
 }
 
-render_reset_config() {
-	sed -e "s#^    lan_interface: br-lan\$#    lan_interface: $3#" \
-		-e "s#^        listen: '127\.0\.0\.1:9527'\$#        listen: '$4:$5'#" \
-		"$1" > "$2"
-}
 
 reset_data() {
 	reset_target_device=$1
@@ -1099,14 +1119,10 @@ reset_data() {
 	mkdir -p "$reset_stage/etc/honk" "$reset_uci" || { error temporary_storage_unavailable; return 1; }
 	[ -f /usr/share/honk/default-config.dae ] && [ ! -L /usr/share/honk/default-config.dae ] || { error default_config_unavailable; return 1; }
 	reset_verify_target || { error lan_target_unavailable; return 1; }
-	render_reset_config /usr/share/honk/default-config.dae "$reset_stage/etc/honk/config.dae" "$reset_target_device" "$reset_target_ip" 9527 || { error reset_stage_failed; return 1; }
-	grep -q "^    lan_interface: $reset_target_device$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
-	grep -q "^        listen: '$reset_target_ip:9527'$" "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
-	reset_wan_device=
-	. /lib/functions/network.sh 2>/dev/null || :
-	network_get_device reset_wan_device wan 2>/dev/null || reset_wan_device=
-	case "$reset_wan_device" in ''|*[!A-Za-z0-9_.:-]*) reset_wan_device= ;; esac
-	"$CONTROL" local-direct-file "$reset_stage/etc/honk/config.dae" "$reset_target_device" "$reset_wan_device" || { error local_direct_render_failed; return 1; }
+	# 完整恢复随包那份 config.dae：原样复制，不渲染运行字段、也不动本机直连区块 ——
+	# 恢复出来的就是上游写的那个文件（首次引导只在配置与随包模板一致时才放行，
+	# 运行字段由它自己填），其余配置不留，用户重新配置即可。
+	cp -p /usr/share/honk/default-config.dae "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
 	chmod 0600 "$reset_stage/etc/honk/config.dae" || { error reset_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" import honk < "$temp_dir/old-uci" || { error reset_profile_stage_failed; return 1; }
 	uci -c "$reset_uci" -t "$temp_dir/uci-tmp" set honk.main.enabled=0 || { error reset_profile_stage_failed; return 1; }
@@ -1211,5 +1227,7 @@ case "$1" in
 	restore) restore ;;
 	reset) reset_data "$2" "$3" ;;
 	recover) recover_action ;;
+	checkpoint) checkpoint_state ;;
+	checkpoint) checkpoint_state ;;
 	*) error invalid_action ;;
 esac

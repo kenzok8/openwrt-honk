@@ -15,6 +15,34 @@ boot() {
 	start
 }
 
+# cgroup v2：核心的遥测读的是它自己所在 cgroup 的内存文件
+# （memory.current / memory.max / memory.events）。这些文件只有在 memory 控制器
+# 被一路委派到那个 cgroup 时才存在，而 OpenWrt 自己不委派任何控制器，所以面板的
+# cgroup 一栏一直是空的。委派的链条是：根 -> services -> services/honk ->
+# services/honk/main（procd 把每个服务实例放在 services/<服务>/<实例>）。
+# 实例 cgroup 在这里先建好：procd 要等实例起来才建，那时已经来不及委派了。
+# 根 cgroup 不受「有进程就不能开控制器」的限制，所以即使 procd（PID 1）就在根
+# cgroup 里，这一步照样成立。
+honk_cgroup_delegate_memory() {
+	local base=/sys/fs/cgroup
+	[ -f "$base/cgroup.controllers" ] || return 0
+	# 内核没有编译 memory 控制器时没什么可委派的
+	grep -qw memory "$base/cgroup.controllers" 2>/dev/null || return 0
+	mkdir -p "$base/services/honk/main" 2>/dev/null || return 0
+	# 只动我们自己的那两个目录。services 是所有服务共用的，改它的权限会影响到
+	# 别的服务；委派本身只是往三处 subtree_control 里写 +memory，不需要改权限
+	# （在私有的 cgroup 命名空间里验过：共享目录保持 0755 时三处写入都成功，实例
+	# cgroup 里照样出现 memory.current / memory.max / memory.events）。
+	chmod 0700 "$base/services/honk" "$base/services/honk/main" 2>/dev/null
+	# 从上往下逐级委派：控制器只对子树_control 里打开的那一级以下的子 cgroup 生效。
+	# 某一级写不进去就记一笔，不中断后面的：面板的 cgroup 一栏靠实例 cgroup 里的
+	# memory.current，缺文件时下面那一句会说明。
+	echo +memory > "$base/cgroup.subtree_control" 2>/dev/null || logger -t honk "the memory controller could not be enabled in the root cgroup"
+	echo +memory > "$base/services/cgroup.subtree_control" 2>/dev/null || logger -t honk "the memory controller could not be enabled in the services cgroup"
+	echo +memory > "$base/services/honk/cgroup.subtree_control" 2>/dev/null || logger -t honk "the memory controller could not be enabled in the honk service cgroup"
+	[ -f "$base/services/honk/main/memory.current" ] || logger -t honk "the memory controller is not delegated to the instance cgroup; the panel's cgroup row stays empty"
+}
+
 start_service() {
 	local enabled initialized config_file ready_token ready_hash ready_runtime ready_api_enabled ready_api_listen ready_clash_api_listen ready_clash_api_secret_set old_ready_token
 	config_load honk
@@ -30,6 +58,29 @@ start_service() {
 		return 1
 	}
 	"$HONK_CONTROL" preflight || return 1
+	"$HONK_CONTROL" local-direct || logger -t honk "local-direct sync skipped"
+	# 旧版本写进 system.dae 的地理数据下载源要删掉（见 control.sh migrate）：
+	# 那一段把源写死成一个 GitHub 地址并强制直连，覆盖了核心自己的内置列表
+	# （每个文件两个地址，一个不通就换下一个），面板的「立即更新」因此只会
+	# 超时。现在核心用内置的列表，路由规则决定出口。
+	#
+	# 删掉以后库里那份下载源还是旧的（里面写着那个写死的地址）：清单是启动时
+	# 算一次就固定的，核心下次启动照旧用它。下载源清单现在由 geodata-sources
+	# 每次启动重算（过时的那份会被换成同一个来源当前的镜像组），所以不必再
+	# 清状态库 —— 清了会把面板的修订历史一起抹掉。
+	if "$HONK_CONTROL" migrate 2>/dev/null | grep -qx changed; then
+		logger -t honk "removed the old geodata source block from the config"
+	fi
+	# 下载源清单：一个来源（默认是上游原版那一份），清单只在启动时算一次，
+	# 所以要在核心起来之前写进状态库。
+	"$HONK_CONTROL" geodata-sources >/dev/null 2>&1 || :
+	# 地理数据必须在数据目录里：软件包（v2ray-geodata）那份在只读分区
+	# （squashfs）里，核心更新时要原地替换加载着的那份 —— 写不进去，面板的
+	# 「立即更新」就停在替换阶段（LuCI 那条路直接写数据目录，所以它正常）。
+	# 之前只在初始化时复制一次：已经初始化过的设备上从来没有那两份文件，资产
+	# 目录就一直退回到只读的那份。改成每次启动都补一次：缺了才复制（24MB），
+	# 复制失败下次启动再试。
+	"$HONK_CONTROL" geodata-files >/dev/null 2>&1 || :
 	unset HONK_MAINT_CAP
 
 	# 所有配置都走 readiness 标记：状态页据此判断真正就绪，而不是只看进程在不在。
@@ -54,11 +105,45 @@ start_service() {
 	fi
 	printf '%s %s\n' "$ready_token" "$ready_hash" > /var/run/honk/readiness || return 1
 	chmod 0600 /var/run/honk/readiness || return 1
+	# 让核心跑在一个带内存文件的 cgroup 里：面板的 cgroup 一栏（已用/上限/OOM）靠这个
+	honk_cgroup_delegate_memory
 	procd_open_instance main
-	procd_set_param command /usr/bin/honk-core --config "$HONK_CONFIG" --disable-timestamp
+	# 存储模式：db = 核心托管配置（原生 API 的导入/修订历史可用）；file = 配置文件为准。
+	# 两种模式都需要 native-api 构建特性（--store db 按 honk 文档要求）。
+	# --data-dir 必须与配置里的 global.data_dir 完全一致（honk 文档的硬性要求）。
+	# 不一致时核心会直接退出（"global.data_dir ... differs from --data-dir ..."），
+	# 状态库也会和 mock 核心分家：Doona 管理员与修订历史两边对不上。
+	honk_data_dir=$(sed -n "s/^[[:space:]]*data_dir:[[:space:]]*'\([^']*\)'.*/\1/p" "$HONK_CONFIG" 2>/dev/null | head -1)
+	[ -n "$honk_data_dir" ] || honk_data_dir=$(sed -n "s/^[[:space:]]*data_dir:[[:space:]]*'\([^']*\)'.*/\1/p" /etc/honk/system.dae 2>/dev/null | head -1)
+	[ -n "$honk_data_dir" ] || honk_data_dir=/etc/honk
+	# config_get 给了 option（第三个参数）时是 export 语义，不会往标准输出写东西，
+	# 所以不能写成 $(config_get ...)：那样 store_mode 恒为空，核心会一直落在 file 模式。
+	# file 模式下核心不发布 config_import/config_revisions（config_import.available=false），
+	# Doona 面板的导入与修订历史就一直用不了。
+	config_get store_mode main store db
+	[ -n "$store_mode" ] || store_mode=db
+	# db 存储模式下核心拒绝 Clash API（"experimental.clash_api.external_controller is
+	# set; --store db runs without the Clash API"），而升级上来的配置里还带着那一段
+	# （新的模板没有了，磁盘上的 conffile 还在）—— 核心会直接退出。启动前把它去掉，
+	# 留一份备份。file 模式不受影响，那一段照旧可用。
+	if [ "$store_mode" = db ]; then
+		"$HONK_CONTROL" strip-clash-api || logger -t honk "the clash_api block could not be removed; the core may refuse to start"
+	fi
+	case "$store_mode" in
+		db) procd_set_param command /usr/bin/honk-core --config "$HONK_CONFIG" --disable-timestamp --store db --data-dir "$honk_data_dir" ;;
+		file) procd_set_param command /usr/bin/honk-core --config "$HONK_CONFIG" --disable-timestamp --data-dir "$honk_data_dir" ;;
+		*) logger -t honk "unknown store mode '$store_mode', using file"; procd_set_param command /usr/bin/honk-core --config "$HONK_CONFIG" --disable-timestamp --data-dir "$honk_data_dir" ;;
+	esac
 	# One env call, no empty values: procd drops the whole list when a KEY has an
 	# empty value, which silently stripped the readiness hash the core requires.
-	ready_env="DAE_LOCATION_ASSET=/usr/share/v2ray"
+	# 地理数据放在数据目录里：软件包里的那份在只读分区（squashfs）里，
+	# 核心更新时要原地替换它，写不进去 —— 面板的「立即更新」就是这么失败的。
+	# 数据目录可写又是持久的，核心把新文件写在这里，之后原地替换。
+	# 数据目录里没有（复制失败，空间不够）就退回软件包的那份：核心照样能起，
+	# 只是更新替换不了。
+	asset_dir=$honk_data_dir
+	[ -f "$honk_data_dir/geosite.dat" ] && [ -f "$honk_data_dir/geoip.dat" ] || asset_dir=/usr/share/v2ray
+	ready_env="DAE_LOCATION_ASSET=$asset_dir"
 	ready_env="$ready_env HONK_READY_TOKEN=$ready_token HONK_READY_CONFIG_HASH=$ready_hash HONK_READY_API_ENABLED=$ready_api_enabled HONK_READY_CLASH_API_SECRET_SET=$ready_clash_api_secret_set"
 	[ -n "$ready_api_listen" ] && ready_env="$ready_env HONK_READY_API_LISTEN=$ready_api_listen"
 	[ -n "$ready_clash_api_listen" ] && ready_env="$ready_env HONK_READY_CLASH_API_LISTEN=$ready_clash_api_listen"
@@ -69,6 +154,12 @@ start_service() {
 	procd_set_param respawn 3600 5 5
 	procd_set_param term_timeout 20
 	procd_close_instance
+}
+
+# 停服务时把状态库落盘：管理员记录写在 SQLite 的 WAL 里，落进 honk.db 本身
+# 之后，掉电或固件升级把 -wal 弄丢了它才还在（面板也就不会要求新建管理员）。
+stop_service() {
+	/usr/share/honk/maintenance.sh checkpoint >/dev/null 2>&1 || :
 }
 
 # procd 默认的 stop→start 太快，start 的 preflight 会把还没清掉的 dae0 当残留

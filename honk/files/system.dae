@@ -6,9 +6,25 @@ global {
     allow_insecure: false
     auto_config_kernel_parameter: true
     data_dir: '/etc/honk'
+    bootstrap_resolver: '127.0.0.1:53'
     store_subscribe: true
     nfqueue_enable: true
 }
+
+# 地理数据的下载源交给核心自己的内置列表：MetaCubeX 的 meta-rules-dat，
+# raw.githubusercontent 在前、jsDelivr 在后（GitHub 慢的时候走 CDN）。内置列表
+# 每个文件有两个地址，一个不通就换下一个；配置文件里写死一个地址就没有
+# 这个退路了，所以这里不写 URL。
+#
+# 下载走哪条路由由路由规则决定，和上游一样：assets 里不写 geodata 段，核心
+# 按路由规则选出口（配置里写 route: direct 才是强制直连）。
+#
+# bootstrap_resolver 用路由器自己的解析器（dnsmasq），不要用公网上的 DNS：
+# 订阅的 route: direct 抓取也走它，而且它的答案一旦解析出来就不再回落到系统
+# 解析器（只有失败或空结果才回落）。换成公网 DNS 就等于替订阅换了 DNS，
+# 被污染或劫持的域名会解析到错的地址，订阅就再也拉不到数据 —— 实测：
+# 配了假 resolver 后订阅 status 变成 stale、节点为 0，而去掉它就正常。
+# 本机的解析器永远可达，答案与系统解析器一致，等于升级前的行为。
 
 experimental {
     native_api {

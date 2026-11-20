@@ -14,7 +14,12 @@ global {
     udp_check_dns: dns.google.com:53, 8.8.8.8
     check_interval: 300s
     # DNS 上游写域名时用它自举；写死 IP 时不会用到。
-    bootstrap_resolver: '1.1.1.1:53'
+    # 用路由器自己的解析器（dnsmasq），不用公网上的 DNS：订阅的 route: direct
+    # 抓取也走它，答案一旦解析出来就不再回落到系统解析器（只有失败或空结果才
+    # 回落）。换成公网 DNS 等于替订阅换了 DNS，被污染或劫持的域名会解析到错的
+    # 地址，订阅就再也拉不到数据（实测：配了公网 resolver 后订阅 status 变成
+    # stale、节点为 0，去掉就正常）。本机的解析器永远可达，答案与系统解析器一致。
+    bootstrap_resolver: '127.0.0.1:53'
     store_subscribe: true
     nfqueue_enable: true
 }
@@ -29,12 +34,11 @@ experimental {
         ui: '/usr/share/doona'
     }
 
-    clash_api {
-        external_controller: '0.0.0.0:9090'
-        external_ui: '/usr/share/honk/zashboard'
-        secret: ''
-        default_mode: Rule
-    }
+    # 这里不写 clash_api：本树用 --store db 启动核心（Doona 面板的「导入」与
+    # 「修订历史」要它），而核心拒绝 db 存储模式与 Clash API 同时开：
+    # "experimental.clash_api.external_controller is set; --store db runs
+    # without the Clash API" —— 核心会直接退出。要用 Clash API 就把存储模式
+    # 切成 file。
 
     # 缓存解析结果与订阅，重启后首包更快。
     cache_file {

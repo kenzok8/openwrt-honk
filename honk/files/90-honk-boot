@@ -3,6 +3,18 @@
 # 不再提供单独的 boot_enabled 开关。
 /etc/init.d/honk enable
 
+# 存储模式：旧配置里没有这个键（conffile 升级时会保留旧文件），
+# 按新的默认值补成 db —— file 模式下核心不提供配置导入与修订历史。
+if [ -z "$(uci -q get honk.main.store 2>/dev/null)" ]; then
+	uci set honk.main.store='db' && uci commit honk
+fi
+
+# db 模式下核心跑的是状态库里的修订：固件升级换了新的配置文件后，
+# 把库里的修订清掉（管理员记录、订阅记录留着），核心启动时就会按上游的
+# 规矩把当前配置文件导入成修订 1 —— 否则新配置永远不生效。
+# 库里是用户的配置，文件是库的镜像：升级换了文件时以库里为准（mirror）。
+[ "$(uci -q get honk.main.store 2>/dev/null)" = db ] && /usr/share/honk/control.sh sync-db mirror >/dev/null 2>&1 || :
+
 # 配置模式已取消：只清遗留键，活动配置与启停状态一概不动。
 legacy_mode=$(uci -q get honk.main.config_mode 2>/dev/null)
 if [ -n "$legacy_mode" ]; then

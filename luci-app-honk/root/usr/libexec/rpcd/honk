@@ -4,6 +4,7 @@
 . /lib/functions.sh
 . /usr/share/honk/lock.sh
 . /usr/share/honk/lifecycle.sh
+. /usr/share/honk/geodata.sh
 . /usr/share/honk/log-lines.sh
 
 CONTROL=/usr/share/honk/control.sh
@@ -62,8 +63,20 @@ status() {
 	config_get_bool clash_api_enabled main clash_api_enabled 0
 	config_get clash_api_port main clash_api_port 9090
 	config_get clash_api_secret main clash_api_secret ''
+	config_get store_configured main store db
 	managed_pid=$(procd_core_pid)
 	if is_managed_core "$managed_pid"; then running=1; else running=0; fi
+	# 实际生效的存储模式：读运行中核心的命令行。只看 UCI 是不够的，
+	# 配置写的是 db 而启动参数没带上时，两者会分家（面板就会说导入不可用）。
+	store_active=unknown
+	if [ -n "$managed_pid" ] && [ -r "/proc/$managed_pid/cmdline" ]; then
+		core_cmdline=$(tr '\000' ' ' < "/proc/$managed_pid/cmdline" 2>/dev/null)
+		case "$core_cmdline" in
+			*' --store db '*) store_active=db ;;
+			*' --store file '*) store_active=file ;;
+			*) store_active=file ;;
+		esac
+	fi
 	# 只有 system.dae 负责这些字段时，UCI 里的端口/密钥才有意义。
 	settings_owner=$(config_owner /etc/honk/config.dae)
 	includes_system=0
@@ -116,6 +129,19 @@ status() {
 	esac
 	api_url="http://$listen"
 	[ "$api_enabled" = 1 ] || api_url=""
+	# 面板（Doona）看的是核心：auth.setup_required 为真时它就要求「新建管理员」。
+	# LuCI 以前只看 UCI 的 initialized 标记，管理员记录丢了它也不知道 ——
+	# 于是升级固件后面板要新建管理员，LuCI 却一切正常。这里把核心的真实状态读出来。
+	admin_setup_required=unknown
+	if [ -n "$api_url" ]; then
+		discovery=$(curl -fsS --noproxy '*' --connect-timeout 1 --max-time 3 "$api_url/api" 2>/dev/null)
+		setup_flag=$(printf '%s' "$discovery" | jsonfilter -e '@.auth.setup_required' 2>/dev/null)
+		case "$setup_flag" in
+			true) admin_setup_required=1 ;;
+			false) admin_setup_required=0 ;;
+			*) admin_setup_required=unknown ;;
+		esac
+	fi
 	clash_api_url=
 	[ -n "$clash_listen_addr" ] && clash_api_url="http://$clash_listen_addr"
 	active_hash=$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')
@@ -164,6 +190,9 @@ status() {
 	config_sha256=$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')
 	json_add_string config_sha256 "$config_sha256"
 	json_add_string settings_owner "$settings_owner"
+	json_add_string store_mode "$store_configured"
+	json_add_string store_active "$store_active"
+	json_add_string admin_setup_required "$admin_setup_required"
 	json_add_boolean includes_system "$includes_system"
 	system_managed=$(uci -q get honk.main.system_managed)
 	[ -n "$system_managed" ] || system_managed=1
@@ -521,7 +550,7 @@ experimental {
     }
 }
 EOF
-	DAE_LOCATION_ASSET=/usr/share/v2ray "$CORE" --config "$temp/config.dae" --mock-ebpf \
+	DAE_LOCATION_ASSET="$temp" "$CORE" --config "$temp/config.dae" --mock-ebpf \
 		--data-dir "$temp" --log-file "$temp/core.log" > "$temp/core.console" 2>&1 &
 	core_pid=$!
 	ready=0
@@ -1162,6 +1191,33 @@ restore_prepare() {
 
 # 忘记密码：清掉核心里的管理员记录，并让 LuCI 重新显示首次设置。
 # 只删管理员，不动订阅/分组/路由；需要先停服务（内核自己也会拒绝运行中的 reset）。
+# 升级固件后状态库里的管理员记录可能没了，面板（Doona）会要求「新建管理员」。
+# LuCI 这边做同一件事：先把服务停掉（初始化要求核心不在运行），做完按原状态拉回来。
+# 这里不取锁：control.sh 的 initialize 自己取（同一把锁，取两次会死锁）。
+initialize_account() {
+	request=$(cat)
+	was_running=0
+	honk_lifecycle_managed_pid >/dev/null 2>&1 && was_running=1
+	old_enabled=$(uci -q get honk.main.enabled || echo 0)
+	if [ "$was_running" = 1 ] || [ "$old_enabled" = 1 ]; then
+		set_enabled 0 || { emit_result false settings_write_failed; exit 1; }
+	fi
+	if [ "$was_running" = 1 ]; then
+		honk_lifecycle_stop 30 || { emit_result false service_stop_failed_rolled_back; exit 1; }
+	fi
+	printf '%s' "$request" | "$CONTROL" initialize
+	result=$?
+	if [ "$result" = 0 ] && { [ "$was_running" = 1 ] || [ "$old_enabled" = 1 ]; }; then
+		set_enabled "$old_enabled" || :
+		honk_lifecycle_start 30 || :
+	elif [ "$old_enabled" = 1 ]; then
+		# 失败也要把服务恢复原样：不能一次失败的设置把服务留在关着的状态。
+		set_enabled 1 || :
+		honk_lifecycle_start 30 || :
+	fi
+	return $result
+}
+
 reset_admin() {
 	begin_mutation
 	if pidof honk-core >/dev/null 2>&1; then
@@ -1182,6 +1238,8 @@ reset_admin() {
 		emit_result false administrator_reset_failed
 		return 1
 	fi
+	# 删掉的记录同样先落在 WAL 里，落盘一次才不会在下次启动时复活。
+	"$MAINT" checkpoint >/dev/null 2>&1 || :
 	if ! uci set honk.main.initialized=0 || ! uci set honk.main.enabled=0 || ! uci commit honk || ! chmod 0600 /etc/config/honk; then
 		emit_result false config_write_failed
 		return 1
@@ -1591,6 +1649,10 @@ config_apply_candidate() {
 	else
 		apply_failed=0
 	fi
+	# db 模式：核心跑的是状态库里的修订，文件改了要重新导入才生效。
+	# 服务此刻是停着的（上面刚停过），导入是安全的：写一条新的修订，旧的修订
+	# 留着（面板的修订历史就是它们）。
+	[ "$apply_failed" = 0 ] && "$CONTROL" sync-db import >/dev/null 2>&1 || :
 	if [ "$apply_failed" = 0 ] && honk_lifecycle_start 20; then
 		rm -rf "$backup_dir"
 		emit_result true config_applied
@@ -1633,7 +1695,7 @@ list)
 				if errors=$("$CONTROL" diagnose 2>/dev/null); then emit_errors true ""; else emit_errors false "$errors"; fi
 				;;
 			initialize)
-				exec "$CONTROL" initialize
+				initialize_account
 				;;
 			settings)
 				# 首次引导阶段只记意图（UCI），文件仍保持模板，初始化才据此渲染；

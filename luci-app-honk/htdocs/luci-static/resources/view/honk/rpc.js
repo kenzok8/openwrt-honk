@@ -30,7 +30,7 @@ const callRestart = rpc.declare({ object: 'honk', method: 'restart', expect: { '
 const callSettings = rpc.declare({
 	object: 'honk',
 	method: 'settings',
-	params: [ 'lan_network', 'lan_device', 'listen_host', 'listen_port', 'clash_api_enabled', 'clash_host', 'clash_api_port', 'clash_api_secret', 'clash_api_secret_mode', 'expect_sha256' ],
+	params: [ 'lan_network', 'lan_device', 'listen_host', 'listen_port', 'clash_api_enabled', 'clash_host', 'clash_api_port', 'clash_api_secret', 'clash_api_secret_mode', 'store', 'expect_sha256' ],
 	expect: { '': {} }
 });
 
@@ -601,7 +601,7 @@ return baseclass.extend({
 		return callSettings(
 			opts.lan_network, opts.lan_device, opts.listen_host, opts.listen_port,
 			opts.clash_api_enabled, opts.clash_host, opts.clash_api_port,
-			opts.clash_api_secret, opts.clash_api_secret_mode, opts.expect_sha256
+			opts.clash_api_secret, opts.clash_api_secret_mode, opts.store, opts.expect_sha256
 		);
 	},
 	probeSubscription: callProbeSubscription,

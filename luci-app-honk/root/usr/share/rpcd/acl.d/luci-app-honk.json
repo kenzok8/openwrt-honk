@@ -22,10 +22,10 @@
 				"/tmp/honk-backup.tar.gz": [
 					"read"
 				],
-				"/usr/share/v2ray/geoip.dat": [
+				"/etc/honk/geoip.dat": [
 					"read"
 				],
-				"/usr/share/v2ray/geosite.dat": [
+				"/etc/honk/geosite.dat": [
 					"read"
 				],
 				"/tmp/luci-app-honk.geoip.log": [

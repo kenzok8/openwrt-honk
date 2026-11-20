@@ -23,6 +23,20 @@ function getNetworkNames(networks) {
 	}).sort();
 }
 
+
+/* db 模式下核心把运行配置存在状态库里，LuCI 改的配置文件只有走 import 才进库，
+   而 import 要用管理员口令鉴权。这里让用户输一次口令完成授权。 */
+
+function storeModeText(status) {
+	if (!status || !status.store_mode)
+		return '';
+	if (!status.store_active || status.store_active === 'unknown')
+		return status.store_mode;
+	if (status.store_mode === status.store_active)
+		return status.store_mode;
+	return status.store_mode + ' \u2192 ' + status.store_active;
+}
+
 function metaItem(label, value) {
 	return E('span', { 'class': 'honk-meta-item' }, [
 		E('span', { 'class': 'honk-meta-label' }, label),
@@ -179,9 +193,10 @@ return view.extend({
 					E('div', { 'class': 'honk-actions' }, actions)
 				]),
 				E('div', { 'class': 'honk-meta' }, [
-					metaItem(_('Core version'), status.core_version),
+					metaItem(_('Core version'), status.core_lane === 'linux66' ? status.core_version + ' · ' + _('Linux 6.6 experimental') : status.core_version),
 					metaItem(_('Doona version'), status.doona_version),
-					metaItem(_('Kernel'), status.kernel)
+					metaItem(_('Kernel'), status.kernel),
+					metaItem(_('Store mode'), storeModeText(status)),
 				])
 			]);
 
@@ -196,8 +211,21 @@ return view.extend({
 					return E('li', {}, honk.statusIssue(token));
 				})));
 
+			if (status.store_mode && status.store_active && status.store_mode !== status.store_active)
+				statusCard.appendChild(E('p', { 'class': 'alert-message', 'role': 'status' },
+					_('The store mode in the configuration (%s) is not the one the core runs with (%s). The configuration import and the revision history need the database store.').format(status.store_mode, status.store_active)));
+
+			if (status.store_active === 'file')
+				statusCard.appendChild(E('p', { 'class': 'alert-message', 'role': 'status' },
+					_('The core runs in file mode: the configuration import and the revision history are not available. Switch the store mode to the database in the settings.')));
+
+
 			if (!status.initialized)
 				statusCard.appendChild(E('p', { 'class': 'honk-note', 'role': 'status' }, _('Not initialized yet. Finish the first setup below, then Honk can be started.')));
+
+			if (status.admin_setup_required === '1')
+				statusCard.appendChild(E('p', { 'class': 'alert-message', 'role': 'status' },
+					_('The Doona panel asks you to create an administrator: the state database has no administrator record. Create it below to get the panel working again.')));
 
 			statusArea.appendChild(statusCard);
 			statusArea.appendChild(renderServiceSettings(status));
@@ -249,7 +277,11 @@ return view.extend({
 			const listenPortInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'listen_port', 'id': 'honk-listen-port', 'min': '1', 'max': '65535', 'step': '1' });
 			listenPortInput.value = listenParts[1] || (status.listen_port ? String(status.listen_port) : '9527');
 
-			const clashEnabledInput = E('input', { 'type': 'checkbox', 'name': 'clash_api_enabled', 'id': 'honk-clash-enabled' });
+			const storeSelect = E('select', { 'class': 'cbi-input-select', 'name': 'store', 'id': 'honk-store-mode' });
+	storeSelect.appendChild(E('option', { 'value': 'db' }, _('Database (the panel keeps the import and the revision history)')));
+	storeSelect.appendChild(E('option', { 'value': 'file' }, _('File (the configuration file is the only truth)')));
+	storeSelect.value = status.store_configured === 'file' ? 'file' : 'db';
+	const clashEnabledInput = E('input', { 'type': 'checkbox', 'name': 'clash_api_enabled', 'id': 'honk-clash-enabled' });
 			clashEnabledInput.checked = status.clash_api_enabled === true;
 			const clashSwitch = honk.switchControl(clashEnabledInput);
 			const clashPortInput = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'name': 'clash_api_port', 'id': 'honk-clash-port', 'min': '1', 'max': '65535', 'step': '1' });
@@ -276,6 +308,7 @@ return view.extend({
 				card.appendChild(E('p', { 'class': 'honk-note' }, _('This configuration is managed by the panel. Saving keeps the previous layout.')));
 			form.appendChild(field(_('LAN interface'), lanSelect));
 			form.appendChild(field(_('Listen port'), listenPortInput));
+			form.appendChild(field(_('Storage mode'), storeSelect));
 			form.appendChild(field(_('Enable Clash API'), clashSwitch));
 			form.appendChild(field(_('Clash API port'), clashPortInput));
 			form.appendChild(field(_('Clash API secret'), clashSecretInput,
@@ -314,6 +347,7 @@ return view.extend({
 					clash_api_port: clashPort,
 					clash_api_secret: secret,
 					clash_api_secret_mode: mode,
+					store: storeSelect.value,
 					expect_sha256: formSnapshotSha
 				}).then(honk.ensureOk).then(function(result) {
 					formSnapshotSha = null;
@@ -338,14 +372,19 @@ return view.extend({
 			if (!status)
 				return;
 			const initialized = status.initialized === true;
-			if (setupState === initialized)
+			/* 面板（Doona）问的是核心：状态库里没有管理员记录时它会要求「新建管理员」。
+			   升级固件后管理员记录可能没了，而 UCI 的 initialized 标记还在 ——
+			   两边就会说法不一。这里跟着核心的说法走：管理员没了就把建账号的表单显示出来。 */
+			const adminMissing = status.admin_setup_required === '1';
+			const setupStateKey = adminMissing ? 'admin' : (initialized ? 'done' : 'setup');
+			if (setupState === setupStateKey)
 				return;
-			setupState = initialized;
+			setupState = setupStateKey;
 			const fields = captureFields(setupArea);
 			while (setupArea.firstChild)
 				setupArea.removeChild(setupArea.firstChild);
 
-			if (initialized)
+			if (setupStateKey === 'done')
 				return;
 
 			const form = E('form', { 'class': 'honk-card' });
@@ -353,8 +392,13 @@ return view.extend({
 			const password = E('input', { 'type': 'password', 'name': 'password', 'id': 'honk-init-password', 'autocomplete': 'new-password', 'required': true, 'class': 'cbi-input-password' });
 			const message = E('p', { 'class': 'honk-status-msg', 'role': 'status' }, '');
 			const submit = E('button', { 'class': 'cbi-button cbi-button-positive', 'type': 'submit' }, _('Initialize Honk'));
-			form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Initial setup')));
-			form.appendChild(E('p', { 'class': 'honk-note' }, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
+			if (adminMissing) {
+				form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Create the administrator')));
+				form.appendChild(E('p', { 'class': 'honk-note' }, _('The Doona panel asks you to create an administrator: the state database has no administrator record (it is lost after a firmware update). Create it here and the panel works again.')));
+			} else {
+				form.appendChild(E('h3', { 'class': 'honk-card-title' }, _('Initial setup')));
+				form.appendChild(E('p', { 'class': 'honk-note' }, _('Create the Honk administrator account. The password is sent only for this request and is not saved by this page.')));
+			}
 			form.appendChild(E('p', { 'class': 'honk-note' }, _('Username: letters, digits, underscore, dot or hyphen (max 64 characters). Password: 8 to 128 characters.')));
 			form.appendChild(field(_('Username'), username));
 			form.appendChild(field(_('Password'), password));

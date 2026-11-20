@@ -98,6 +98,10 @@ define Package/luci-app-honk/postinst
 	rm -rf /tmp/luci-modulecache/
 	/etc/init.d/rpcd reload 2>/dev/null
 	/etc/init.d/uhttpd restart 2>/dev/null
+	# 面板的「立即更新」走核心那条路，而核心手里的地理数据资产是启动时读
+	# 进去的：升级完让核心重起一次，下载源清单与数据目录里的文件才生效
+	# （apk 自己不重启服务）。核心没在跑就不动它。
+	pidof honk-core >/dev/null 2>&1 && /etc/init.d/honk restart >/dev/null 2>&1 || :
 	exit 0
 }
 endef

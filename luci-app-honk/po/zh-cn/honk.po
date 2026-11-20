@@ -534,6 +534,35 @@ msgstr "正在初始化……"
 msgid "Invalid %s: must be an http(s) URL."
 msgstr "无效的 %s：必须是 http(s) 链接。"
 
+msgid "Store mode"
+msgstr "存储模式"
+
+msgid "Create the administrator"
+msgstr "创建管理员"
+
+msgid "The Doona panel asks you to create an administrator: the state database has no administrator record (it is lost after a firmware update). Create it here and the panel works again."
+msgstr "Doona 面板要求新建管理员：状态库里没有管理员记录（固件升级后丢了）。在这里建一个，面板就恢复正常。"
+
+msgid "The Doona panel asks you to create an administrator: the state database has no administrator record. Create it below to get the panel working again."
+msgstr "Doona 面板要求新建管理员：状态库里没有管理员记录。在下面建一个，面板就恢复正常。"
+
+
+msgid "Configuration file"
+msgstr "配置文件"
+
+msgid "The database store keeps the running configuration as revisions, so the Doona panel can import configurations and show the revision history. The file store keeps the configuration in /etc/honk/config.dae only, and the panel then has no import or revision history. In the database store the configuration file is not the source any more: the core runs the revision in the database, so a configuration written in LuCI only takes effect after the panel imports it. The change takes effect after the service restarts."
+msgstr "数据库存储把运行配置保存为修订，Doona 面板才能导入配置、查看修订历史；文件存储只认 /etc/honk/config.dae，面板没有导入与修订历史。数据库存储下配置文件不再是配置的来源：核心跑的是库里的修订，LuCI 里改的配置要等面板导入后才生效。保存后需要重启服务才会生效。"
+
+msgid "The core runs in file mode: the configuration import and the revision history are not available. Switch the store mode to the database in the settings."
+msgstr "核心当前运行在文件模式：配置导入与修订历史不可用。请在设置里把存储模式改为数据库。"
+
+msgid "The core keeps the running configuration as revisions in its database, so a configuration written in LuCI has to be imported. The import is authenticated with the administrator password, which is then kept in a root-only file for that call."
+msgstr "核心把运行配置以修订的形式存在状态库里，所以 LuCI 里写的配置需要导入才生效。导入要用管理员口令鉴权，验证通过后口令只保存在一个仅 root 可读的文件里，供这一次调用使用。"
+
+
+msgid "The store mode in the configuration (%s) is not the one the core runs with (%s). The configuration import and the revision history need the database store."
+msgstr "配置里的存储模式（%s）与核心实际运行的模式（%s）不一致。配置导入与修订历史需要数据库存储模式。"
+
 msgid "Kernel"
 msgstr "内核"
 
@@ -1761,3 +1790,6 @@ msgstr "订阅名称，例如 MyAirport"
 
 msgid "Subscription name is required."
 msgstr "请输入订阅名称。"
+
+msgid "Storage mode"
+msgstr "存储模式"

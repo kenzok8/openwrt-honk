@@ -18,18 +18,33 @@ const GEO_CRON = '/usr/share/luci-app-honk/geo-cron.sh';
 const PKGS = [ 'honk', 'luci-app-honk' ];
 const PKG_NAMES = { honk: 'Honk', 'luci-app-honk': 'luci-app-honk' };
 
+// The geodata lives in the data directory: the package's copies are in the
+// read-only partition and the core replaces the loaded file in place.
 const DATA_PATHS = {
-	geoip: '/usr/share/v2ray/geoip.dat',
-	geosite: '/usr/share/v2ray/geosite.dat'
+	geoip: '/etc/honk/geoip.dat',
+	geosite: '/etc/honk/geosite.dat'
 };
 
-// Geo data source presets. `loyalsoldier` keeps both URLs empty so the actual
-// default lives in one place — update-geo.sh — avoiding UI/script drift.
+// Geo data source presets. One preset is one source (the panel calls it a
+// tag): only the addresses of that source, so the panel's own dropdown
+// recognises it instead of falling back to "custom" with a list of addresses.
+// `default` is the source the packaged geo files come from (the v2fly data,
+// as Loyalsoldier/v2ray-rules-dat serves it): the core refuses a download that
+// does not define every category the rules use, so the source has to be the one
+// the rules were written against.
+//
+// Only the sources the core can use are offered: the lite file lacks the
+// categories the rules use (the core refuses it and keeps the current file)
+// and the v2fly addresses are GitHub release links that redirect (the core
+// does not follow redirects).
 const GEO_PRESETS = {
-	loyalsoldier: { geoip: '', geosite: '' },
-	v2fly: {
-		geoip: 'https://github.com/v2fly/geoip/releases/latest/download/geoip.dat',
-		geosite: 'https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat'
+	loyalsoldier: {
+		geoip: 'https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/geoip.dat',
+		geosite: 'https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/geosite.dat'
+	},
+	metacubex: {
+		geoip: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geoip.dat',
+		geosite: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat'
 	}
 };
 
@@ -204,12 +219,18 @@ return view.extend({
 			const gs0 = uci.get('honk', 'main', 'geosite_url') || '';
 			const auto0 = uci.get('honk', 'main', 'geo_auto') === '1';
 			const freq0 = uci.get('honk', 'main', 'geo_auto_freq') || 'daily';
-			const preset0 = (!gi0 && !gs0) ? 'loyalsoldier' :
-				(gi0 === GEO_PRESETS.v2fly.geoip && gs0 === GEO_PRESETS.v2fly.geosite) ? 'v2fly' : 'custom';
+			const preset0 = (function() {
+				if (!gi0 && !gs0) return 'loyalsoldier';
+				for (const id of Object.keys(GEO_PRESETS)) {
+					const preset = GEO_PRESETS[id];
+					if (gi0 === preset.geoip && gs0 === preset.geosite) return id;
+				}
+				return 'custom';
+			})();
 
 			const presetSel = E('select', { 'class': 'cbi-input-select', 'id': 'honk-geo-preset' }, [
 				E('option', { 'value': 'loyalsoldier' }, 'Loyalsoldier'),
-				E('option', { 'value': 'v2fly' }, 'v2fly'),
+				E('option', { 'value': 'metacubex' }, 'MetaCubeX'),
 				E('option', { 'value': 'custom' }, _('Custom'))
 			]);
 			presetSel.value = preset0;
@@ -240,8 +261,11 @@ return view.extend({
 				let gi = '', gs = '';
 				const geoAuto = autoSel.value !== 'off';
 				const geoFreq = autoSel.value === 'weekly' ? 'weekly' : 'daily';
-				if (p === 'v2fly') { gi = GEO_PRESETS.v2fly.geoip; gs = GEO_PRESETS.v2fly.geosite; }
-				else if (p === 'custom') {
+				if (p !== 'custom') {
+					const preset = GEO_PRESETS[p] || GEO_PRESETS.default;
+					gi = preset.geoip; gs = preset.geosite;
+				}
+				else {
 					gi = giInput.value.trim(); gs = gsInput.value.trim();
 					for (const [label, url] of [['GeoIP URL', gi], ['GeoSite URL', gs]]) {
 						if (url) {
@@ -443,6 +467,7 @@ return view.extend({
 				setBackupBusy(false);
 			});
 		});
+
 
 		resetAdminBtn.addEventListener('click', function(ev) {
 			ev.preventDefault();
