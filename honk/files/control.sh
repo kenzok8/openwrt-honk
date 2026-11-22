@@ -400,10 +400,43 @@ migrate_listener_secret() {
 	return 0
 }
 
+# A clash_api without a credential off loopback stays open to the whole LAN; close it.
+# Any doubt leaves the file alone, and a failed validation puts the original back.
+close_open_clash_api() {
+	_oc_cfg=/etc/honk/config.dae
+	[ -f "$_oc_cfg" ] && [ ! -L "$_oc_cfg" ] || return 0
+	# Nothing to do when a non-empty secret is already configured, here or in the include.
+	if grep -qE "^[[:space:]]*secret[[:space:]]*:[[:space:]]*['\"]?[^'\"[:space:]]" "$_oc_cfg" 2>/dev/null; then return 0; fi
+	if [ -f /etc/honk/secrets.dae ] && [ ! -L /etc/honk/secrets.dae ] &&
+		grep -qE "^[[:space:]]*secret[[:space:]]*:[[:space:]]*['\"]?[^'\"[:space:]]" /etc/honk/secrets.dae 2>/dev/null; then
+		return 0
+	fi
+	_oc_dir=$(mktemp -d /tmp/honk-clash.XXXXXX) || return 0
+	cp -p "$_oc_cfg" "$_oc_dir/orig.dae" || { rm -rf "$_oc_dir"; return 0; }
+	_oc_candidate=/etc/honk/.config-clash.$$.dae
+	cp -p "$_oc_cfg" "$_oc_candidate" && chmod 0600 "$_oc_candidate" || { rm -rf "$_oc_dir"; rm -f "$_oc_candidate"; return 0; }
+	_oc_bind=$(honk_secrets_blank_open_clash "$_oc_candidate") || { rm -rf "$_oc_dir"; rm -f "$_oc_candidate"; return 0; }
+	if ! "$HONK_CORE" config validate --config "$_oc_candidate" >/dev/null 2>&1; then
+		rm -rf "$_oc_dir"
+		rm -f "$_oc_candidate"
+		return 0
+	fi
+	if [ ! -e /etc/honk/config-before-clash.dae ]; then
+		cp -p "$_oc_dir/orig.dae" /etc/honk/config-before-clash.dae 2>/dev/null &&
+			chmod 0600 /etc/honk/config-before-clash.dae 2>/dev/null
+	fi
+	mv -f "$_oc_candidate" "$_oc_cfg" || { rm -rf "$_oc_dir"; rm -f "$_oc_candidate"; return 0; }
+	chmod 0600 "$_oc_cfg" 2>/dev/null
+	logger -t honk "clash API had no secret on $_oc_bind; disabled it (enable it from the panel with a secret)"
+	rm -rf "$_oc_dir"
+	return 0
+}
+
 preflight() {
 	load_settings
 	[ "$enabled" = 1 ] && [ "$initialized" = 1 ] || { fail "请先在 LuCI 里启用并完成初始化"; return 1; }
 	migrate_listener_secret
+	close_open_clash_api
 	maintenance_start_guard && check_config && check_kernel && no_honk_resources && check_conflicts && check_runtime_ports
 }
 

@@ -104,3 +104,46 @@ honk_secrets_split() {
 		*) return 3 ;;
 	esac
 }
+
+# Blank a clash_api bind that serves without a credential off loopback.
+# Prints the previous bind address when it changed the file; exits 1 when nothing changed.
+honk_secrets_blank_open_clash() {
+	_bs_file=$1
+	[ -f "$_bs_file" ] && [ ! -L "$_bs_file" ] || return 1
+	_bs_temp=$(mktemp "$(dirname "$_bs_file")/.clash-bind.XXXXXX") || return 1
+	_bs_hint=$(awk -v out="$_bs_temp" '
+		BEGIN { in_clash = 0; changed = 0; q = sprintf("%c", 39) }
+		{
+			line = $0
+			if (line ~ /^[ \t]*clash_api[ \t]*\{[ \t]*$/) { in_clash = 1; print > out; next }
+			if (in_clash && line ~ /^[ \t]*\}[ \t]*$/) { in_clash = 0; print > out; next }
+			if (in_clash && line ~ /^[ \t]*external_controller[ \t]*:/) {
+				value = line
+				sub(/^[ \t]*external_controller[ \t]*:[ \t]*/, "", value)
+				sub(/[ \t]+$/, "", value)
+				if (substr(value, 1, 1) == q) {
+					value = substr(value, 2)
+					idx = index(value, q)
+					if (idx) value = substr(value, 1, idx - 1)
+				}
+				else if (substr(value, 1, 1) == "\"") {
+					value = substr(value, 2)
+					idx = index(value, "\"")
+					if (idx) value = substr(value, 1, idx - 1)
+				}
+				# Loopback and already-empty binds stay as they are.
+				if (value == "" || value ~ /^(127\.|\[::1\]|::1:|localhost)/) { print > out; next }
+				match($0, /^[ \t]*/)
+				printf "%sexternal_controller: %c%c\n", substr($0, 1, RLENGTH), q, q > out
+				print value > "/dev/stdout"
+				changed = 1
+				next
+			}
+			print > out
+		}
+		END { exit (changed ? 0 : 1) }
+	' "$_bs_file") || { rm -f "$_bs_temp"; return 1; }
+	chmod 0600 "$_bs_temp" && mv -f "$_bs_temp" "$_bs_file" || { rm -f "$_bs_temp"; return 1; }
+	printf '%s\n' "$_bs_hint"
+	return 0
+}

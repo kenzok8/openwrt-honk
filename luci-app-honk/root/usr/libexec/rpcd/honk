@@ -974,6 +974,12 @@ settings_file_apply() {
 		clear) secrets_clash= ;;
 		*) secrets_clash=$existing_clash ;;
 	esac
+	# An enabled Clash API without a secret would be open to the whole LAN.
+	if [ "$sf_ce" = 1 ] && [ -z "$secrets_clash" ]; then
+		rm -rf "$work"
+		emit_result false invalid_clash_api_secret
+		return 1
+	fi
 	# The core only accepts .dae, so the candidate keeps the extension.
 	candidate_dir=$(mktemp -d /etc/honk/.settings-candidate.XXXXXX) || { rm -rf "$work"; emit_result false config_write_failed; return 1; }
 	candidate=/etc/honk/.settings-candidate-${candidate_dir##*.settings-candidate.}.dae
@@ -1394,6 +1400,11 @@ migrate_config_candidate() {
 		[ -n "$_mc_native" ] || _mc_native=$(cat "$_mc_dir/pnative" 2>/dev/null)
 		migrate_secrets_backup=$(mktemp /etc/honk/.secrets-prev.XXXXXX) || { rm -rf "$_mc_dir"; return 1; }
 		cp -p /etc/honk/secrets.dae "$migrate_secrets_backup" || { rm -f "$migrate_secrets_backup"; migrate_secrets_backup=; rm -rf "$_mc_dir"; return 1; }
+	fi
+	# No secret anywhere means the clash bind would serve the LAN unauthenticated.
+	if [ -z "$_mc_clash" ]; then
+		_mc_bind=$(honk_secrets_blank_open_clash "$_mc_dir/main") || :
+		[ -z "$_mc_bind" ] || logger -t honk "clash API had no secret on $_mc_bind; disabled it"
 	fi
 	if ! config_includes_entry "$_mc_dir/main" "$HONK_SECRETS_FILE"; then
 		{ printf 'include {\n    %s\n}\n' "$HONK_SECRETS_FILE"; cat "$_mc_dir/main"; } > "$_mc_dir/main.inc" && \

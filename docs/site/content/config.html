@@ -41,6 +41,8 @@
 
 <p>在配置页粘贴或导入自带密钥的配置时，面板会自动把密钥移到 <code>secrets.dae</code>、在主配置补上 include，再校验应用；迁移失败不会改动现有文件。升级后首次启动也会做同样的一次性迁移，旧文件备份在 <code>/etc/honk/config-before-secrets.dae</code>。</p>
 
+<p>升级设备上如果还留着「没有密钥、却绑在 LAN 地址上」的 <code>clash_api</code>（老模板的 <code>0.0.0.0:9090</code> 就是），启动时会把这个绑定置空并记一条日志，等于替用户关掉不认证的面板端口；原文件备份在 <code>/etc/honk/config-before-clash.dae</code>。要重新用 Zashboard，到设置页开启并设密钥即可。</p>
+
 <p>升级不自动合并现有文件。仍使用规范 <code>include { system.dae }</code> 的配置，可在配置页点击合并预览，检查完整候选后确认应用。应用会启动服务；旧 <code>system.dae</code> 和已有草稿会保留，来源发生变化时必须重新预览。</p>
 
 <p>含额外 include、重复系统块或其他无法确认的结构时，不自动合并，原布局仍可运行。配置页保留旧 <code>system.dae</code> 的编辑入口。恢复备份时保留文件里的接口与监听地址，换设备后需自行确认是否适用。</p>
