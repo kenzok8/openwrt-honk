@@ -130,6 +130,8 @@ wget -qO- https://down.dllkids.xyz/openwrt-feed/openwrt-feed-setup.sh | sh
 
 节点与订阅直接写进 `/etc/honk/config.dae`（`node { label: 'share-link' }` 或 `subscription { tag: 'url' }`），重载 Honk 后生效；路由、DNS 与订阅也可以只在 Doona 面板里管。
 
+Clash API 的密钥单独存放在 `/etc/honk/secrets.dae`，主配置只 include 它。核心按文件判定可写性：一份文件里出现 `native_api` / `clash_api` 的 `secret` 字段（空值也算），整份配置就对面板只读，Doona 里加不了订阅和节点。粘贴自带密钥的配置时面板会自动迁移，升级后首次启动也会迁移一次，旧文件留在 `/etc/honk/config-before-secrets.dae`。
+
 > 管理入口和 API 只应在可信 LAN 内使用。若 LuCI 走未加密的 HTTP，浏览器到路由器之间的登录信息和 API 流量没有传输加密，请勿把管理页面暴露到互联网。
 
 ## 依赖

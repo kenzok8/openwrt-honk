@@ -183,18 +183,21 @@ printf 'node { name: old }\n' > "$reset_fixture/old/etc/honk/extra.dae"
 printf 'administrator-preserved\n' > "$reset_fixture/old/etc/honk/state/honk.db"
 printf 'system config\n' > "$reset_fixture/system.dae"
 printf 'default config\n' > "$reset_fixture/default.dae"
+printf 'experimental {\n    clash_api {\n        secret: reset-secret\n    }\n}\n' > "$reset_fixture/secrets.dae"
 check_path=$PATH
 export HONK_MAINT_LIBRARY=1
 . honk/files/maintenance.sh
 unset HONK_MAINT_LIBRARY
 PATH=$check_path
 export PATH
-stage_reset_tree "$reset_fixture/old/etc/honk" "$reset_fixture/new/etc/honk" "$reset_fixture/system.dae" "$reset_fixture/default.dae"
+stage_reset_tree "$reset_fixture/old/etc/honk" "$reset_fixture/new/etc/honk" "$reset_fixture/system.dae" "$reset_fixture/default.dae" "$reset_fixture/secrets.dae"
 test "$(cat "$reset_fixture/new/etc/honk/config.dae")" = 'default config'
 test "$(cat "$reset_fixture/new/etc/honk/system.dae")" = 'system config'
 test "$(ls -ld "$reset_fixture/new/etc/honk/system.dae" | awk '{print substr($1, 1, 10)}')" = '-rw-------'
 test "$(cat "$reset_fixture/new/etc/honk/state/honk.db")" = 'administrator-preserved'
 test ! -e "$reset_fixture/new/etc/honk/extra.dae"
+test "$(ls -ld "$reset_fixture/new/etc/honk/secrets.dae" | awk '{print substr($1, 1, 10)}')" = '-rw-------'
+case "$(cat "$reset_fixture/new/etc/honk/secrets.dae")" in *reset-secret*) ;; *) echo 'Reset lost the listener secret file.' >&2; exit 1 ;; esac
 rm -rf "$reset_fixture"
 
 grep -Fq 'include $(INCLUDE_DIR)/package.mk' luci-app-honk/Makefile
@@ -225,6 +228,12 @@ for script in honk/files/control.sh honk/files/update.sh; do
 	grep -Fq 'HONK_VMLINUX_BTF' "$script"
 done
 # 管理口自保护规则由启动时按本机地址重写，标记块与同步函数必须都在
+grep -qxF 'include {' honk/files/config.dae
+grep -qxF '    secrets.dae' honk/files/config.dae
+! sed -n '/^    clash_api {/,/^    }/p' honk/files/config.dae | grep -q 'secret:' || {
+	echo 'config.dae must not declare a listener secret; it belongs in secrets.dae' >&2
+	exit 1
+}
 grep -qxF '    # honk:local-direct-begin' honk/files/config.dae
 grep -Fq 'sync_local_direct()' honk/files/control.sh
 if sed -n 's/^[[:space:]]*DEPENDS:=//p' honk/Makefile luci-app-honk/Makefile | grep -Fq '+libubox'; then

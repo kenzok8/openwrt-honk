@@ -28,6 +28,7 @@
 <table>
   <tr><th>路径</th><th>内容</th></tr>
   <tr><td><code>/etc/honk/config.dae</code></td><td>完整运行配置：global、experimental、节点、订阅、分组、路由和 DNS</td></tr>
+  <tr><td><code>/etc/honk/secrets.dae</code></td><td>只放监听器密钥（Clash API 的 secret），由面板按 UCI 渲染；主配置只 include 它</td></tr>
   <tr><td><code>/etc/honk/system.dae</code></td><td>保留的旧布局文件；只有被主配置 include 时才生效</td></tr>
   <tr><td><code>/etc/honk/state/</code></td><td>运行状态与缓存</td></tr>
 </table>
@@ -35,6 +36,10 @@
 <h2 id="ownership">谁在管这份配置</h2>
 
 <p><code>config.dae</code> 是运行配置的权威来源，启动、重启和修复不按 UCI 重建 <code>global</code> 或 <code>experimental</code>。UCI 继续保存服务状态、Geo 更新及首次引导意图。</p>
+
+<p id="secrets">密钥必须留在 <code>secrets.dae</code>。核心按文件判定可写性：同一份文件里出现 <code>native_api</code> 或 <code>clash_api</code> 的 <code>secret</code> 字段（值可以为空），整份配置就对面板只读，Doona 里新增订阅和节点会被拒绝。所以 Clash API 的密钥由面板写进 <code>secrets.dae</code>，主配置只保留 <code>include { secrets.dae }</code>。</p>
+
+<p>在配置页粘贴或导入自带密钥的配置时，面板会自动把密钥移到 <code>secrets.dae</code>、在主配置补上 include，再校验应用；迁移失败不会改动现有文件。升级后首次启动也会做同样的一次性迁移，旧文件备份在 <code>/etc/honk/config-before-secrets.dae</code>。</p>
 
 <p>升级不自动合并现有文件。仍使用规范 <code>include { system.dae }</code> 的配置，可在配置页点击合并预览，检查完整候选后确认应用。应用会启动服务；旧 <code>system.dae</code> 和已有草稿会保留，来源发生变化时必须重新预览。</p>
 
