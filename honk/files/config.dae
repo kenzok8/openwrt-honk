@@ -35,12 +35,8 @@ experimental {
         ui: '/usr/share/doona'
     }
 
-    # secret 不在这里：见顶部的 secrets.dae include。
-    clash_api {
-        external_controller: '0.0.0.0:9090'
-        external_ui: '/usr/share/honk/zashboard'
-        default_mode: Rule
-    }
+    # Clash API 由面板按需开启（概览页 → Clash API）。开启时密钥写进 secrets.dae，
+    # 这里不预置块，免得不认证的 9090 端口一直敞着。
 
     # 缓存解析结果与订阅，重启后首包更快。
     cache_file {
