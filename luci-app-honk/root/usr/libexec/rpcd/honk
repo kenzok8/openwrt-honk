@@ -1652,6 +1652,13 @@ config_apply() {
 }
 
 # Merge candidates share the apply transaction; an existing draft is kept.
+# Undo an aborted apply: drop the candidate and snapshot, and put the pre-migration secret back.
+abort_apply() {
+	rm -f "$activate_file"
+	rm -rf "$backup_dir"
+	restore_migrated_secrets
+}
+
 config_apply_candidate() {
 	draft_path=$1
 	apply_expected_config=$2
@@ -1663,21 +1670,32 @@ config_apply_candidate() {
 	(set -C; cp "$draft_path" "$activate_file") || { rm -rf "$activate_dir"; emit_result false config_write_failed; return 1; }
 	rmdir "$activate_dir" || { rm -rf "$activate_dir"; rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
 	chmod 0600 "$activate_file" || { rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
+	# Snapshot the live files first: migration rewrites secrets.dae, and a failed start
+	# must restore the previous secret rather than keep the pasted one.
+	backup_dir=$(mktemp -d /etc/honk/.config-apply-backup.XXXXXX) || { rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
+	chmod 0700 "$backup_dir" || { rm -rf "$backup_dir"; rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
+	cp -p /etc/honk/config.dae "$backup_dir/config.dae" && cp -p /etc/config/honk "$backup_dir/honk.uci" || {
+		rm -rf "$backup_dir" "$activate_file"
+		emit_result false config_write_failed
+		return 1
+	}
+	if [ -f /etc/honk/secrets.dae ] && [ ! -L /etc/honk/secrets.dae ]; then
+		cp -p /etc/honk/secrets.dae "$backup_dir/secrets.dae" 2>/dev/null || :
+	fi
 	# Pasting a config often carries an inline secret; move it out so doona stays writable.
 	if ! migrate_config_candidate "$activate_file"; then
-		rm -f "$activate_file"
+		rm -rf "$backup_dir" "$activate_file"
 		emit_result false config_write_failed
 		return 1
 	fi
 	config_candidate=$activate_file
 	if ! validate_config_candidate; then
-		rm -f "$activate_file"
-		restore_migrated_secrets
+		abort_apply
 		[ -n "$config_validation" ] && printf '%s\n' "$config_validation" || emit_result false config_validation_unavailable
 		return 1
 	fi
 	if ! config_merge_guard "$apply_expected_config" "$apply_expected_system" "$apply_expected_candidate" "$activate_file"; then
-		rm -f "$activate_file"; restore_migrated_secrets; emit_result false "$merge_guard_error"; return 1
+		abort_apply; emit_result false "$merge_guard_error"; return 1
 	fi
 	candidate_hash=$(sha256sum "$activate_file" | awk '{print $1}')
 	old_hash=$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')
@@ -1686,20 +1704,12 @@ config_apply_candidate() {
 	if [ -n "$old_pid" ]; then
 		old_running=1
 	elif pidof honk-core >/dev/null 2>&1; then
-		rm -f "$activate_file"
+		abort_apply
 		emit_result false unmanaged_core_running
 		return 1
 	fi
-	backup_dir=$(mktemp -d /etc/honk/.config-apply-backup.XXXXXX) || { rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
-	chmod 0700 "$backup_dir" || { rm -rf "$backup_dir"; rm -f "$activate_file"; emit_result false config_write_failed; return 1; }
-	cp -p /etc/honk/config.dae "$backup_dir/config.dae" && cp -p /etc/config/honk "$backup_dir/honk.uci" || {
-		rm -rf "$backup_dir" "$activate_file"
-		emit_result false config_write_failed
-		return 1
-	}
-	cp -p /etc/honk/secrets.dae "$backup_dir/secrets.dae" 2>/dev/null || :
 	if [ "$old_running" = 1 ] && ! honk_lifecycle_stop 30; then
-		rm -f "$activate_file"
+		abort_apply
 		emit_result false service_stop_unconfirmed
 		return 1
 	fi
@@ -1707,13 +1717,14 @@ config_apply_candidate() {
 	[ "$(sha256sum /etc/honk/config.dae 2>/dev/null | awk '{print $1}')" = "$old_hash" ] || apply_source_changed=1
 	config_merge_guard "$apply_expected_config" "$apply_expected_system" "$apply_expected_candidate" "$activate_file" || apply_source_changed=1
 	if [ "$apply_source_changed" = 1 ]; then
-		if [ "$old_running" = 1 ]; then honk_lifecycle_start 20 || { emit_result false config_changed_concurrently_restart_failed; return 1; }; fi
-		rm -rf "$backup_dir" "$activate_file"
+		if [ "$old_running" = 1 ]; then honk_lifecycle_start 20 || { abort_apply; emit_result false config_changed_concurrently_restart_failed; return 1; }; fi
+		abort_apply
 		[ -n "$merge_guard_error" ] || merge_guard_error=config_changed_concurrently
 		emit_result false "$merge_guard_error"
 		return 1
 	fi
 	if ! mv -f "$activate_file" /etc/honk/config.dae; then
+		abort_apply
 		emit_result false config_write_failed
 		return 1
 	fi

@@ -59,8 +59,8 @@ honk_secrets_split() {
 		{
 			line = $0
 			if (sect == "") {
-				if (line ~ /^[ \t]*native_api[ \t]*\{[ \t]*$/) { sect = "native_api"; print; next }
-				if (line ~ /^[ \t]*clash_api[ \t]*\{[ \t]*$/) { sect = "clash_api"; print; next }
+				if (line ~ /^[ \t]*native_api[ \t]*\{[ \t]*(#.*)?$/) { sect = "native_api"; print; next }
+				if (line ~ /^[ \t]*clash_api[ \t]*\{[ \t]*(#.*)?$/) { sect = "clash_api"; print; next }
 				print; next
 			}
 			if (line ~ /^[ \t]*secret[ \t]*:/) {
@@ -86,7 +86,7 @@ honk_secrets_split() {
 				next
 			}
 			if (line ~ /\{/) { bad = 1; print; next }
-			if (line ~ /^[ \t]*\}[ \t]*$/) { sect = ""; print; next }
+			if (line ~ /^[ \t]*\}[ \t]*(#.*)?$/) { sect = ""; print; next }
 			print; next
 		}
 		END {
@@ -115,8 +115,8 @@ honk_secrets_blank_open_clash() {
 		BEGIN { in_clash = 0; changed = 0; q = sprintf("%c", 39) }
 		{
 			line = $0
-			if (line ~ /^[ \t]*clash_api[ \t]*\{[ \t]*$/) { in_clash = 1; print > out; next }
-			if (in_clash && line ~ /^[ \t]*\}[ \t]*$/) { in_clash = 0; print > out; next }
+			if (line ~ /^[ \t]*clash_api[ \t]*\{[ \t]*(#.*)?$/) { in_clash = 1; print > out; next }
+			if (in_clash && line ~ /^[ \t]*\}[ \t]*(#.*)?$/) { in_clash = 0; print > out; next }
 			if (in_clash && line ~ /^[ \t]*external_controller[ \t]*:/) {
 				value = line
 				sub(/^[ \t]*external_controller[ \t]*:[ \t]*/, "", value)

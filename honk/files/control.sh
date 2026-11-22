@@ -392,8 +392,8 @@ migrate_listener_secret() {
 		return 0
 	fi
 	chmod 0600 "$_mig_cfg" 2>/dev/null
+	# Only the secret is recorded; whether the API is enabled stays the user's choice.
 	[ -z "$_mig_clash" ] || uci -q set "honk.main.clash_api_secret=$_mig_clash" || :
-	[ -z "$_mig_clash" ] || uci -q set honk.main.clash_api_enabled=1 || :
 	[ -z "$_mig_clash" ] || uci -q commit honk || :
 	logger -t honk "listener secret moved to $HONK_SECRETS_FILE; config.dae is writable again"
 	rm -rf "$_mig_dir"
