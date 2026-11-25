@@ -19,7 +19,7 @@ index f986741..426c146 100644
 -export const loadSamples = () => (pending ??= createSamples());
 +export const loadSamples = () => (openwrtHonk ? Promise.resolve({} as PreviewSamples) : (pending ??= createSamples()));
 diff --git a/src/vite-env.d.ts b/src/vite-env.d.ts
-index fbd5962..5cedcfd 100644
+index d181821..6257b3e 100644
 --- a/src/vite-env.d.ts
 +++ b/src/vite-env.d.ts
 @@ -15,6 +15,7 @@ declare module 'virtual:startup-text' {
@@ -27,6 +27,6 @@ index fbd5962..5cedcfd 100644
  interface ImportMetaEnv {
    readonly VITE_DOONA_VERSION: string;
 +  readonly VITE_OPENWRT_HONK: string;
+   readonly VITE_DOONA_LICENSE: string;
    readonly VITE_DOONA_CONTRACT_COMMIT: string;
    readonly VITE_DOONA_REPO: string;
-   readonly VITE_ENGINE_ORG: string;
