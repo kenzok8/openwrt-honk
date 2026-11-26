@@ -151,26 +151,38 @@ done
 
 # honk-core's monotonic_nanos() builds libc::timespec with a struct literal,
 # which breaks on 32-bit musl with musl32_time64 (private __pad0 field), and
-# mixes i64 tv_sec with i32 tv_nsec in saturating_add. Patch the pinned
-# source; both changes are no-ops on 64-bit.
+# mixes i64 tv_sec with i32 tv_nsec in saturating_add. Upstream beta.7 added
+# the same literal in honk-outbound's monotonic_coarse_ns() (urltest.rs),
+# which breaks the armv7 build the same way (auto-bump #79). Patch the pinned
+# source; all three changes are no-ops on 64-bit.
+# NOTE: urltest.rs is patched only when the literal is present — the 6.6
+# fork predates beta.7 and has no monotonic_coarse_ns() yet.
 driver_rs="$WORK_DIR/source/crates/honk-core/src/control/udp_endpoint/driver.rs"
-python3 - "$driver_rs" <<'PYEOF'
+urltest_rs="$WORK_DIR/source/crates/honk-outbound/src/alive/urltest.rs"
+python3 - "$driver_rs" "$urltest_rs" <<'PYEOF'
 import sys
-p = sys.argv[1]
-s = open(p).read()
+driver, urltest = sys.argv[1], sys.argv[2]
 old_struct = """    let mut ts = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
     };"""
 new_struct = """    let mut ts: libc::timespec = unsafe { std::mem::zeroed() };"""
+s = open(driver).read()
 assert old_struct in s, "driver.rs timespec literal not found"
 s = s.replace(old_struct, new_struct)
 old_add = ".saturating_add(ts.tv_nsec)"
 new_add = ".saturating_add(ts.tv_nsec as i64)"
 assert old_add in s, "driver.rs tv_nsec add not found"
 s = s.replace(old_add, new_add)
-open(p, "w").write(s)
+open(driver, "w").write(s)
 print("patched driver.rs for 32-bit time_t")
+u = open(urltest).read()
+if old_struct in u:
+    u = u.replace(old_struct, new_struct)
+    open(urltest, "w").write(u)
+    print("patched urltest.rs for 32-bit time_t")
+else:
+    print("urltest.rs has no timespec literal, skipping")
 PYEOF
 
 for arch in $CORE_ARCHS; do
